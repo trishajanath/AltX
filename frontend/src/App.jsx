@@ -24,7 +24,7 @@ function App() {
 
   return (
     <div style={{ padding: '2rem' }}>
-      <h1>Security Header Scanner</h1>
+      <h1>🛡️ Real-Time Website Security Scanner</h1>
       <input
         type="text"
         placeholder="https://example.com"
@@ -40,18 +40,25 @@ function App() {
         <div style={{ marginTop: '1rem' }}>
           <h3>Scan Result</h3>
           <p><strong>HTTPS:</strong> {report.https ? '✅ Yes' : '❌ No'}</p>
+
           <h4>Headers</h4>
           <ul>
             {Object.entries(report.headers).map(([key, value]) => (
-              <li key={key}>
-                <strong>{key}:</strong> {value}
-              </li>
+              <li key={key}><strong>{key}:</strong> {value}</li>
             ))}
           </ul>
+
           <h4>Suggestions</h4>
           <ul>
             {report.suggestions.map((msg, i) => (
               <li key={i}>⚠ {msg}</li>
+            ))}
+          </ul>
+
+          <h4>Crawled Pages</h4>
+          <ul>
+            {report.crawled_pages.map((link, i) => (
+              <li key={i}>{link}</li>
             ))}
           </ul>
         </div>
