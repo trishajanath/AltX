@@ -1,2 +1,5 @@
-uvicorn
 fastapi
+uvicorn
+requests
+beautifulsoup4
+pydantic

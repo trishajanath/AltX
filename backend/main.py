@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from scanner import scan_url
 from crawler import crawl_site
 from nlp_suggester import suggest_fixes
+from ai_assistant import analyze_scan_with_llm
 
 app = FastAPI()
 
@@ -29,5 +30,11 @@ async def scan(request: ScanRequest):
         "https": scan_result['https'],
         "headers": scan_result['headers'],
         "suggestions": suggestions,
-        "crawled_pages": pages
+        "crawled_pages": pages,
+        "ai_assistant_advice": analyze_scan_with_llm(
+            scan_result["https"],
+            scan_result["flags"],
+            scan_result["headers"]
+        ),
+
     }
