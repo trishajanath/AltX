@@ -1,0 +1,40 @@
+def get_chat_response(history: List[Dict]) -> str:
+    """
+    Handles a multi-turn chat conversation.
+    This is called by the new /chat endpoint.
+    """
+    # Initialize the model if not already done
+    model = getattr(get_chat_response, "_model", None)
+    if model is None:
+        try:
+            model = client.models.get("gemini-2.0-pro")
+            get_chat_response._model = model
+        except Exception as e:
+            return f"AI Assistant is not available due to a configuration error: {str(e)}"
+
+    if not model:
+        return "AI Assistant is not available due to a configuration error."
+
+    try:
+        # The history is passed directly to start_chat
+        chat_session = model.start_chat(history=history)
+        
+        # The last message in the history is the user's new prompt
+        new_prompt = history[-1]['parts'][0]
+
+        response = chat_session.send_message(new_prompt)
+        return response.text
+    except Exception as e:
+        return f"API Error: Could not get chat response from AI. Details: {str(e)}"
+
+
+
+
+@app.post("/chat")
+async def chat(request: ChatRequest):
+    """
+    This endpoint handles follow-up questions from the user.
+    """
+    # The frontend must send the entire conversation history with each request.
+    reply = get_chat_response(request.history)
+    return {"reply": reply}

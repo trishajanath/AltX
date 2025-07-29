@@ -1,65 +1,80 @@
-from google import genai
-from google.genai import types
-
+import google.generativeai as genai
 import os
 from typing import List, Dict
+from dotenv import load_dotenv
 
+# Load environment variables
+load_dotenv()
 
-client = genai.Client(
-    api_key='AIzaSyBHvyscC7Ss8TlN3FXdMlTlh5-maW6Mp1g',
-    http_options=types.HttpOptions(api_version='v1alpha')
-)
+# Initialize Gemini API
+try:
+    api_key = os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        raise ValueError("No API key found. Set GOOGLE_API_KEY environment variable.")
+    
+    genai.configure(api_key=api_key)
+    
+    # Initialize the model with the latest stable version
+    model = genai.GenerativeModel('models/gemini-2.5-pro')
+    
+    # Test the connection
+    response = model.generate_content("Test connection")
+    if not response or not response.text:
+        raise ConnectionError("Could not connect to Gemini API")
+        
+except Exception as e:
+    print(f"❌ Error initializing Gemini API: {e}")
+    model = None
 
-def analyze_scan_with_llm(https: bool, flags: List[str], headers: Dict) -> str:
-    """
-    Analyzes web security scan results using the Gemini Pro model.
-    """
-    system_prompt = "You are a web security expert helping developers fix insecure websites. Be clear, concise, and provide actionable advice."
+def analyze_scan_with_llm(https: bool, flags: List[str], headers: Dict[str, str]) -> str:
+    if model is None:
+        return "AI model is not available"
+
+    system_prompt = "You are a web security expert. Analyze these scan results and provide specific, actionable recommendations."
     user_prompt = f"""
-    A website security scan returned the following data:
-
+    Security Scan Results:
     - HTTPS enabled: {https}
-    - Missing or insecure headers: {flags}
+    - Missing/insecure headers: {flags}
     - Present headers: {headers}
-
-    Based on this information, please perform the following:
-    1. Provide a concise analysis of the site's current security posture.
-    2. Suggest specific improvements to mitigate the identified risks.
-    3. Recommend exact header values or server configuration snippets (e.g., for Nginx or Apache) for the missing headers.
+    
+    Please provide:
+    1. Security posture analysis
+    2. Specific improvement recommendations
+    3. Example header configurations
     """
-
-    full_prompt = f"{system_prompt}\n\n{user_prompt}"
 
     try:
-        generation_config = types.GenerateContentConfig(
-            temperature=0.5,
-            max_output_tokens=800
-        )
-        
-        response = client.models.generate_content(
-            model='gemini-2.0-flash-001', 
-            contents=full_prompt,
-            config=generation_config
-        )
-
+        response = model.generate_content(system_prompt + "\n\n" + user_prompt)
         return response.text.strip()
     except Exception as e:
         return f"API Error: {str(e)}"
 
-if __name__ == "__main__":
-    https_enabled = True
-    missing_headers = [
-        "Content-Security-Policy",
-        "Permissions-Policy"
-    ]
-    present_headers = {
-        "Strict-Transport-Security": "max-age=31536000; includeSubDomains; preload",
-        "X-Frame-Options": "DENY",
-        "X-Content-Type-Options": "nosniff"
-    }
+def get_chat_response(history: List[Dict]) -> str:
+    if model is None:
+        return "AI model is not available"
 
-    analysis_result = analyze_scan_with_llm(https_enabled, missing_headers, present_headers)
+    try:
+        # Convert history to the format Gemini expects
+        formatted_history = []
+        for msg in history:
+            if isinstance(msg.get('parts'), list):
+                content = msg['parts'][0]  # Get the first part's content
+            else:
+                content = msg.get('user') or msg.get('ai') or msg.get('content', '')
+            
+            formatted_history.append({
+                'parts': [{'text': content}],
+                'role': 'user' if msg.get('type') == 'user' else 'model'
+            })
 
-    print("--- Security Analysis Result ---")
-    print(analysis_result)
-    print("------------------------------")
+        # Create chat session with formatted history
+        chat = model.start_chat(history=formatted_history)
+        
+        # Get the last user message
+        last_message = history[-1]['parts'][0] if isinstance(history[-1].get('parts'), list) else history[-1].get('content', '')
+        
+        # Send message and get response
+        response = chat.send_message(last_message)
+        return response.text.strip()
+    except Exception as e:
+        return f"Chat Error: {str(e)}"
