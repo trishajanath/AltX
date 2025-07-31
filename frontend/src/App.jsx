@@ -1,69 +1,73 @@
 import React, { useState } from 'react';
+import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
+import './App.css';
+import HomePage from './components/HomePage';
+import DeployPage from './components/DeployPage';
+import SecurityScanPage from './components/SecurityScanPage';
+import ReportPage from './components/ReportPage';
 
-function App() {
-  const [url, setUrl] = useState('');
-  const [report, setReport] = useState(null);
-  const [error, setError] = useState('');
-
-  const scan = async () => {
-    setReport(null);
-    setError('');
-    try {
-      const res = await fetch('http://127.0.0.1:8000/scan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url }),
-      });
-      const data = await res.json();
-      if (data.error) setError(data.error);
-      else setReport(data);
-    } catch (e) {
-      setError('Could not connect to server.');
-    }
-  };
+function Navigation() {
+  const location = useLocation();
+  const activeTab = location.pathname === '/' ? 'home' : location.pathname.slice(1);
 
   return (
-    <div style={{ padding: '2rem' }}>
-      <h1>🛡️ Real-Time Website Security Scanner</h1>
-      <input
-        type="text"
-        placeholder="https://example.com"
-        value={url}
-        onChange={(e) => setUrl(e.target.value)}
-        style={{ width: '300px', marginRight: '10px' }}
-      />
-      <button onClick={scan}>Scan</button>
+    <nav className="nav">
+      <Link to="/" className="logo">
+        AltX
+      </Link>
+      <ul className="nav-links">
+        <li>
+          <Link 
+            to="/"
+            className={`nav-link ${activeTab === 'home' ? 'active' : ''}`}
+          >
+            Home
+          </Link>
+        </li>
+        <li>
+          <Link 
+            to="/deploy"
+            className={`nav-link ${activeTab === 'deploy' ? 'active' : ''}`}
+          >
+            Deploy
+          </Link>
+        </li>
+        <li>
+          <Link 
+            to="/security"
+            className={`nav-link ${activeTab === 'security' ? 'active' : ''}`}
+          >
+            Security Scan
+          </Link>
+        </li>
+        <li>
+          <Link 
+            to="/report"
+            className={`nav-link ${activeTab === 'report' ? 'active' : ''}`}
+          >
+            Reports
+          </Link>
+        </li>
+      </ul>
+    </nav>
+  );
+}
 
-      {error && <p style={{ color: 'red' }}>{error}</p>}
+function App() {
+  const [scanResult, setScanResult] = useState(null);
 
-      {report && (
-        <div style={{ marginTop: '1rem' }}>
-          <h3>Scan Result</h3>
-          <p><strong>HTTPS:</strong> {report.https ? '✅ Yes' : '❌ No'}</p>
-
-          <h4>Headers</h4>
-          <ul>
-            {Object.entries(report.headers).map(([key, value]) => (
-              <li key={key}><strong>{key}:</strong> {value}</li>
-            ))}
-          </ul>
-
-          <h4>Suggestions</h4>
-          <ul>
-            {report.suggestions.map((msg, i) => (
-              <li key={i}>⚠ {msg}</li>
-            ))}
-          </ul>
-
-          <h4>Crawled Pages</h4>
-          <ul>
-            {report.crawled_pages.map((link, i) => (
-              <li key={i}>{link}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </div>
+  return (
+    <Router>
+      <div className="App">
+        <Navigation />
+        <Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/deploy" element={<DeployPage setScanResult={setScanResult} />} />
+          <Route path="/security" element={<SecurityScanPage setScanResult={setScanResult} />} />
+          <Route path="/report" element={<ReportPage scanResult={scanResult} />} />
+        </Routes>
+      </div>
+    </Router>
   );
 }
 
