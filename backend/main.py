@@ -28,10 +28,6 @@ class ChatRequest(BaseModel):
     history: List[Dict]
     model_type: str = 'fast'
 
-class AIChatRequest(BaseModel):
-    question: str
-    context: str = 'general'
-
 class RepoAnalysisRequest(BaseModel):
     repo_url: str
     model_type: str = 'smart'
@@ -53,11 +49,15 @@ async def scan(request: ScanRequest):
         request.model_type
     )
     
-    # Create a summary for the chatbot
+    # Create enhanced summary with better formatting
+    security_level = scan_result.get("security_level", "Unknown")
+    security_score = scan_result.get("security_score", 0)
+    
     summary = f"""🔒 **Security Scan Complete**
 
 📊 **Scan Results Summary:**
 • Target: {url}
+• Security Score: {security_score}/100 ({security_level})
 • HTTPS: {'✅ Enabled' if scan_result["https"] else '❌ Disabled'}
 • Vulnerabilities: {len(scan_result["flags"])} issues found
 • Pages Crawled: {len(pages)} pages
@@ -111,69 +111,68 @@ async def analyze_repo(request: RepoAnalysisRequest):
 @app.post("/chat")
 async def chat(request: ChatRequest):
     """Chat about security analysis results"""
-    try:
-        # Validate request has history
-        if not request.history or len(request.history) == 0:
-            raise HTTPException(
-                status_code=400,
-                detail="No conversation history provided"
-            )
-        
-        # Check the last message format and extract text safely
-        last_msg = request.history[-1]
-        message_text = ""
-        
-        if 'parts' in last_msg and isinstance(last_msg['parts'], list) and len(last_msg['parts']) > 0:
-            if isinstance(last_msg['parts'][0], dict):
-                message_text = last_msg['parts'][0].get('text', '').lower()
-            else:
-                message_text = str(last_msg['parts'][0]).lower()
-        elif 'message' in last_msg:
-            message_text = last_msg['message'].lower()
-        
-        # Check if trying to discuss repository without analysis
-        if not RepoAnalysis.latest_analysis and any(
-            word in message_text 
-            for word in ['repository', 'repo', 'github']
-        ):
-            return {
-                "reply": "I don't have any repository analysis data yet. Please analyze a repository first using the Deploy page, then I can help you with specific questions about the security findings."
-            }
-        
-        response = await run_in_threadpool(
-            get_chat_response,
-            request.history,
-            request.model_type
+    # Check if trying to discuss repository without analysis
+    if not RepoAnalysis.latest_analysis and any(
+        word in request.history[-1]['parts'][0].lower() 
+        for word in ['repository', 'repo', 'github']
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Please analyze a repository first using /analyze-repo endpoint"
         )
-        return {"reply": response}
-        
-    except Exception as e:
-        print(f"Chat endpoint error: {str(e)}")
-        return {"reply": "I'm having trouble processing your request. Please try again."}
+    
+    response = await run_in_threadpool(
+        get_chat_response,
+        request.history,
+        request.model_type
+    )
+    return {"reply": response}
 
 @app.post("/ai-chat")
-async def ai_chat(request: AIChatRequest):
-    """AI chat endpoint for frontend integration"""
+async def ai_chat(request: dict):
+    """Enhanced AI chat endpoint with better context handling"""
     try:
-        # Convert the simple question format to the expected history format
-        history = [
-            {
-                "role": "user",
-                "parts": [{"text": request.question}]
-            }
-        ]
+        question = request.get('question', '')
+        context = request.get('context', 'general')
+        scan_result = request.get('scan_result', None)
+        
+        # Create enhanced context based on the type of question
+        enhanced_context = f"""
+**CONTEXT:** {context}
+**USER QUESTION:** {question}
+
+**AVAILABLE INFORMATION:**
+"""
+        
+        if scan_result:
+            enhanced_context += f"""
+**SCAN RESULTS:**
+• Target URL: {scan_result.get('url', 'N/A')}
+• HTTPS Status: {'✅ Enabled' if scan_result.get('https', False) else '❌ Disabled'}
+• Security Headers: {len(scan_result.get('headers', {}))} detected
+• Vulnerabilities Found: {len(scan_result.get('flags', []))} issues
+• Security Score: {scan_result.get('security_score', 'N/A')}/100
+
+**SPECIFIC ISSUES:**
+{chr(10).join([f'• {flag}' for flag in scan_result.get('flags', [])]) if scan_result.get('flags') else '• No specific issues detected'}
+"""
+        
+        # Create history for the AI
+        history = [{
+            'type': 'user',
+            'parts': [enhanced_context + f"\n\nPlease provide a helpful, user-friendly response to: {question}"]
+        }]
         
         response = await run_in_threadpool(
             get_chat_response,
             history,
-            'fast'  # Use fast model for chat
+            request.get('model_type', 'fast')
         )
         
         return {"response": response}
         
     except Exception as e:
-        print(f"AI Chat endpoint error: {str(e)}")
-        return {"response": "I'm here to help with security questions. Could you please rephrase your question?"}
+        return {"response": f"❌ **Error processing your question:** {str(e)}\n\nPlease try rephrasing your question or contact support if the issue persists."}
 
 # Health check endpoint
 @app.get("/health")

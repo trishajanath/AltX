@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import ChatResponseFormatter from './ChatResponseFormatter';
 
 const SecurityScanPage = ({ setScanResult }) => {
   const [targetUrl, setTargetUrl] = useState('');
@@ -375,25 +376,11 @@ Ready to start? Enter a URL above and select your preferred analysis model!`,
               </div>
             ) : (
               chatHistory.map((chat, index) => (
-                <div key={index} style={{ marginBottom: '20px' }}>
-                  <div style={{ 
-                    color: chat.type === 'user' ? '#00d4ff' : '#fafafa',
-                    fontWeight: '600',
-                    marginBottom: '8px'
-                  }}>
-                    {chat.type === 'user' ? '👤 You' : '🤖 AI Security Advisor'}
-                  </div>
-                  <div style={{ 
-                    background: chat.type === 'user' 
-                      ? 'rgba(0, 212, 255, 0.1)' 
-                      : 'rgba(255, 255, 255, 0.05)',
-                    padding: '12px 16px',
-                    borderRadius: '8px',
-                    fontSize: '14px'
-                  }}>
-                    {chat.message}
-                  </div>
-                </div>
+                <ChatResponseFormatter 
+                  key={index}
+                  message={chat.message}
+                  type={chat.type}
+                />
               ))
             )}
             {isChatLoading && (

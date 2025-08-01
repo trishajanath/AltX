@@ -32,10 +32,18 @@ AVAILABLE_MODELS = {
 # --- Initialize API Clients ---
 models = {}
 GITHUB_TOKEN = os.getenv("GITHUB_PAT")
+
 # Initialize GitHub client - use token if available, otherwise use anonymous access for public repos
 if GITHUB_TOKEN:
-    github_client = Github(GITHUB_TOKEN)
-    print("✅ GitHub client initialized with authentication token")
+    try:
+        github_client = Github(GITHUB_TOKEN)
+        # Test the connection immediately
+        test_user = github_client.get_user()
+        print(f"✅ GitHub client initialized for user: {test_user.login}")
+    except Exception as e:
+        print(f"❌ GitHub client initialization failed: {e}")
+        github_client = Github()  # Fallback to anonymous
+        print("⚠️ Falling back to anonymous GitHub access")
 else:
     github_client = Github()  # Anonymous access for public repositories
     print("⚠️ GitHub client initialized without token (public repos only)")
@@ -63,11 +71,316 @@ def get_model(model_type: str = 'fast') -> Optional[genai.GenerativeModel]:
     """Retrieves the specified generative model instance."""
     return models.get(model_type)
 
+def format_chat_response(text: str) -> str:
+    """Format the AI response for better readability - strip HTML and format as clean text"""
+    
+    # Clean up the text
+    formatted = text.strip()
+    
+    # Remove HTML tags and styling
+    import re
+    # Remove HTML tags
+    formatted = re.sub(r'<[^>]+>', '', formatted)
+    # Remove HTML entities
+    formatted = formatted.replace('&nbsp;', ' ')
+    formatted = formatted.replace('&lt;', '<')
+    formatted = formatted.replace('&gt;', '>')
+    formatted = formatted.replace('&amp;', '&')
+    
+    # Remove excessive dashes and separators
+    formatted = re.sub(r'---+', '', formatted)
+    formatted = re.sub(r'═══+', '', formatted)
+    
+    # Clean up spacing
+    formatted = re.sub(r'\n\s*\n\s*\n', '\n\n', formatted)
+    
+    # Ensure proper spacing around emojis and headers
+    emojis = ['✅', '❌', '⚠️', '🚨', '📊', '🔒', '🛡️', '🔐', '🌐', '🎯', '⚡', '📂', '🔍']
+    for emoji in emojis:
+        formatted = formatted.replace(emoji, f'\n{emoji}')
+    
+    # Fix headers
+    formatted = re.sub(r'(##?\s*[🛡️🚨⚠️✅❌📊🎯⚡📂🔍].*)', r'\n\n\1', formatted)
+    
+    # Clean up excessive line breaks
+    while '\n\n\n' in formatted:
+        formatted = formatted.replace('\n\n\n', '\n\n')
+    
+    # Ensure response starts clean
+    formatted = formatted.lstrip('\n')
+    
+    return formatted
+
+def get_chat_response(history: List[Dict], model_type: str = 'fast') -> str:
+    model = get_model(model_type)
+    if model is None:
+        return f"❌ **AI model ({model_type}) is not available**"
+
+    try:
+        # Enhanced context with strict formatting requirements
+        context = """You are a friendly cybersecurity expert assistant. IMPORTANT: Always respond with clean, readable text only - NO HTML, NO styling tags, NO div elements.
+
+**FORMATTING REQUIREMENTS:**
+- Use **bold text** for headings (markdown style)
+- Use bullet points (•) for lists
+- Use emojis (✅ ❌ ⚠️ 🚨 🔒 🛡️ 🔐 🌐 🎯 ⚡ 📂 🔍 📊 💡 🔧 📝 ℹ️) for status indicators
+- Add clear line breaks between sections
+- Provide specific, actionable recommendations
+- Keep responses well-organized and easy to scan
+- DO NOT use HTML tags, div elements, or styling
+- Use plain text formatting only
+- Make responses conversational and user-friendly
+- Explain technical concepts in simple terms
+- Provide step-by-step guidance when possible
+
+**RESPONSE STRUCTURE:**
+1. Start with a friendly greeting and brief summary
+2. Use clear section headers with ## 
+3. Provide detailed analysis with examples
+4. End with actionable recommendations
+5. Use friendly, encouraging tone
+
+**CONVERSATION STYLE:**
+- Be helpful and encouraging - like a knowledgeable friend
+- Explain security concepts in simple, everyday terms
+- Provide practical, actionable advice
+- Use examples and analogies when helpful
+- Acknowledge user concerns and questions
+- Be supportive of security improvement efforts
+- Avoid overwhelming users with too much technical detail
+- Focus on the most important actions first
+- Keep implementation checklists simple and focused
+
+**IMPLEMENTATION CHECKLIST STYLE:**
+- Only show the most critical and high-priority items
+- Use simple, clear language
+- Focus on 3-5 most important actions
+- Avoid listing every possible security measure
+- Make it easy to understand and implement
+
+CRITICAL: Return only clean text - no HTML formatting, no <div> tags, no styling attributes."""
+        
+        if RepoAnalysis.latest_analysis:
+            context += f"""
+
+📂 **CURRENT REPOSITORY CONTEXT:**
+**Repository:** {RepoAnalysis.latest_analysis.repo_name}
+**Language:** {RepoAnalysis.latest_analysis.language}
+**Files Scanned:** {len(RepoAnalysis.latest_analysis.files_scanned)}
+**Open Issues:** {RepoAnalysis.latest_analysis.open_issues}
+
+**Security Findings:**
+{chr(10).join([f'• {finding}' for finding in RepoAnalysis.latest_analysis.security_findings[:10]])}
+
+**IMPORTANT:** Base your answers on these actual scan results. Reference specific findings when providing recommendations."""
+        
+        # Convert history to Gemini format
+        formatted_history = [{
+            'parts': [{'text': context}],
+            'role': 'model'
+        }]
+        
+        for msg in history:
+            if isinstance(msg.get('parts'), list):
+                content = msg['parts'][0]
+            elif isinstance(msg.get('parts'), dict):
+                content = msg['parts'].get('text', '')
+            else:
+                content = msg.get('user') or msg.get('ai') or msg.get('content', '')
+            
+            role = 'user' if msg.get('type') == 'user' or msg.get('role') == 'user' else 'model'
+            formatted_history.append({
+                'parts': [{'text': str(content)}],
+                'role': role
+            })
+
+        # Create chat session
+        chat = model.start_chat(history=formatted_history[:-1])
+        
+        # Get the last user message
+        last_message = formatted_history[-1]['parts'][0]['text']
+        
+        # Send message and get response
+        response = chat.send_message(last_message)
+        
+        # Format the response for better readability
+        formatted_response = format_chat_response(response.text.strip())
+        return formatted_response
+        
+    except Exception as e:
+        return f"❌ **Chat Error:** {str(e)}"
+
+def analyze_github_repo(repo_url: str, model_type: str = 'smart') -> str:
+    """Analyzes a GitHub repository for potential security issues."""
+    if not github_client:
+        return "❌ **GitHub client not available.** Please check your setup."
+    
+    try:
+        # Extract owner and repo name from the URL
+        repo_url = repo_url.rstrip('/').replace('.git', '')
+        parts = repo_url.split('/')
+        if len(parts) < 5 or parts[2].lower() != 'github.com':
+            return "❌ **Invalid repository URL format.** Expected: https://github.com/owner/repo"
+        
+        owner, repo_name = parts[-2], parts[-1]
+        
+        # Try to access the repository
+        repo = github_client.get_repo(f"{owner}/{repo_name}")
+        print(f"📂 Accessing repository: {owner}/{repo_name}")
+        
+        # Check rate limit for anonymous users
+        try:
+            rate_limit = github_client.get_rate_limit()
+            remaining = getattr(rate_limit.core, 'remaining', 1000)
+            if not GITHUB_TOKEN and remaining < 10:
+                return f"⚠️ **GitHub API rate limit approaching** ({remaining} requests remaining). Please add a GITHUB_PAT token to your .env file for higher limits."
+        except Exception as e:
+            print(f"⚠️ Could not check rate limit: {e}")
+        
+        # --- Scan Repository ---
+        security_findings = []
+        all_files_visited = []
+        
+        def scan_directory(path="", max_files=100):
+            """Recursively scan directory, flagging sensitive file names."""
+            try:
+                contents = repo.get_contents(path)
+                if not isinstance(contents, list):
+                    contents = [contents]
+                    
+                for content in contents:
+                    if len(all_files_visited) >= max_files:
+                        security_findings.append(f"⚠️ File scan limit reached ({max_files} files). Use GitHub token for complete analysis.")
+                        return
+                        
+                    if content.type == "dir":
+                        scan_directory(content.path, max_files)
+                    else:
+                        all_files_visited.append(content.path)
+                        # Check for sensitive patterns
+                        sensitive_patterns = ['secret', 'password', 'key', '.env', 'config', 'credential', 'token']
+                        if any(p in content.path.lower() for p in sensitive_patterns):
+                            security_findings.append(f"🚨 Potentially sensitive file: {content.path}")
+                        
+                        # Check for security-related files
+                        if content.name.lower() in ['security.md', 'security.txt', 'dockerfile', 'docker-compose.yml']:
+                            security_findings.append(f"✅ Security-related file: {content.path}")
+                            
+            except Exception as e:
+                security_findings.append(f"⚠️ Could not access {path}: {str(e)}")
+
+        print("🔍 Scanning repository contents...")
+        scan_directory()
+
+        # Check for common security files
+        security_files_to_check = [
+            ('SECURITY.md', 'Security policy'),
+            ('.github/SECURITY.md', 'GitHub security policy'), 
+            ('requirements.txt', 'Python dependencies'),
+            ('package.json', 'Node.js dependencies'),
+            ('package-lock.json', 'Node.js dependency lock'),
+            ('yarn.lock', 'Yarn dependency lock'),
+            ('Pipfile', 'Python pipenv dependencies'),
+            ('Dockerfile', 'Container configuration'),
+            ('docker-compose.yml', 'Docker compose configuration'),
+            ('.github/workflows', 'CI/CD workflows'),
+            ('.gitignore', 'Git ignore patterns')
+        ]
+        
+        for file_path, description in security_files_to_check:
+            try:
+                content = repo.get_contents(file_path)
+                if isinstance(content, list):
+                    security_findings.append(f"📁 Found {description} directory: {file_path}")
+                else:
+                    security_findings.append(f"📄 Found {description}: {file_path}")
+            except:
+                pass  # File doesn't exist
+
+        # --- Store Analysis Results ---
+        RepoAnalysis.latest_analysis = RepoAnalysis(
+            repo_name=repo.full_name,
+            description=repo.description or 'No description',
+            language=repo.language or 'Unknown',
+            files_scanned=all_files_visited,
+            security_findings=security_findings,
+            open_issues=repo.open_issues_count
+        )
+        
+        # Enhanced security analysis prompt
+        security_prompt = f"""
+        **REPOSITORY SECURITY ANALYSIS REQUEST**
+
+        Analyze the following GitHub repository for security vulnerabilities and provide a comprehensive security assessment.
+
+        **📊 Repository Information:**
+        • **Name:** {repo.full_name}
+        • **Description:** {repo.description or 'No description provided'}
+        • **Primary Language:** {repo.language or 'Unknown'}
+        • **Open Issues:** {repo.open_issues_count}
+        • **Stars:** {repo.stargazers_count}
+        • **Forks:** {repo.forks_count}
+        • **Files Analyzed:** {len(all_files_visited)}
+
+        **🔍 Security Scan Results:**
+        {chr(10).join(security_findings) if security_findings else "• No specific security findings detected during initial scan"}
+
+        **📋 FILES SCANNED ({len(all_files_visited)} total):**
+        {chr(10).join([f"• {file}" for file in all_files_visited[:20]])}
+        {f"• ... and {len(all_files_visited) - 20} more files" if len(all_files_visited) > 20 else ""}
+
+        **REQUIRED ANALYSIS SECTIONS:**
+
+        ## 🛡️ **Overall Security Assessment**
+        Provide a security rating (High/Medium/Low) and explain the reasoning.
+
+        ## 🚨 **Critical Security Issues**
+        List any high-priority security vulnerabilities found.
+
+        ## ⚠️ **Potential Security Risks**
+        Identify possible security concerns that need attention.
+
+        ## ✅ **Security Best Practices Found**
+        Highlight what the repository is doing well security-wise.
+
+        ## 🎯 **Immediate Action Items**
+        Provide 3-5 specific, actionable recommendations with examples.
+
+        ## 📊 **Repository Structure Analysis**
+        Evaluate the overall project security architecture and file organization.
+
+        ## 💡 **Long-term Security Improvements**
+        Suggest additional security measures for enhanced protection.
+
+        **FORMAT REQUIREMENTS:**
+        • Use clear section headers with emojis
+        • Provide specific examples and code snippets where applicable
+        • Make recommendations actionable and implementation-ready
+        • Use bullet points for better readability
+        • Include severity levels for issues (Critical/High/Medium/Low)
+        """
+        
+        # Get AI analysis using the chat system
+        history = [{"type": "user", "parts": [security_prompt]}]
+        return get_chat_response(history, model_type)
+
+    except GithubException as e:
+        if e.status == 404:
+            return "❌ **Repository not found.** Please check that the URL is correct and the repository is public."
+        elif e.status == 401:
+            return "❌ **GitHub authentication failed.** For private repositories, please add a GITHUB_PAT token to your .env file."
+        elif e.status == 403:
+            return "❌ **GitHub API rate limit exceeded.** Please add a GITHUB_PAT token to your .env file for higher rate limits."
+        return f"❌ **GitHub API error:** {e.status} - {e.data.get('message', 'Unknown error')}"
+    except Exception as e:
+        print(f"Error analyzing repository: {str(e)}")
+        return f"❌ **An unexpected error occurred during repository analysis:** {str(e)}"
+
 def analyze_scan_with_llm(https: bool, flags: List[str], headers: Dict[str, str], model_type: str = 'fast') -> str:
     """Generates a detailed security report with structured containers."""
     model = get_model(model_type)
     if not model:
-        return f"AI model ({model_type}) is not available."
+        return f"❌ **AI model ({model_type}) is not available.**"
 
     # Calculate security metrics
     total_headers = 6  # Essential security headers
@@ -123,15 +436,17 @@ def analyze_scan_with_llm(https: bool, flags: List[str], headers: Dict[str, str]
     content_score = 20 if present_headers >= 2 else 10
     network_score = 15 if https else 5
     
-    # System prompt for generating container-friendly output
-    system_prompt = """You are a senior cybersecurity expert. Create a well-structured security analysis that can be displayed in organized UI containers/boxes.
+    # System prompt for generating user-friendly output
+    system_prompt = """You are a friendly cybersecurity expert. Create a conversational, easy-to-understand security analysis.
 
     FORMATTING REQUIREMENTS:
-    - Use clear section headers for different containers
+    - Use clear section headers with emojis
     - Include visual indicators (✅❌⚠️🚨) for easy scanning
-    - Make each section self-contained and visually distinct
-    - Focus on actionable recommendations
-    - Structure output for easy container-based UI display
+    - Make responses conversational and encouraging
+    - Focus on the most important actionable recommendations
+    - Explain technical concepts in simple terms
+    - Keep implementation checklists focused on 3-5 key items
+    - Avoid overwhelming users with too much detail
     """
     
     user_prompt = f"""
@@ -142,410 +457,56 @@ SECURITY SCAN RESULTS:
 - Security Level: {security_level}
 - Security Score: {min(100, security_score)}/100
 
-Create a comprehensive security report with these container sections:
+Create a bullet-point only security analysis with these sections:
 
-## 🛡️ SECURITY OVERVIEW CONTAINER
-- **Security Level:** {security_level}
-- **Overall Score:** {min(100, security_score)}/100
-- **Critical Issues:** {critical_issues}
-- **Action Required:** {"Yes" if not https or critical_issues > 0 else "No"}
+## 🤖 **Security Analysis Summary**
+• Security Level: {security_level}
+• Security Score: {min(100, security_score)}/100
 
-## ✅ WORKING FEATURES CONTAINER
-{chr(10).join(implemented_features)}
+## ✅ **What's Working Well**
+{chr(10).join(implemented_features[:3]) if implemented_features else "• Website is accessible and responsive"}
 
-## ❌ MISSING FEATURES CONTAINER  
-{chr(10).join(missing_features)}
+## ⚠️ **Areas for Improvement**
+{chr(10).join(missing_features[:3]) if missing_features else "• No major issues detected"}
 
-## 🚨 VULNERABILITIES CONTAINER
-{chr(10).join([f"🚨 **CRITICAL:** {flag}" for flag in flags]) if flags else '✅ **No critical vulnerabilities detected**'}
+## 🚨 **Key Issues Found**
+{chr(10).join([f"• {flag}" for flag in flags[:3]]) if flags else "• No critical vulnerabilities detected"}
 
-## 📊 SECURITY METRICS CONTAINER
-- **🔒 HTTPS/SSL:** {https_score}/25 - {"✅ Enabled" if https else "❌ Disabled"}
-- **🛡️ Security Headers:** {headers_score}/30 - {present_headers}/{total_headers} headers present
-- **🔐 Content Protection:** {content_score}/25 - {"Good" if present_headers >= 2 else "Poor"}
-- **🌐 Network Security:** {network_score}/20 - {"Secure" if https else "Insecure"}
+## 🎯 **Quick Recommendations**
+• {"Enable HTTPS/SSL certificate immediately" if not https else "Implement missing security headers"}
+• Add the most important security headers this week
+• Test all implementations thoroughly
 
-## 🎯 ACTION PLAN CONTAINER
-{"1. 🚨 **CRITICAL:** Enable HTTPS/SSL certificate (immediate)" if not https else ""}
-2. ⚠️ **HIGH:** Implement missing security headers (CSP, X-Frame-Options, etc.)
-3. 🔧 **MEDIUM:** Configure proper HTTP to HTTPS redirects  
-4. 📝 **LOW:** Schedule regular security monitoring
-
-## ⚡ IMPLEMENTATION CHECKLIST CONTAINER
-- [{"x" if https else " "}] Enable HTTPS/SSL certificate (Critical Priority)
-- [{"x" if 'content-security-policy' in header_keys_lower else " "}] Add Content-Security-Policy header (High Priority)
-- [{"x" if 'x-frame-options' in header_keys_lower else " "}] Implement X-Frame-Options header (High Priority)
-- [{"x" if 'x-content-type-options' in header_keys_lower else " "}] Configure X-Content-Type-Options header (Medium Priority)
-- [{"x" if 'strict-transport-security' in header_keys_lower else " "}] Set up Strict-Transport-Security header (High Priority)
-- [ ] Test all security implementations (Medium Priority)
-
-Format each section clearly so it can be displayed in separate UI containers with appropriate styling and colors.
+Use ONLY bullet points - no paragraphs or long explanations!
 """
 
     try:
         response = model.generate_content(f"{system_prompt}\n\n{user_prompt}")
         
         # Post-process for better container formatting
-        formatted_response = response.text.strip()
+        formatted_response = format_chat_response(response.text.strip())
+        return formatted_response
         
-        # Ensure proper spacing for containers
-        formatted_response = formatted_response.replace('##', '\n\n##')
-        formatted_response = formatted_response.replace('- [', '\n- [')
-        formatted_response = formatted_response.replace('- **', '\n- **')
-        formatted_response = formatted_response.replace('✅', '\n✅')
-        formatted_response = formatted_response.replace('❌', '\n❌')
-        formatted_response = formatted_response.replace('🚨', '\n🚨')
-        formatted_response = formatted_response.replace('⚠️', '\n⚠️')
-        
-        # Clean up excessive line breaks
-        while '\n\n\n' in formatted_response:
-            formatted_response = formatted_response.replace('\n\n\n', '\n\n')
-        
-        return formatted_response.strip()
     except Exception as e:
-        # Fallback structured format
+        # Fallback bullet-point format
         return f"""
-## 🛡️ SECURITY OVERVIEW CONTAINER
-**Security Level:** {security_level}
-**Overall Score:** {min(100, security_score)}/100
-**Critical Issues:** {critical_issues}
-**Action Required:** {"Yes" if not https or critical_issues > 0 else "No"}
+## 🤖 **Security Analysis Summary**
+• Security Level: {security_level}
+• Security Score: {min(100, security_score)}/100
 
-## ✅ WORKING FEATURES CONTAINER
-{chr(10).join(implemented_features)}
+## ✅ **What's Working Well**
+{chr(10).join(implemented_features[:3]) if implemented_features else "• Website is accessible and responsive"}
 
-## ❌ MISSING FEATURES CONTAINER
-{chr(10).join(missing_features)}
+## ⚠️ **Areas for Improvement**
+{chr(10).join(missing_features[:3]) if missing_features else "• No major issues detected"}
 
-## 🚨 VULNERABILITIES CONTAINER
-{chr(10).join([f"🚨 **CRITICAL:** {flag}" for flag in flags]) if flags else '✅ **No critical vulnerabilities detected**'}
+## 🚨 **Key Issues Found**
+{chr(10).join([f"• {flag}" for flag in flags[:3]]) if flags else "• No critical vulnerabilities detected"}
 
-## 📊 SECURITY METRICS CONTAINER
-**🔒 HTTPS/SSL:** {https_score}/25 - {"✅ Enabled" if https else "❌ Disabled"}
-**🛡️ Security Headers:** {headers_score}/30 - {present_headers}/{total_headers} headers present
-**🔐 Content Protection:** {content_score}/25 - {"Good" if present_headers >= 2 else "Poor"}
-**🌐 Network Security:** {network_score}/20 - {"Secure" if https else "Insecure"}
+## 🎯 **Quick Recommendations**
+• {"Enable HTTPS/SSL certificate immediately" if not https else "Implement missing security headers"}
+• Add the most important security headers this week
+• Test all implementations thoroughly
 
-## 🎯 ACTION PLAN CONTAINER
-{"1. 🚨 **CRITICAL:** Enable HTTPS/SSL certificate" if not https else ""}
-2. ⚠️ **HIGH:** Implement missing security headers
-3. 🔧 **MEDIUM:** Configure proper redirects
-4. 📝 **LOW:** Schedule regular monitoring
-
-## ⚡ IMPLEMENTATION CHECKLIST CONTAINER
-- [{"x" if https else " "}] Enable HTTPS/SSL certificate
-- [{"x" if 'content-security-policy' in header_keys_lower else " "}] Add Content-Security-Policy header
-- [{"x" if 'x-frame-options' in header_keys_lower else " "}] Implement X-Frame-Options header
-- [{"x" if 'x-content-type-options' in header_keys_lower else " "}] Configure X-Content-Type-Options header
-- [{"x" if 'strict-transport-security' in header_keys_lower else " "}] Set up Strict-Transport-Security header
-- [ ] Test all security implementations
-
-API Error: {str(e)}
+**Note:** There was a technical issue with the AI analysis, but I've provided you with the essential information above.
 """
-    """Generates a detailed security report based on scan results using an LLM."""
-    model = get_model(model_type)
-    if not model:
-        return f"AI model ({model_type}) is not available."
-
-    # System prompt defines the AI's persona and expertise
-    system_prompt = """You are a senior cybersecurity expert. Provide clear, point-wise security analysis with proper formatting.
-    
-    CRITICAL FORMATTING REQUIREMENTS:
-    - Use proper markdown formatting with line breaks between sections
-    - Each bullet point should be on a separate line
-    - Use bold text for important items
-    - Include proper spacing between headers and content
-    - Make the output easy to read and well-structured
-    - Each section should be clearly separated
-    """
-    
-    # User prompt provides the scan data and requests a specific report format
-    user_prompt = f"""
-    SECURITY SCAN RESULTS:
-    - HTTPS Status: {'✅ Enabled' if https else '❌ Not Enabled'}
-    - Vulnerabilities Found: {len(flags)} issues
-    - Security Issues: {flags if flags else 'None detected'}
-    - Headers Analyzed: {len(headers.keys()) if headers else 0}
-    - Present Headers: {list(headers.keys()) if headers else 'None'}
-    
-    Please provide a CLEAR, POINT-WISE security analysis:
-
-    ## � Security Analysis Summary
-
-    ### ✅ Security Status
-    • Overall Security Level: [High/Medium/Low]
-    • Critical Issues: [Number] found
-    • Immediate Action Required: [Yes/No]
-
-    ### � Critical Vulnerabilities
-    {f'• {chr(10).join([f"- {flag}" for flag in flags])}' if flags else '• No critical vulnerabilities detected'}
-
-    ### 🛡️ Security Headers Analysis
-    #### Present Headers:
-    {f'• {chr(10).join([f"- {header}: {value[:50]}..." for header, value in headers.items()])}' if headers else '• No security headers detected'}
-    
-    #### Missing Critical Headers:
-    • Content-Security-Policy: [Status and recommendation]
-    • X-Frame-Options: [Status and recommendation] 
-    • X-Content-Type-Options: [Status and recommendation]
-    • Strict-Transport-Security: [Status and recommendation]
-
-    ### 🎯 Immediate Action Items
-    1. **CRITICAL**: [Most urgent security fix needed]
-    2. **HIGH**: [Important security improvements]
-    3. **MEDIUM**: [General security enhancements]
-
-    ### 📊 Security Score
-    **Overall: [X]/100**
-    • HTTPS: [X]/25
-    • Headers: [X]/35  
-    • Content Protection: [X]/40
-
-    ### � Quick Fixes
-    • [Specific 1-line fix recommendations]
-    • [Code examples where applicable]
-
-    Keep all points concise, actionable, and easy to implement.
-    """
-
-    try:
-        response = model.generate_content(f"{system_prompt}\n\n{user_prompt}")
-        
-        # Post-process the response to ensure proper formatting
-        formatted_response = response.text.strip()
-        
-        # Add proper line breaks after headers and sections
-        formatted_response = formatted_response.replace('##', '\n\n##')
-        formatted_response = formatted_response.replace('###', '\n\n###')
-        formatted_response = formatted_response.replace('####', '\n\n####')
-        formatted_response = formatted_response.replace('• ', '\n• ')
-        formatted_response = formatted_response.replace('1. ', '\n1. ')
-        formatted_response = formatted_response.replace('2. ', '\n2. ')
-        formatted_response = formatted_response.replace('3. ', '\n3. ')
-        formatted_response = formatted_response.replace('4. ', '\n4. ')
-        formatted_response = formatted_response.replace('5. ', '\n5. ')
-        
-        # Clean up multiple consecutive line breaks
-        while '\n\n\n' in formatted_response:
-            formatted_response = formatted_response.replace('\n\n\n', '\n\n')
-        
-        return formatted_response.strip()
-    except Exception as e:
-        return f"API Error: {str(e)}"
-
-def get_chat_response(history: List[Dict], model_type: str = 'fast') -> str:
-    """Handles conversational chat with context from repository analysis."""
-    model = get_model(model_type)
-    if not model:
-        return f"AI model ({model_type}) is not available."
-
-    try:
-        # Extract the user's current question
-        current_question = ""
-        if history and len(history) > 0:
-            last_msg = history[-1]
-            if 'parts' in last_msg and isinstance(last_msg['parts'], list) and len(last_msg['parts']) > 0:
-                if isinstance(last_msg['parts'][0], dict):
-                    current_question = last_msg['parts'][0].get('text', '')
-                else:
-                    current_question = str(last_msg['parts'][0])
-
-        # Check if question is within security scope
-        security_keywords = [
-            'security', 'vulnerability', 'scan', 'attack', 'threat', 'malware', 'encryption', 
-            'authentication', 'authorization', 'firewall', 'penetration', 'exploit', 'breach',
-            'https', 'ssl', 'tls', 'certificate', 'headers', 'cors', 'xss', 'sql injection',
-            'csrf', 'owasp', 'password', 'token', 'api', 'endpoint', 'secure', 'protection',
-            'analyze', 'repository', 'code', 'github', 'deployment', 'configuration', 'best practices'
-        ]
-        
-
-        # Build context with repository analysis if available
-        context_lines = [
-            "You are a cybersecurity expert AI assistant. Provide clear, actionable security advice.",
-            "Focus ONLY on cybersecurity, web security, application security, and security best practices.",
-            "Always use bullet points and structured responses for clarity."
-        ]
-        
-        if RepoAnalysis.latest_analysis:
-            repo_info = RepoAnalysis.latest_analysis
-            context_lines.extend([
-                f"\n📂 **Current Analysis Context**:",
-                f"• Repository: {repo_info.repo_name}",
-                f"• Language: {repo_info.language}",
-                f"• Files Analyzed: {len(repo_info.files_scanned)}",
-                f"• Security Issues Found: {len(repo_info.security_findings)}",
-                "\n🔍 **Key Security Findings**:",
-                *[f"• {finding}" for finding in repo_info.security_findings[:5]],
-                "\nUse this analysis to provide specific, actionable security recommendations."
-            ])
-        else:
-            context_lines.append("\n💡 **No current repository analysis available.** Please run a security scan first for specific recommendations.")
-        
-        context_lines.extend([
-            "\n📋 **Response Guidelines**:",
-            "• Keep responses focused on security topics only",
-            "• Use bullet points and numbered lists for clarity", 
-            "• Provide specific, implementable solutions",
-            "• Include code examples when relevant",
-            "• Reference security standards (OWASP, NIST) when applicable"
-        ])
-        
-        system_context = "\n".join(context_lines)
-
-        # Create focused security prompt
-        prompt = f"""
-{system_context}
-
-Security Question: {current_question}
-
-Provide a comprehensive security-focused response with actionable recommendations.
-Use clear structure with bullet points and specific steps.
-"""
-        
-        response = model.generate_content(prompt)
-        return response.text.strip()
-        
-    except Exception as e:
-        print(f"Chat error details: {str(e)}")
-        return "I'm having trouble processing your security question. Please try asking about specific security topics like vulnerabilities, best practices, or security configurations."
-
-def analyze_github_repo(repo_url: str, model_type: str = 'smart') -> str:
-    """Analyzes a public GitHub repository for potential security issues."""
-    if not github_client:
-        return "GitHub client not available. Please check your setup."
-    
-    try:
-        # Extract owner and repo name from the URL
-        repo_url = repo_url.rstrip('/').replace('.git', '')
-        parts = repo_url.split('/')
-        if len(parts) < 5 or parts[2].lower() != 'github.com':
-            return "Invalid repository URL format. Expected: https://github.com/owner/repo"
-        
-        owner, repo_name = parts[-2], parts[-1]
-        
-        # Try to access the repository
-        repo = github_client.get_repo(f"{owner}/{repo_name}")
-        print(f"📂 Accessing repository: {owner}/{repo_name}")
-        
-        # Check rate limit for anonymous users (with error handling)
-        try:
-            rate_limit = github_client.get_rate_limit()
-            if hasattr(rate_limit, 'core'):
-                remaining = rate_limit.core.remaining
-            elif hasattr(rate_limit, 'search'):
-                remaining = rate_limit.search.remaining  
-            else:
-                remaining = 1000  # Assume reasonable limit if can't determine
-                
-            if not GITHUB_TOKEN and remaining < 10:
-                return f"GitHub API rate limit approaching ({remaining} requests remaining). Please add a GITHUB_PAT token to your .env file for higher limits."
-        except Exception as e:
-            print(f"⚠️ Could not check rate limit: {e}")
-            # Continue without rate limit check
-        
-        # --- Scan Repository ---
-        security_findings = []
-        all_files_visited = []
-        
-        def scan_directory(path="", max_files=100):
-            """Recursively scan directory, flagging sensitive file names."""
-            try:
-                contents = repo.get_contents(path)
-                if not isinstance(contents, list):
-                    contents = [contents]
-                    
-                for content in contents:
-                    if len(all_files_visited) >= max_files:
-                        security_findings.append(f"⚠️ File scan limit reached ({max_files} files). Use GitHub token for complete analysis.")
-                        return
-                        
-                    if content.type == "dir":
-                        scan_directory(content.path, max_files)
-                    else:
-                        all_files_visited.append(f"- {content.path}")
-                        # Check for sensitive patterns
-                        sensitive_patterns = ['secret', 'password', 'key', '.env', 'config', 'credential', 'token']
-                        if any(p in content.path.lower() for p in sensitive_patterns):
-                            security_findings.append(f"⚠️ Potentially sensitive file found: {content.path}")
-                        
-                        # Check for security-related files
-                        if content.name.lower() in ['security.md', 'security.txt', 'dockerfile', 'docker-compose.yml']:
-                            security_findings.append(f"✅ Security-related file found: {content.path}")
-                            
-            except Exception as e:
-                security_findings.append(f"⚠️ Could not access {path}: {str(e)}")
-
-        print("🔍 Scanning repository contents...")
-        scan_directory()
-
-        # Check for common security files
-        security_files_to_check = [
-            ('SECURITY.md', 'Security policy'),
-            ('.github/SECURITY.md', 'GitHub security policy'), 
-            ('requirements.txt', 'Python dependencies'),
-            ('package.json', 'Node.js dependencies'),
-            ('Dockerfile', 'Container configuration'),
-            ('docker-compose.yml', 'Docker compose configuration')
-        ]
-        
-        for file_path, description in security_files_to_check:
-            try:
-                content = repo.get_contents(file_path)
-                security_findings.append(f"✅ Found {description}: {file_path}")
-            except:
-                pass  # File doesn't exist
-
-        # --- Store Analysis and Generate Report ---
-        RepoAnalysis.latest_analysis = RepoAnalysis(
-            repo_name=repo.full_name,
-            description=repo.description or 'No description',
-            language=repo.language or 'Unknown',
-            files_scanned=all_files_visited,
-            security_findings=security_findings,
-            open_issues=repo.open_issues_count
-        )
-        
-        # Prepare the initial prompt for the security analysis
-        security_prompt = f"""
-        Perform a detailed security analysis of the following GitHub repository based on the initial scan data.
-
-        **Repository Info:**
-        - **Name**: {repo.full_name}
-        - **Description**: {repo.description or 'No description'}
-        - **Primary Language**: {repo.language or 'Unknown'}
-        - **Open Issues**: {repo.open_issues_count}
-        - **Stars**: {repo.stargazers_count}
-        - **Forks**: {repo.forks_count}
-        - **Files Scanned**: {len(all_files_visited)}
-        
-        **Security Findings:**
-        {chr(10).join(security_findings) if security_findings else "No specific security findings detected."}
-        
-        **Please provide a comprehensive security analysis report covering:**
-        1. **Overall Security Assessment** - Rate the repository's security posture
-        2. **Vulnerabilities Found** - Detail any security issues discovered
-        3. **Sensitive Information Risks** - Assess potential data exposure
-        4. **Missing Security Best Practices** - Identify gaps in security implementation
-        5. **Actionable Recommendations** - Provide specific, implementable security improvements
-        6. **Repository Structure Analysis** - Evaluate the overall project security architecture
-        
-        Format your response with clear sections, use bullet points for lists, and provide specific examples where possible.
-        """
-        
-        # Format the prompt as the first message in a new chat history
-        history = [{"role": "user", "parts": [{"text": security_prompt}]}]
-        
-        return get_chat_response(history, model_type)
-
-    except GithubException as e:
-        if e.status == 404:
-            return "Repository not found. Please check that the URL is correct and the repository is public."
-        elif e.status == 401:
-            return "GitHub authentication failed. For private repositories, please add a GITHUB_PAT token to your .env file."
-        elif e.status == 403:
-            return "GitHub API rate limit exceeded. Please add a GITHUB_PAT token to your .env file for higher rate limits."
-        return f"GitHub API error: {e.status} - {e.data.get('message', 'Unknown error')}"
-    except Exception as e:
-        print(f"Error analyzing repository: {str(e)}")
-        return f"An unexpected error occurred during the repository analysis: {str(e)}"

@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import SecurityIssueFormatter from './SecurityIssueFormatter';
+import ChatResponseFormatter from './ChatResponseFormatter';
 
 const ReportPage = ({ scanResult }) => {
   const [chatInput, setChatInput] = useState('');
@@ -139,35 +141,14 @@ const ReportPage = ({ scanResult }) => {
           </div>
         </div>
 
-        {scanResult.scan_result?.vulnerabilities && (
+        {/* Security Issues Formatted Display */}
+        {scanResult.scan_result?.flags && (
           <div className="card">
-            <h3>Vulnerability Summary</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '16px' }}>
-              {Object.entries(scanResult.scan_result.vulnerabilities).map(([level, count]) => (
-                <div key={level} style={{ 
-                  background: `rgba(${getVulnerabilityColor(level).replace('#', '')}, 0.1)`,
-                  border: `1px solid ${getVulnerabilityColor(level)}20`,
-                  borderRadius: '8px',
-                  padding: '16px',
-                  textAlign: 'center'
-                }}>
-                  <div style={{ 
-                    fontSize: '24px', 
-                    fontWeight: '700', 
-                    color: getVulnerabilityColor(level) 
-                  }}>
-                    {count}
-                  </div>
-                  <div style={{ 
-                    color: '#a1a1aa', 
-                    textTransform: 'capitalize',
-                    fontSize: '14px'
-                  }}>
-                    {level}
-                  </div>
-                </div>
-              ))}
-            </div>
+            <h3>🔍 Security Issues Analysis</h3>
+            <SecurityIssueFormatter 
+              issues={scanResult.scan_result.flags} 
+              scanResult={scanResult.scan_result}
+            />
           </div>
         )}
 
@@ -207,25 +188,11 @@ const ReportPage = ({ scanResult }) => {
               </div>
             ) : (
               chatHistory.map((chat, index) => (
-                <div key={index} style={{ marginBottom: '20px' }}>
-                  <div style={{ 
-                    color: chat.type === 'user' ? '#00d4ff' : '#fafafa',
-                    fontWeight: '600',
-                    marginBottom: '8px'
-                  }}>
-                    {chat.type === 'user' ? '👤 You' : '🤖 AI Security Advisor'}
-                  </div>
-                  <div style={{ 
-                    background: chat.type === 'user' 
-                      ? 'rgba(0, 212, 255, 0.1)' 
-                      : 'rgba(255, 255, 255, 0.05)',
-                    padding: '12px 16px',
-                    borderRadius: '8px',
-                    fontSize: '14px'
-                  }}>
-                    {chat.message}
-                  </div>
-                </div>
+                <ChatResponseFormatter 
+                  key={index}
+                  message={chat.message}
+                  type={chat.type}
+                />
               ))
             )}
             {isLoading && (
