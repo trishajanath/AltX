@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import ChatResponseFormatter from './ChatResponseFormatter';
+import PageWrapper from './PageWrapper';
 
 const SecurityScanPage = ({ setScanResult }) => {
   const [targetUrl, setTargetUrl] = useState('');
@@ -211,12 +212,13 @@ Ready to start? Enter a URL above and select your preferred analysis model!`,
   };
 
   return (
-    <div className="page">
-      <div className="container">
-        <div className="hero">
-          <h1>AI-Powered Security Analysis</h1>
-          <p>Advanced AI-driven security scanning with intelligent threat detection and real-time recommendations</p>
-        </div>
+    <PageWrapper>
+      <div className="page-container">
+        <div className="content-wrapper">
+          <div className="hero">
+            <h1>AI-Powered Security Analysis</h1>
+            <p>Advanced AI-driven security scanning with intelligent threat detection and real-time recommendations</p>
+          </div>
 
         <div className="card">
           <h3>🤖 AI Security Scanner</h3>
@@ -437,8 +439,9 @@ Ready to start? Enter a URL above and select your preferred analysis model!`,
             </div>
           </div>
         </div>
+        </div>
       </div>
-    </div>
+    </PageWrapper>
   );
 };
 

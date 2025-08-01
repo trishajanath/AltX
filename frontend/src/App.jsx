@@ -5,6 +5,7 @@ import HomePage from './components/HomePage';
 import DeployPage from './components/DeployPage';
 import SecurityScanPage from './components/SecurityScanPage';
 import ReportPage from './components/ReportPage';
+import RepoAnalysisPage from './components/RepoAnalysisPage';
 
 function Navigation() {
   const location = useLocation();
@@ -42,6 +43,14 @@ function Navigation() {
         </li>
         <li>
           <Link 
+            to="/repo-analysis"
+            className={`nav-link ${activeTab === 'repo-analysis' ? 'active' : ''}`}
+          >
+            Repository Analysis
+          </Link>
+        </li>
+        <li>
+          <Link 
             to="/report"
             className={`nav-link ${activeTab === 'report' ? 'active' : ''}`}
           >
@@ -60,12 +69,15 @@ function App() {
     <Router>
       <div className="App">
         <Navigation />
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/deploy" element={<DeployPage setScanResult={setScanResult} />} />
-          <Route path="/security" element={<SecurityScanPage setScanResult={setScanResult} />} />
-          <Route path="/report" element={<ReportPage scanResult={scanResult} />} />
-        </Routes>
+        <div className="page-container">
+          <Routes>
+            <Route path="/" element={<div className="page"><HomePage /></div>} />
+            <Route path="/deploy" element={<div className="page"><DeployPage setScanResult={setScanResult} /></div>} />
+            <Route path="/security" element={<div className="page"><SecurityScanPage setScanResult={setScanResult} /></div>} />
+            <Route path="/repo-analysis" element={<div className="page"><RepoAnalysisPage /></div>} />
+            <Route path="/report" element={<div className="page"><ReportPage scanResult={scanResult} /></div>} />
+          </Routes>
+        </div>
       </div>
     </Router>
   );

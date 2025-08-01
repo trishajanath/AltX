@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import PageWrapper from './PageWrapper';
 
 const DeployPage = ({ setScanResult }) => {
   const [repoUrl, setRepoUrl] = useState('');
@@ -74,14 +75,15 @@ const DeployPage = ({ setScanResult }) => {
   };
 
   return (
-    <div className="page">
-      <div className="container">
-        <div className="hero">
-          <h1>Deploy GitHub Project</h1>
-          <p>Deploy your GitHub repository with automatic security analysis and monitoring</p>
-        </div>
+    <PageWrapper>
+      <div className="page-container">
+        <div className="content-wrapper">
+          <div className="hero">
+            <h1>Deploy GitHub Project</h1>
+            <p>Deploy your GitHub repository with automatic security analysis and monitoring</p>
+          </div>
 
-        <div className="card">
+          <div className="card">
           <h3>Repository Deployment</h3>
           <div style={{ marginBottom: '24px' }}>
             <input
@@ -196,8 +198,9 @@ const DeployPage = ({ setScanResult }) => {
             <p>24/7 uptime monitoring with instant alerts</p>
           </div>
         </div>
+        </div>
       </div>
-    </div>
+    </PageWrapper>
   );
 };
 

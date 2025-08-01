@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import SecurityIssueFormatter from './SecurityIssueFormatter';
 import ChatResponseFormatter from './ChatResponseFormatter';
+import PageWrapper from './PageWrapper';
 
 const ReportPage = ({ scanResult }) => {
   const [chatInput, setChatInput] = useState('');
@@ -90,12 +91,13 @@ const ReportPage = ({ scanResult }) => {
   }
 
   return (
-    <div className="page">
-      <div className="container">
-        <div className="hero">
-          <h1>Security Report</h1>
-          <p>Comprehensive analysis for {scanResult.url || scanResult.deploymentUrl}</p>
-        </div>
+    <PageWrapper>
+      <div className="page-container">
+        <div className="content-wrapper">
+          <div className="hero">
+            <h1>Security Report</h1>
+            <p>Comprehensive analysis for {scanResult.url || scanResult.deploymentUrl}</p>
+          </div>
 
         <div className="card">
           <h3>Security Overview</h3>
@@ -222,8 +224,9 @@ const ReportPage = ({ scanResult }) => {
             </button>
           </div>
         </div>
+        </div>
       </div>
-    </div>
+    </PageWrapper>
   );
 };
 
