@@ -7,3 +7,4 @@ google-generativeai
 python-dotenv
 httpx
 PyGithub
+bandit

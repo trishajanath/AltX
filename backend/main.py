@@ -1,13 +1,31 @@
+import os
+import shutil
+import git
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Dict
 from starlette.concurrency import run_in_threadpool
-from ai_assistant import analyze_github_repo, get_chat_response, RepoAnalysis
+import tempfile
+import json
+import re
+from scanner.file_security_scanner import scan_for_sensitive_files, scan_file_contents_for_secrets
+
+# --- Local Imports ---
+from ai_assistant import get_chat_response, RepoAnalysis
 from scanner import scan_url
 from crawler import crawl_site
 from nlp_suggester import suggest_fixes
 import ai_assistant
+try:
+    from ai_assistant import github_client
+except ImportError:
+    github_client = None
+    print("Warning: GitHub client not available")
+
+# --- Phase 1 Imports ---
+from scanner.secrets_detector import scan_secrets
+from scanner.static_python import run_bandit
 
 app = FastAPI()
 
@@ -31,6 +49,221 @@ class ChatRequest(BaseModel):
 class RepoAnalysisRequest(BaseModel):
     repo_url: str
     model_type: str = 'smart'
+    deep_scan: bool = True
+
+# --- Enhanced Security Analysis Functions ---
+def scan_dependencies(directory_path: str) -> Dict:
+    """Scan for vulnerable dependencies in package files"""
+    
+    vulnerable_patterns = {
+        'package.json': {
+            'lodash': {'versions': ['<4.17.19'], 'severity': 'High'},
+            'axios': {'versions': ['<0.21.1'], 'severity': 'Critical'},
+            'jquery': {'versions': ['<3.5.0'], 'severity': 'Medium'},
+            'express': {'versions': ['<4.17.1'], 'severity': 'High'},
+            'react': {'versions': ['<16.13.0'], 'severity': 'Medium'},
+            'angular': {'versions': ['<10.0.0'], 'severity': 'Medium'},
+        },
+        'requirements.txt': {
+            'django': {'versions': ['<2.2.13'], 'severity': 'Critical'},
+            'flask': {'versions': ['<1.1.0'], 'severity': 'High'},
+            'requests': {'versions': ['<2.20.0'], 'severity': 'Medium'},
+            'pillow': {'versions': ['<6.2.0'], 'severity': 'High'},
+            'urllib3': {'versions': ['<1.24.2'], 'severity': 'High'},
+            'pyyaml': {'versions': ['<5.1'], 'severity': 'Critical'},
+        }
+    }
+    
+    findings = {
+        'dependency_files_found': [],
+        'vulnerable_packages': [],
+        'total_dependencies': 0,
+        'security_advisory_count': 0
+    }
+    
+    try:
+        for root, dirs, files in os.walk(directory_path):
+            if '.git' in root:
+                continue
+                
+            for file in files:
+                if file in vulnerable_patterns:
+                    file_path = os.path.join(root, file)
+                    relative_path = os.path.relpath(file_path, directory_path)
+                    
+                    findings['dependency_files_found'].append({
+                        'file': relative_path,
+                        'type': file
+                    })
+                    
+                    # Analyze dependencies
+                    try:
+                        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                            content = f.read()
+                            
+                            if file == 'package.json':
+                                data = json.loads(content)
+                                deps = {**data.get('dependencies', {}), **data.get('devDependencies', {})}
+                                findings['total_dependencies'] += len(deps)
+                                
+                                for pkg_name, version in deps.items():
+                                    if pkg_name in vulnerable_patterns[file]:
+                                        findings['vulnerable_packages'].append({
+                                            'package': pkg_name,
+                                            'current_version': version,
+                                            'file': relative_path,
+                                            'severity': vulnerable_patterns[file][pkg_name]['severity'],
+                                            'advisory': f"Update {pkg_name} to latest version"
+                                        })
+                                        
+                            elif file == 'requirements.txt':
+                                lines = [l.strip() for l in content.split('\n') if l.strip() and not l.startswith('#')]
+                                findings['total_dependencies'] += len(lines)
+                                
+                                for line in lines:
+                                    pkg_name = line.split('==')[0].split('>=')[0].split('<=')[0].strip()
+                                    if pkg_name in vulnerable_patterns[file]:
+                                        findings['vulnerable_packages'].append({
+                                            'package': pkg_name,
+                                            'current_version': line,
+                                            'file': relative_path,
+                                            'severity': vulnerable_patterns[file][pkg_name]['severity'],
+                                            'advisory': f"Update {pkg_name} to latest version"
+                                        })
+                    except Exception as e:
+                        pass
+        
+        findings['security_advisory_count'] = len(findings['vulnerable_packages'])
+        return findings
+        
+    except Exception as e:
+        return {
+            'error': f"Error scanning dependencies: {str(e)}",
+            'dependency_files_found': [],
+            'vulnerable_packages': [],
+            'total_dependencies': 0,
+            'security_advisory_count': 0
+        }
+
+def scan_code_quality_patterns(directory_path: str) -> List[Dict]:
+    """Scan for insecure coding patterns across multiple languages"""
+    
+    patterns = {
+        'python': {
+            'eval_usage': {'pattern': r'eval\s*\(', 'severity': 'Critical', 'description': 'Use of eval() can lead to code injection'},
+            'exec_usage': {'pattern': r'exec\s*\(', 'severity': 'Critical', 'description': 'Use of exec() can lead to code injection'},
+            'shell_injection': {'pattern': r'os\.system\s*\(', 'severity': 'High', 'description': 'Potential shell injection vulnerability'},
+            'sql_injection': {'pattern': r'cursor\.execute\s*\(\s*["\'].*%.*["\']', 'severity': 'Critical', 'description': 'Potential SQL injection vulnerability'},
+            'pickle_usage': {'pattern': r'pickle\.loads?\s*\(', 'severity': 'High', 'description': 'Unsafe deserialization with pickle'},
+            'subprocess_shell': {'pattern': r'subprocess\.\w+\(.*shell=True', 'severity': 'High', 'description': 'Subprocess with shell=True can be dangerous'},
+            'input_function': {'pattern': r'\binput\s*\(', 'severity': 'Medium', 'description': 'input() function can be vulnerable in Python 2'},
+        },
+        'javascript': {
+            'eval_usage': {'pattern': r'eval\s*\(', 'severity': 'Critical', 'description': 'Use of eval() can lead to code injection'},
+            'document_write': {'pattern': r'document\.write\s*\(', 'severity': 'Medium', 'description': 'document.write can lead to XSS'},
+            'inner_html': {'pattern': r'innerHTML\s*=', 'severity': 'Medium', 'description': 'innerHTML assignment can lead to XSS'},
+            'local_storage': {'pattern': r'localStorage\.setItem', 'severity': 'Low', 'description': 'Sensitive data in localStorage'},
+            'console_log': {'pattern': r'console\.log\s*\(', 'severity': 'Low', 'description': 'Remove console.log in production'},
+            'function_constructor': {'pattern': r'new\s+Function\s*\(', 'severity': 'High', 'description': 'Function constructor can lead to code injection'},
+            'settimeout_string': {'pattern': r'setTimeout\s*\(\s*["\']', 'severity': 'High', 'description': 'setTimeout with string argument can lead to code injection'},
+        }
+    }
+    
+    findings = []
+    
+    try:
+        for root, dirs, files in os.walk(directory_path):
+            if '.git' in root:
+                continue
+                
+            for file in files:
+                file_path = os.path.join(root, file)
+                relative_path = os.path.relpath(file_path, directory_path)
+                
+                # Determine file type
+                lang = None
+                if file.endswith('.py'):
+                    lang = 'python'
+                elif file.endswith(('.js', '.jsx', '.ts', '.tsx')):
+                    lang = 'javascript'
+                
+                if lang and lang in patterns:
+                    try:
+                        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                            content = f.read()
+                            
+                            for pattern_name, pattern_info in patterns[lang].items():
+                                matches = list(re.finditer(pattern_info['pattern'], content, re.IGNORECASE))
+                                
+                                for match in matches:
+                                    line_num = content[:match.start()].count('\n') + 1
+                                    findings.append({
+                                        'file': relative_path,
+                                        'line': line_num,
+                                        'pattern': pattern_name,
+                                        'severity': pattern_info['severity'],
+                                        'description': pattern_info['description'],
+                                        'code_snippet': match.group()[:100],
+                                        'language': lang
+                                    })
+                    except Exception:
+                        pass
+        
+        return findings
+        
+    except Exception as e:
+        return [{"error": f"Error scanning code quality: {str(e)}"}]
+
+def is_likely_false_positive(file_path: str, secret_type: str, match: str) -> bool:
+    """Enhanced general-purpose false positive filter"""
+    
+    # Package management files (contains hashes, not secrets)
+    package_files = ['package-lock.json', 'yarn.lock', 'composer.lock', 'Pipfile.lock', 'poetry.lock']
+    if any(pkg_file in file_path.lower() for pkg_file in package_files):
+        if secret_type in ['aws_secret_key', 'aws_access_key']:
+            return True
+    
+    # Build/dist/cache directories
+    if any(dir_name in file_path.lower() for dir_name in ['node_modules', 'dist/', 'build/', '.cache/', 'vendor/']):
+        return True
+    
+    # Data/configuration files (often contain encoded data)
+    data_extensions = ['.json', '.xml', '.csv', '.log', '.dump', '.backup']
+    data_keywords = ['data', 'config', 'settings', 'cache', 'temp', 'log', 'backup', 'dump']
+    
+    file_lower = file_path.lower()
+    if (any(ext in file_lower for ext in data_extensions) and 
+        any(keyword in file_lower for keyword in data_keywords)):
+        if secret_type in ['aws_secret_key', 'aws_access_key']:
+            return True
+    
+    # Base64 encoded data (universal pattern)
+    if secret_type in ['aws_secret_key'] and len(match) >= 20:
+        # Base64 characteristics: contains +, /, = and high alphanumeric ratio
+        has_base64_chars = any(char in match for char in ['+', '/', '='])
+        alphanumeric_ratio = sum(c.isalnum() for c in match) / len(match)
+        
+        if has_base64_chars or alphanumeric_ratio > 0.9:
+            return True
+    
+    # Non-AWS patterns (anything that doesn't look like real AWS credentials)
+    if secret_type in ['aws_secret_key']:
+        # Real AWS access keys start with 'AKIA'
+        # Real AWS secret keys are 40 chars, mixed case, no special pattern
+        if not match.startswith('AKIA') and len(match) == 40:
+            # If it has patterns typical of encoded data, it's likely a false positive
+            return True
+    
+    # Test/demo/example patterns
+    test_indicators = ['test', 'demo', 'example', 'sample', 'mock', 'fake', 'dummy', 'placeholder']
+    if any(indicator in match.lower() or indicator in file_path.lower() for indicator in test_indicators):
+        return True
+    
+    # Very short matches
+    if len(match.strip()) < 20:
+        return True
+    
+    return False
 
 # --- Endpoints ---
 @app.post("/scan")
@@ -49,7 +282,6 @@ async def scan(request: ScanRequest):
         request.model_type
     )
     
-    # Create enhanced summary with better formatting
     security_level = scan_result.get("security_level", "Unknown")
     security_score = scan_result.get("security_score", 0)
     
@@ -78,104 +310,268 @@ async def scan(request: ScanRequest):
     }
 
 @app.post("/analyze-repo")
-async def analyze_repo(request: RepoAnalysisRequest):
-    """Analyze a GitHub repository for security issues"""
-    analysis = await run_in_threadpool(
-        analyze_github_repo,
-        request.repo_url,
-        request.model_type
-    )
-    
-    # Create a summary if repository analysis was successful
-    summary = ""
-    if RepoAnalysis.latest_analysis:
-        repo_info = RepoAnalysis.latest_analysis
-        summary = f"""📂 **Repository Analysis Complete**
-
-🔍 **Repository Summary:**
-• Name: {repo_info.repo_name}
-• Language: {repo_info.language}
-• Files Scanned: {len(repo_info.files_scanned)}
-• Open Issues: {repo_info.open_issues}
-
-🛡️ **Security Findings:**
-{chr(10).join([f'• {finding}' for finding in repo_info.security_findings[:5]]) if repo_info.security_findings else '• No security issues detected'}
-
-💬 **Ask me specific questions about this repository's security!**"""
-    
-    return {
-        "analysis": analysis,
-        "summary": summary
-    }
+async def analyze_repo_comprehensive(request: RepoAnalysisRequest):
+    """Comprehensive repository security analysis with file scanning"""
+    try:
+        repo_url = request.repo_url
+        model_type = request.model_type
+        deep_scan = request.deep_scan
+        
+        if not repo_url:
+            return {"error": "Repository URL is required"}
+        
+        # Validate model type
+        if model_type not in ['fast', 'smart']:
+            model_type = 'smart'  # Default fallback
+        
+        # Create temporary directory for cloning
+        temp_dir = tempfile.mkdtemp()
+        
+        try:
+            # Clone the repository for comprehensive analysis
+            print(f"🔄 Cloning repository: {repo_url}")
+            
+            # Handle different URL formats
+            clone_url = repo_url
+            if not clone_url.endswith('.git'):
+                clone_url += '.git'
+            
+            repo = git.Repo.clone_from(clone_url, temp_dir)
+            
+            # Get basic repo info from GitHub API
+            repo_url_clean = repo_url.rstrip('/').replace('.git', '')
+            parts = repo_url_clean.split('/')
+            github_repo = None
+            
+            if len(parts) >= 5 and github_client:
+                owner, repo_name = parts[-2], parts[-1]
+                try:
+                    github_repo = github_client.get_repo(f"{owner}/{repo_name}")
+                except Exception as e:
+                    print(f"Could not fetch GitHub repo info: {e}")
+            
+            # 1. Comprehensive file security scan
+            print("🔍 Performing comprehensive file security scan...")
+            file_scan_results = await run_in_threadpool(scan_for_sensitive_files, temp_dir)
+            
+            # 2. Deep content scanning for secrets (with false positive filtering)
+            secret_scan_results = []
+            if deep_scan:
+                print("🕵️ Performing deep content scanning for secrets...")
+                scanned_files = 0
+                for root, dirs, files in os.walk(temp_dir):
+                    # Skip .git directory
+                    if '.git' in root:
+                        continue
+                    
+                    for file in files:
+                        if scanned_files >= 50:  # Limit to prevent timeout
+                            break
+                        
+                        if file.endswith(('.py', '.js', '.json', '.yml', '.yaml', '.env', '.config', '.txt', '.md')):
+                            file_path = os.path.join(root, file)
+                            secrets = await run_in_threadpool(scan_file_contents_for_secrets, file_path)
+                            
+                            # Filter false positives
+                            filtered_secrets = []
+                            for secret in secrets:
+                                if not is_likely_false_positive(file_path, secret.get('secret_type', ''), secret.get('match', '')):
+                                    filtered_secrets.append(secret)
+                            
+                            secret_scan_results.extend(filtered_secrets)
+                            scanned_files += 1
+            
+            # 3. Static Code Analysis with Bandit
+            print("🔬 Running static code analysis...")
+            static_analysis_results = []
+            if deep_scan:
+                try:
+                    bandit_results = await run_in_threadpool(run_bandit, temp_dir)
+                    static_analysis_results = bandit_results if isinstance(bandit_results, list) else []
+                except Exception as e:
+                    print(f"Static analysis failed: {e}")
+                    static_analysis_results = []
+            
+            # 4. Dependency Vulnerability Scanning
+            print("📦 Scanning dependencies for vulnerabilities...")
+            dependency_scan_results = await run_in_threadpool(scan_dependencies, temp_dir)
+            
+            # 5. Code Quality Pattern Detection
+            print("🎯 Detecting insecure coding patterns...")
+            code_quality_results = await run_in_threadpool(scan_code_quality_patterns, temp_dir)
+            
+            # Run traditional GitHub API analysis for AI insights
+            print("📊 Running AI analysis...")
+            try:
+                github_analysis = await run_in_threadpool(
+                    ai_assistant.analyze_github_repo, 
+                    repo_url, 
+                    model_type
+                )
+            except Exception as e:
+                github_analysis = f"AI analysis error: {str(e)}"
+            
+            # Compile comprehensive results
+            comprehensive_results = {
+                "repository_info": {
+                    "url": repo_url,
+                    "name": github_repo.full_name if github_repo else "Unknown",
+                    "description": github_repo.description if github_repo else "No description",
+                    "language": github_repo.language if github_repo else "Unknown",
+                    "stars": github_repo.stargazers_count if github_repo else 0,
+                    "forks": github_repo.forks_count if github_repo else 0,
+                    "open_issues": github_repo.open_issues_count if github_repo else 0
+                },
+                "file_security_scan": file_scan_results,
+                "secret_scan_results": secret_scan_results,
+                "static_analysis_results": static_analysis_results,
+                "dependency_scan_results": dependency_scan_results,
+                "code_quality_results": code_quality_results,
+                "ai_analysis": github_analysis,
+                "security_summary": {
+                    "total_files_scanned": file_scan_results.get('total_files_scanned', 0),
+                    "sensitive_files_found": len(file_scan_results.get('sensitive_files', [])),
+                    "risky_files_found": len(file_scan_results.get('risky_files', [])),
+                    "secrets_found": len(secret_scan_results),
+                    "static_issues_found": len(static_analysis_results),
+                    "vulnerable_dependencies": len(dependency_scan_results.get('vulnerable_packages', [])),
+                    "code_quality_issues": len(code_quality_results),
+                    "security_files_present": len(file_scan_results.get('security_files_found', [])),
+                    "missing_security_files": len(file_scan_results.get('missing_security_files', []))
+                }
+            }
+            
+            # Enhanced security score calculation
+            base_score = 70
+            
+            # Deduct for security issues
+            sensitive_files_penalty = min(30, len(file_scan_results.get('sensitive_files', [])) * 10)
+            risky_files_penalty = min(20, len(file_scan_results.get('risky_files', [])) * 5)
+            secrets_penalty = min(40, len(secret_scan_results) * 15)
+            static_analysis_penalty = min(25, len(static_analysis_results) * 5)
+            dependency_penalty = min(20, len(dependency_scan_results.get('vulnerable_packages', [])) * 10)
+            code_quality_penalty = min(15, len([r for r in code_quality_results if r.get('severity') in ['Critical', 'High']]) * 3)
+            
+            # Add points for good practices
+            security_files_bonus = min(15, len(file_scan_results.get('security_files_found', [])) * 2)
+            
+            overall_score = max(0, base_score - sensitive_files_penalty - risky_files_penalty - secrets_penalty - static_analysis_penalty - dependency_penalty - code_quality_penalty + security_files_bonus)
+            
+            comprehensive_results["overall_security_score"] = overall_score
+            comprehensive_results["security_level"] = (
+                "High" if overall_score >= 80 else 
+                "Medium" if overall_score >= 60 else 
+                "Low"
+            )
+            
+            # Enhanced recommendations
+            recommendations = []
+            
+            if file_scan_results.get('sensitive_files'):
+                recommendations.append("🚨 CRITICAL: Remove or secure sensitive files detected")
+            
+            if secret_scan_results:
+                recommendations.append("🔑 CRITICAL: Remove hardcoded secrets from source code")
+            
+            if static_analysis_results and len(static_analysis_results) > 0:
+                recommendations.append("🔬 HIGH: Fix static code analysis vulnerabilities")
+            
+            if dependency_scan_results.get('vulnerable_packages'):
+                recommendations.append("📦 HIGH: Update vulnerable dependencies")
+            
+            critical_code_issues = [r for r in code_quality_results if r.get('severity') in ['Critical', 'High']]
+            if critical_code_issues:
+                recommendations.append("🎯 HIGH: Address critical insecure coding patterns")
+            
+            if file_scan_results.get('risky_files'):
+                recommendations.append("⚠️ MEDIUM: Review risky file types for security implications")
+            
+            if file_scan_results.get('missing_security_files'):
+                missing = file_scan_results['missing_security_files'][:3]
+                recommendations.append(f"📄 MEDIUM: Add missing security files: {', '.join(missing)}")
+            
+            if not any('security.md' in f.get('type', '') for f in file_scan_results.get('security_files_found', [])):
+                recommendations.append("📋 LOW: Add SECURITY.md file with security policy")
+            
+            comprehensive_results["recommendations"] = recommendations[:8]  # Increased to 8
+            
+            return comprehensive_results
+            
+        except git.exc.GitCommandError as e:
+            return {"error": f"Git clone failed: {str(e)}"}
+        except Exception as e:
+            return {"error": f"Repository analysis failed: {str(e)}"}
+        finally:
+            # Clean up temporary directory
+            if os.path.exists(temp_dir):
+                try:
+                    shutil.rmtree(temp_dir)
+                except Exception as e:
+                    print(f"Warning: Could not clean up temp directory: {e}")
+                
+    except Exception as e:
+        return {"error": f"Analysis setup failed: {str(e)}"}
 
 @app.post("/chat")
 async def chat(request: ChatRequest):
-    """Chat about security analysis results"""
-    # Check if trying to discuss repository without analysis
-    if not RepoAnalysis.latest_analysis and any(
-        word in request.history[-1]['parts'][0].lower() 
-        for word in ['repository', 'repo', 'github']
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail="Please analyze a repository first using /analyze-repo endpoint"
-        )
+    """Chat about the latest repository analysis"""
+    # Check if there's any repo analysis data available
+    if not RepoAnalysis.latest_analysis:
+        return {"response": "❌ **No repository analysis available yet.** Please analyze a repository first using the `/analyze-repo` endpoint, then you can ask questions about the results."}
     
-    response = await run_in_threadpool(
-        get_chat_response,
-        request.history,
-        request.model_type
-    )
-    return {"reply": response}
+    try:
+        response = await run_in_threadpool(get_chat_response, request.history, request.model_type)
+        return {"response": response}
+    except Exception as e:
+        return {"response": f"❌ **Chat Error:** {str(e)}"}
 
 @app.post("/ai-chat")
-async def ai_chat(request: dict):
-    """Enhanced AI chat endpoint with better context handling"""
+async def unified_ai_chat(request: dict):
+    """Unified AI chat endpoint for all security questions"""
     try:
         question = request.get('question', '')
-        context = request.get('context', 'general')
+        context_type = request.get('context', 'general')  # 'general', 'website_scan', 'repo_analysis'
         scan_result = request.get('scan_result', None)
+        model_type = request.get('model_type', 'fast')
         
-        # Create enhanced context based on the type of question
-        enhanced_context = f"""
-**CONTEXT:** {context}
-**USER QUESTION:** {question}
-
-**AVAILABLE INFORMATION:**
-"""
+        # Build context based on available information
+        enhanced_context = f"CONTEXT TYPE: {context_type}\nUSER QUESTION: {question}\n\n"
         
-        if scan_result:
+        if context_type == 'website_scan' and scan_result:
             enhanced_context += f"""
-**SCAN RESULTS:**
-• Target URL: {scan_result.get('url', 'N/A')}
-• HTTPS Status: {'✅ Enabled' if scan_result.get('https', False) else '❌ Disabled'}
-• Security Headers: {len(scan_result.get('headers', {}))} detected
-• Vulnerabilities Found: {len(scan_result.get('flags', []))} issues
+WEBSITE SCAN RESULTS:
+• Target: {scan_result.get('url', 'N/A')}
+• HTTPS: {'✅ Enabled' if scan_result.get('https', False) else '❌ Disabled'}
 • Security Score: {scan_result.get('security_score', 'N/A')}/100
+• Issues Found: {len(scan_result.get('flags', []))} vulnerabilities
 
-**SPECIFIC ISSUES:**
-{chr(10).join([f'• {flag}' for flag in scan_result.get('flags', [])]) if scan_result.get('flags') else '• No specific issues detected'}
+SECURITY ISSUES:
+{chr(10).join([f'• {flag}' for flag in scan_result.get('flags', [])]) if scan_result.get('flags') else '• No critical issues detected'}
 """
         
-        # Create history for the AI
-        history = [{
-            'type': 'user',
-            'parts': [enhanced_context + f"\n\nPlease provide a helpful, user-friendly response to: {question}"]
-        }]
+        elif context_type == 'repo_analysis' and RepoAnalysis.latest_analysis:
+            enhanced_context += f"""
+REPOSITORY ANALYSIS RESULTS:
+{RepoAnalysis.latest_analysis}
+"""
         
-        response = await run_in_threadpool(
-            get_chat_response,
-            history,
-            request.get('model_type', 'fast')
-        )
+        elif context_type == 'general':
+            enhanced_context += "GENERAL SECURITY CONSULTATION - No specific scan data available.\n"
+        
+        history = [{'type': 'user', 'parts': [enhanced_context + f"\nProvide a helpful response to: {question}"]}]
+        
+        response = await run_in_threadpool(get_chat_response, history, model_type)
         
         return {"response": response}
         
     except Exception as e:
-        return {"response": f"❌ **Error processing your question:** {str(e)}\n\nPlease try rephrasing your question or contact support if the issue persists."}
+        return {"response": f"❌ Error: {str(e)}"}
 
-# Health check endpoint
 @app.get("/health")
 async def health_check():
     """Check if the API is running"""
     return {"status": "healthy"}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
