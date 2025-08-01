@@ -1,6 +1,6 @@
 import google.generativeai as genai
 import os
-from typing import List, Dict, Optional, ClassVar
+from typing import List, Dict, Optional, ClassVar, Union
 from dotenv import load_dotenv
 from github import Github
 from github.GithubException import GithubException
@@ -13,7 +13,7 @@ from pathlib import Path
 from scanner.secrets_detector import scan_secrets
 from scanner.static_python import run_bandit # --- PHASE 1B ---
 
-# Define RepoAnalysis class to store scan results
+# Updated RepoAnalysis class to handle both formats
 @dataclass
 class RepoAnalysis:
     """Store repository analysis results."""
@@ -23,7 +23,8 @@ class RepoAnalysis:
     files_scanned: List[str]
     security_findings: List[str]
     open_issues: int
-    latest_analysis: ClassVar[Optional['RepoAnalysis']] = None
+    # Updated to handle both dict (new comprehensive format) and RepoAnalysis (legacy format)
+    latest_analysis: ClassVar[Optional[Union[Dict, 'RepoAnalysis']]] = None
 
 # Load environment variables from a .env file
 load_dotenv()
@@ -34,7 +35,7 @@ AVAILABLE_MODELS = {
     'smart': 'models/gemini-2.5-pro'
 }
 
-# --- Initialize API Clients (no changes in this section) ---
+# --- Initialize API Clients ---
 models = {}
 GITHUB_TOKEN = os.getenv("GITHUB_PAT")
 
@@ -68,11 +69,13 @@ try:
 except Exception as e:
     print(f"❌ Error initializing Gemini API: {e}")
 
-# --- Helper functions (no changes in this section) ---
+# --- Helper functions ---
 def get_model(model_type: str = 'fast') -> Optional[genai.GenerativeModel]:
+    """Get the specified model (fast or smart)"""
     return models.get(model_type)
 
 def format_chat_response(text: str) -> str:
+    """Format AI response for better readability"""
     import re
     formatted = text.strip()
     formatted = re.sub(r'<[^>]+>', '', formatted)
@@ -90,39 +93,136 @@ def format_chat_response(text: str) -> str:
     return formatted
 
 def get_chat_response(history: List[Dict], model_type: str = 'fast') -> str:
+    """Enhanced chat response with model selection and comprehensive context"""
     model = get_model(model_type)
     if model is None:
         return f"❌ **AI model ({model_type}) is not available**"
 
     try:
-        context = "You are a friendly cybersecurity expert assistant..." # (rest of context is unchanged)
-        
-        if RepoAnalysis.latest_analysis:
-            context += f"""
+        # Enhanced context based on model type
+        if model_type == 'smart':
+            context = """You are GitHub Copilot, an expert cybersecurity consultant and code analysis specialist. You provide comprehensive, detailed security analysis with:
 
-📂 **CURRENT REPOSITORY CONTEXT:**
+🛡️ **Advanced Security Analysis:**
+• Deep threat assessment and risk evaluation
+• Comprehensive vulnerability analysis with CVSS scoring context
+• Advanced remediation strategies with implementation details
+• Compliance and regulatory guidance (OWASP, NIST, SOC2)
+• Architecture-level security recommendations
+
+🔬 **Expert Code Review:**
+• Detailed static analysis interpretation with business impact
+• Complex dependency vulnerability assessment
+• Advanced secure coding pattern recommendations
+• Performance vs security trade-off analysis
+• Enterprise-grade security implementation guidance
+
+💡 **Communication Style:**
+• Provide comprehensive, detailed explanations
+• Include technical depth with practical examples
+• Reference industry standards and best practices
+• Give step-by-step implementation guides
+• Explain the 'why' behind each recommendation
+• Use technical terminology appropriately"""
+        else:  # fast model
+            context = """You are GitHub Copilot, a friendly cybersecurity assistant focused on quick, actionable security guidance:
+
+🔒 **Quick Security Analysis:**
+• Fast vulnerability identification and prioritization
+• Clear, concise remediation steps
+• Immediate action items and quick wins
+• Essential security best practices
+• Rapid threat assessment
+
+⚡ **Efficient Communication:**
+• Provide clear, concise recommendations
+• Focus on high-impact, easy-to-implement fixes
+• Use simple, actionable language
+• Prioritize critical issues first
+• Give practical examples and code snippets
+• Be encouraging and supportive"""
+        
+        # Add current analysis context if available
+        if RepoAnalysis.latest_analysis:
+            if isinstance(RepoAnalysis.latest_analysis, dict):
+                # Handle new comprehensive analysis format from /analyze-repo
+                repo_info = RepoAnalysis.latest_analysis.get('repository_info', {})
+                security_summary = RepoAnalysis.latest_analysis.get('security_summary', {})
+                
+                if model_type == 'smart':
+                    context += f"""
+
+📂 **COMPREHENSIVE REPOSITORY CONTEXT:**
+**Repository:** {repo_info.get('name', 'Unknown')} ({repo_info.get('language', 'Unknown')})
+**Description:** {repo_info.get('description', 'No description')}
+**Security Score:** {RepoAnalysis.latest_analysis.get('overall_security_score', 'N/A')}/100 ({RepoAnalysis.latest_analysis.get('security_level', 'Unknown')})
+
+**DETAILED SECURITY METRICS:**
+• Files Scanned: {security_summary.get('total_files_scanned', 0)}
+• Sensitive Files: {security_summary.get('sensitive_files_found', 0)}
+• Hardcoded Secrets: {security_summary.get('secrets_found', 0)}
+• Static Analysis Issues: {security_summary.get('static_issues_found', 0)}
+• Vulnerable Dependencies: {security_summary.get('vulnerable_dependencies', 0)}
+• Code Quality Issues: {security_summary.get('code_quality_issues', 0)}
+• Security Files Present: {security_summary.get('security_files_present', 0)}
+
+**CRITICAL FINDINGS SUMMARY:**
+• Secret Scan: {len(RepoAnalysis.latest_analysis.get('secret_scan_results', []))} secrets detected
+• Code Quality: {len(RepoAnalysis.latest_analysis.get('code_quality_results', []))} patterns found
+• Dependencies: {len(RepoAnalysis.latest_analysis.get('dependency_scan_results', {}).get('vulnerable_packages', []))} vulnerable packages
+• Static Analysis: {len(RepoAnalysis.latest_analysis.get('static_analysis_results', []))} issues found
+
+**TOP RECOMMENDATIONS:**
+{chr(10).join([f'• {rec}' for rec in RepoAnalysis.latest_analysis.get('recommendations', [])[:5]])}
+
+**RECENT FINDINGS DETAILS:**
+{chr(10).join([f'• {finding.get("file", "unknown")}: {finding.get("description", "Security issue")}' for finding in RepoAnalysis.latest_analysis.get('secret_scan_results', [])[:3]])}
+{chr(10).join([f'• {finding.get("file", "unknown")}: {finding.get("pattern", "unknown")} ({finding.get("severity", "unknown")} severity)' for finding in RepoAnalysis.latest_analysis.get('code_quality_results', [])[:3]])}"""
+                else:  # fast model
+                    context += f"""
+
+📂 **REPOSITORY CONTEXT:**
+**Repository:** {repo_info.get('name', 'Unknown')} - Security Score: {RepoAnalysis.latest_analysis.get('overall_security_score', 'N/A')}/100
+**Key Issues:** {security_summary.get('secrets_found', 0)} secrets, {security_summary.get('code_quality_issues', 0)} code issues, {security_summary.get('vulnerable_dependencies', 0)} vulnerable deps
+**Priority Actions:** {', '.join(RepoAnalysis.latest_analysis.get('recommendations', [])[:2])}"""
+            else:
+                # Handle legacy RepoAnalysis format
+                context += f"""
+
+📂 **REPOSITORY CONTEXT:**
 **Repository:** {RepoAnalysis.latest_analysis.repo_name}
 **Language:** {RepoAnalysis.latest_analysis.language}
-**Security Findings:**
-{chr(10).join([f'• {finding}' for finding in RepoAnalysis.latest_analysis.security_findings[:15]])}
-"""
+**Security Findings:** {len(RepoAnalysis.latest_analysis.security_findings)} issues found
+**Recent Findings:** {', '.join(RepoAnalysis.latest_analysis.security_findings[:3])}"""
         
+        # Build conversation history
         formatted_history = [{'parts': [{'text': context}], 'role': 'model'}]
         for msg in history:
             content = msg.get('parts', [{}])[0].get('text', '') if isinstance(msg.get('parts'), list) else msg.get('parts', {}).get('text', '')
             role = 'user' if msg.get('type') == 'user' or msg.get('role') == 'user' else 'model'
             formatted_history.append({'parts': [{'text': str(content)}], 'role': role})
 
+        # Use selected model for response
         chat = model.start_chat(history=formatted_history[:-1])
         last_message = formatted_history[-1]['parts'][0]['text']
         response = chat.send_message(last_message)
-        return format_chat_response(response.text.strip())
+        
+        # Enhanced response formatting based on model type
+        formatted_response = format_chat_response(response.text.strip())
+        
+        if model_type == 'smart':
+            # Add model indicator for comprehensive responses
+            return f"🧠 **Comprehensive Analysis** (Smart Model)\n\n{formatted_response}"
+        else:
+            # Add model indicator for quick responses
+            return f"⚡ **Quick Analysis** (Fast Model)\n\n{formatted_response}"
         
     except Exception as e:
-        return f"❌ **Chat Error:** {str(e)}"
+        return f"❌ **Chat Error ({model_type} model):** {str(e)}"
 
 # --- Main Analysis Function ---
 def analyze_github_repo(repo_url: str, model_type: str = 'smart') -> str:
+    """Analyze GitHub repository with model selection"""
     if not github_client:
         return "❌ **GitHub client not available.** Please check your setup."
     
@@ -165,7 +265,7 @@ def analyze_github_repo(repo_url: str, model_type: str = 'smart') -> str:
                     security_findings.append(f"   - {issue['severity']}: {issue['issue']} in `{issue['filename']}` (Line: {issue['line_number']})")
         print(f"✅ Scans complete. Found {len(hardcoded_secrets)} secrets and {len(static_issues)} static issues.")
 
-        # --- Store Analysis Results ---
+        # --- Store Analysis Results (Legacy format for backward compatibility) ---
         RepoAnalysis.latest_analysis = RepoAnalysis(
             repo_name=repo.full_name,
             description=repo.description or 'No description',
@@ -175,33 +275,100 @@ def analyze_github_repo(repo_url: str, model_type: str = 'smart') -> str:
             open_issues=repo.open_issues_count
         )
         
-        # --- PHASE 1B: Update AI prompt with both scan results ---
+        # --- Build AI Analysis Prompt with Model-Specific Detail Level ---
         secret_findings_summary = "\n".join([f"• {s}" for s in security_findings if "secret" in s.lower()])
         static_findings_summary = "\n".join([f"• {s}" for s in security_findings if "Bandit" in s or "Python code" in s])
 
-        security_prompt = f"""
-**REPOSITORY SECURITY ANALYSIS REQUEST**
-Analyze the GitHub repository below based on my scan results.
+        if model_type == 'smart':
+            security_prompt = f"""
+**COMPREHENSIVE REPOSITORY SECURITY ANALYSIS REQUEST**
+Perform a detailed security analysis of the GitHub repository below based on comprehensive scan results.
 
 **📊 Repository Information:**
 • **Name:** {repo.full_name}
+• **Description:** {repo.description or 'No description provided'}
 • **Primary Language:** {repo.language or 'Unknown'}
+• **Open Issues:** {repo.open_issues_count}
+• **Files Scanned:** {len(all_files_visited)}
 
-**🔑 Hardcoded Secrets Scan Results:**
-{secret_findings_summary if secret_findings_summary else "• ✅ No hardcoded secrets were found."}
+**🔑 Hardcoded Secrets Analysis:**
+{secret_findings_summary if secret_findings_summary else "• ✅ No hardcoded secrets were detected in the repository."}
 
-**🐍 Python Static Analysis Results (Bandit):**
+**🐍 Python Static Code Analysis (Bandit):**
 {static_findings_summary if static_findings_summary else "• ✅ No medium or high-severity static analysis issues found in Python code."}
 
-Please provide a structured analysis with these sections:
-## 🛡️ Overall Security Assessment
-## 🚨 Critical Security Issues (Prioritize secrets, then high-severity Bandit findings)
-## ⚠️ Potential Security Risks
-## 🎯 Immediate Action Items (Provide a checklist)
-## 💡 Long-term Security Improvements
+Please provide a comprehensive, detailed analysis with these sections:
 
-**FORMAT REQUIREMENTS:**
-• Use clean text formatting only with markdown-style headers. NO HTML.
+## 🛡️ Executive Security Summary
+Provide a detailed security posture assessment with risk rating and strategic recommendations.
+
+## 🚨 Critical Vulnerabilities Assessment
+Detailed analysis of each critical issue with:
+- CVSS risk scoring context
+- Potential attack vectors
+- Business impact assessment
+- Exploitation scenarios
+
+## 🔬 Technical Risk Analysis
+In-depth technical evaluation including:
+- Code quality implications
+- Architecture security considerations
+- Dependency management risks
+- Configuration security gaps
+
+## 🎯 Prioritized Remediation Roadmap
+Detailed action plan with:
+- Immediate critical fixes (0-24 hours)
+- Short-term improvements (1-4 weeks)  
+- Long-term security strategy (1-6 months)
+- Implementation complexity assessment
+
+## 💡 Advanced Security Recommendations
+Enterprise-grade recommendations including:
+- Security architecture improvements
+- DevSecOps integration strategies
+- Compliance considerations (OWASP, NIST)
+- Monitoring and alerting strategies
+
+**ANALYSIS REQUIREMENTS:**
+• Provide comprehensive technical depth with practical examples
+• Include specific code examples and implementation guides
+• Reference industry standards and best practices
+• Explain the business rationale behind each recommendation
+• Use professional security consultant terminology
+"""
+        else:  # fast model
+            security_prompt = f"""
+**QUICK REPOSITORY SECURITY SCAN ANALYSIS**
+Analyze this GitHub repository and provide fast, actionable security guidance.
+
+**📊 Repository:** {repo.full_name} ({repo.language or 'Unknown'})
+
+**🔑 Secrets Scan:**
+{secret_findings_summary if secret_findings_summary else "• ✅ No secrets found"}
+
+**🐍 Code Analysis:**
+{static_findings_summary if static_findings_summary else "• ✅ No major issues found"}
+
+Please provide a quick analysis with these sections:
+
+## 🛡️ Security Summary
+Quick security rating and main concerns.
+
+## 🚨 Critical Issues
+List the most important problems to fix immediately.
+
+## ⚡ Quick Fixes
+Specific, actionable steps you can implement today.
+
+## 🎯 Next Steps
+Simple recommendations for improving security.
+
+**REQUIREMENTS:**
+• Keep responses concise and actionable
+• Focus on high-impact, easy-to-implement fixes
+• Provide specific examples and commands
+• Use simple, clear language
 """
         
         history = [{"type": "user", "parts": [security_prompt]}]
@@ -214,56 +381,108 @@ Please provide a structured analysis with these sections:
         if Path(local_repo_path).exists():
             shutil.rmtree(local_repo_path)
 
-# --- The analyze_scan_with_llm function remains unchanged ---
-# Replace the incomplete analyze_scan_with_llm function in ai_assistant.py with this:
-
 def analyze_scan_with_llm(https: bool, flags: List[str], headers: Dict[str, str], model_type: str = 'fast') -> str:
-    """Analyze scan results using LLM"""
+    """Analyze website scan results using LLM with model selection"""
     model = get_model(model_type)
     if model is None:
         return f"❌ **AI model ({model_type}) is not available**"
     
     try:
-        # Create analysis prompt
-        security_prompt = f"""
-**WEBSITE SECURITY ANALYSIS REQUEST**
+        # Model-specific analysis depth
+        if model_type == 'smart':
+            security_prompt = f"""
+**COMPREHENSIVE WEBSITE SECURITY ANALYSIS REQUEST**
 
-Analyze the following website security scan results and provide actionable recommendations.
+Perform a detailed security assessment of the following website scan results.
+
+**🔒 Security Configuration Status:**
+• **HTTPS Protection:** {'✅ Properly Configured' if https else '❌ Not Implemented - CRITICAL VULNERABILITY'}
+• **Security Issues Detected:** {len(flags)} vulnerabilities identified
+• **HTTP Security Headers:** {len(headers)} headers analyzed
+
+**🚨 Detailed Vulnerability Assessment:**
+{chr(10).join([f'• **{flag}** - Requires immediate attention' for flag in flags]) if flags else '• ✅ No critical security vulnerabilities detected'}
+
+**📋 HTTP Security Headers Analysis:**
+{chr(10).join([f'• **{key}:** `{value}`' for key, value in headers.items()]) if headers else '• ⚠️ No security headers detected'}
+
+Please provide a comprehensive security analysis with these sections:
+
+## 🛡️ Executive Security Assessment
+• Overall security posture rating
+• Risk level classification (Critical/High/Medium/Low)
+• Executive summary for stakeholders
+
+## 🚨 Critical Vulnerability Analysis
+• Detailed assessment of each security issue
+• Potential attack vectors and exploitation scenarios
+• Business impact assessment
+• OWASP Top 10 correlation
+
+## 🔐 Security Headers Deep Dive
+• Analysis of implemented security headers
+• Missing critical headers identification
+• Configuration optimization recommendations
+• Browser compatibility considerations
+
+## 🎯 Comprehensive Remediation Strategy
+• Immediate fixes (0-24 hours)
+• Short-term improvements (1-4 weeks)
+• Long-term security architecture (1-6 months)
+• Implementation complexity assessment
+
+## 💡 Advanced Security Recommendations
+• Content Security Policy (CSP) implementation
+• Security monitoring and alerting setup
+• Penetration testing recommendations
+• Compliance considerations (PCI DSS, GDPR, etc.)
+
+**ANALYSIS REQUIREMENTS:**
+• Provide technical depth with specific implementation examples
+• Include nginx/Apache configuration snippets
+• Reference security standards and best practices
+• Explain business rationale for each recommendation
+"""
+        else:  # fast model
+            security_prompt = f"""
+**QUICK WEBSITE SECURITY SCAN ANALYSIS**
+
+Analyze this website security scan and provide fast, actionable recommendations.
 
 **🔒 Security Status:**
-• **HTTPS Enabled:** {'✅ Yes' if https else '❌ No'}
-• **Security Issues Found:** {len(flags)} issues detected
-• **HTTP Headers Analyzed:** {len(headers)} headers present
+• **HTTPS:** {'✅ Enabled' if https else '❌ Missing - FIX IMMEDIATELY'}
+• **Issues Found:** {len(flags)} problems
+• **Headers Present:** {len(headers)} security headers
 
-**🚨 Security Issues Detected:**
-{chr(10).join([f'• {flag}' for flag in flags]) if flags else '• ✅ No critical security issues detected'}
+**🚨 Problems Found:**
+{chr(10).join([f'• {flag}' for flag in flags]) if flags else '• ✅ No major issues detected'}
 
-**📋 HTTP Headers Present:**
-{chr(10).join([f'• {key}: {value}' for key, value in headers.items()]) if headers else '• No headers detected'}
+**📋 Security Headers:**
+{chr(10).join([f'• {key}: {value}' for key, value in headers.items()]) if headers else '• No headers found'}
 
-Please provide a structured analysis with these sections:
+Please provide a quick analysis with these sections:
 
-## 🛡️ Overall Security Assessment
-Provide a security rating and summary of the website's security posture.
+## 🛡️ Security Rating
+Quick assessment of website security.
 
 ## 🚨 Critical Issues
-List the most important security vulnerabilities that need immediate attention.
+Most important problems to fix first.
 
-## ⚠️ Recommendations
-Provide specific, actionable steps to improve security.
+## ⚡ Quick Fixes
+Specific steps to improve security today.
 
-## 💡 Implementation Guide
-Give practical examples of how to implement the security improvements.
+## 🎯 Implementation Guide
+Simple examples and code snippets.
 
-**FORMAT REQUIREMENTS:**
-• Use clean text formatting with markdown-style headers
-• Provide specific, actionable recommendations
-• Include code examples where helpful
-• NO HTML tags or styling
+**REQUIREMENTS:**
+• Keep responses practical and actionable
+• Provide specific configuration examples
+• Focus on high-impact, easy wins
+• Use clear, simple language
 """
         
         history = [{"type": "user", "parts": [security_prompt]}]
         return get_chat_response(history, model_type)
         
     except Exception as e:
-        return f"❌ **Website Analysis Error:** {str(e)}"
+        return f"❌ **Website Analysis Error ({model_type} model):** {str(e)}"

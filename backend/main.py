@@ -4,7 +4,7 @@ import git
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Dict
+from typing import List, Dict, Optional
 from starlette.concurrency import run_in_threadpool
 import tempfile
 import json
@@ -37,13 +37,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# --- Storage Classes for Scan Results ---
+class WebsiteScan:
+    latest_scan = None
+
 # --- Request Models ---
 class ScanRequest(BaseModel):
     url: str
-    model_type: str = 'fast'
-
-class ChatRequest(BaseModel):
-    history: List[Dict]
     model_type: str = 'fast'
 
 class RepoAnalysisRequest(BaseModel):
@@ -265,10 +265,11 @@ def is_likely_false_positive(file_path: str, secret_type: str, match: str) -> bo
     
     return False
 
-# --- Endpoints ---
+# --- ENDPOINTS ---
+
 @app.post("/scan")
 async def scan(request: ScanRequest):
-    """Scan a website for security vulnerabilities"""
+    """Scan a website for security vulnerabilities and store results for AI chat"""
     url = request.url
     
     pages = await run_in_threadpool(crawl_site, url)
@@ -300,7 +301,7 @@ async def scan(request: ScanRequest):
 
 💡 **Ready to help with specific security questions about this scan!**"""
     
-    return {
+    scan_response = {
         "url": url,
         "pages": pages,
         "scan_result": scan_result,
@@ -308,10 +309,15 @@ async def scan(request: ScanRequest):
         "ai_assistant_advice": ai_advice,
         "summary": summary
     }
+    
+    # Store results for AI chat context
+    WebsiteScan.latest_scan = scan_response
+    
+    return scan_response
 
 @app.post("/analyze-repo")
 async def analyze_repo_comprehensive(request: RepoAnalysisRequest):
-    """Comprehensive repository security analysis with file scanning"""
+    """Comprehensive repository security analysis with file scanning and store results for AI chat"""
     try:
         repo_url = request.repo_url
         model_type = request.model_type
@@ -342,13 +348,20 @@ async def analyze_repo_comprehensive(request: RepoAnalysisRequest):
             repo_url_clean = repo_url.rstrip('/').replace('.git', '')
             parts = repo_url_clean.split('/')
             github_repo = None
+            github_error = None
             
             if len(parts) >= 5 and github_client:
                 owner, repo_name = parts[-2], parts[-1]
                 try:
                     github_repo = github_client.get_repo(f"{owner}/{repo_name}")
+                    print(f"✅ Successfully fetched GitHub repo info for {owner}/{repo_name}")
                 except Exception as e:
-                    print(f"Could not fetch GitHub repo info: {e}")
+                    github_error = str(e)
+                    print(f"⚠️ Could not fetch GitHub repo info: {e}")
+                    if "404" in str(e):
+                        print(f"💡 Repository might be private or URL might be incorrect")
+                    elif "403" in str(e):
+                        print(f"💡 API rate limit reached or authentication required")
             
             # 1. Comprehensive file security scan
             print("🔍 Performing comprehensive file security scan...")
@@ -403,13 +416,32 @@ async def analyze_repo_comprehensive(request: RepoAnalysisRequest):
             # Run traditional GitHub API analysis for AI insights
             print("📊 Running AI analysis...")
             try:
-                github_analysis = await run_in_threadpool(
-                    ai_assistant.analyze_github_repo, 
-                    repo_url, 
-                    model_type
-                )
+                if github_repo:
+                    github_analysis = await run_in_threadpool(
+                        ai_assistant.analyze_github_repo, 
+                        repo_url, 
+                        model_type
+                    )
+                else:
+                    # Fallback when GitHub API fails
+                    github_analysis = f"""
+📊 **Repository Analysis** (Limited - GitHub API unavailable)
+
+**Repository:** {repo_url}
+**Status:** Successfully cloned and analyzed locally
+**Note:** GitHub API returned error: {github_error or 'Unknown error'} - repository might be private or require authentication
+
+✅ **Local Analysis Completed:**
+• File security scanning: Complete
+• Secret detection: Complete  
+• Static code analysis: Complete
+• Dependency scanning: Complete
+• Code quality analysis: Complete
+
+💡 **Recommendation:** For full GitHub integration, ensure repository is public or add GitHub token authentication.
+"""
             except Exception as e:
-                github_analysis = f"AI analysis error: {str(e)}"
+                github_analysis = f"⚠️ AI analysis error: {str(e)}"
             
             # Compile comprehensive results
             comprehensive_results = {
@@ -493,7 +525,10 @@ async def analyze_repo_comprehensive(request: RepoAnalysisRequest):
             if not any('security.md' in f.get('type', '') for f in file_scan_results.get('security_files_found', [])):
                 recommendations.append("📋 LOW: Add SECURITY.md file with security policy")
             
-            comprehensive_results["recommendations"] = recommendations[:8]  # Increased to 8
+            comprehensive_results["recommendations"] = recommendations[:8]
+            
+            # Store results for AI chat context
+            RepoAnalysis.latest_analysis = comprehensive_results
             
             return comprehensive_results
             
@@ -512,60 +547,162 @@ async def analyze_repo_comprehensive(request: RepoAnalysisRequest):
     except Exception as e:
         return {"error": f"Analysis setup failed: {str(e)}"}
 
-@app.post("/chat")
-async def chat(request: ChatRequest):
-    """Chat about the latest repository analysis"""
-    # Check if there's any repo analysis data available
-    if not RepoAnalysis.latest_analysis:
-        return {"response": "❌ **No repository analysis available yet.** Please analyze a repository first using the `/analyze-repo` endpoint, then you can ask questions about the results."}
-    
-    try:
-        response = await run_in_threadpool(get_chat_response, request.history, request.model_type)
-        return {"response": response}
-    except Exception as e:
-        return {"response": f"❌ **Chat Error:** {str(e)}"}
-
 @app.post("/ai-chat")
 async def unified_ai_chat(request: dict):
-    """Unified AI chat endpoint for all security questions"""
+    """Unified AI chat endpoint that automatically uses latest scan results as context"""
     try:
         question = request.get('question', '')
-        context_type = request.get('context', 'general')  # 'general', 'website_scan', 'repo_analysis'
-        scan_result = request.get('scan_result', None)
+        context_type = request.get('context', 'auto')  # 'auto', 'general', 'website_scan', 'repo_analysis'
         model_type = request.get('model_type', 'fast')
+        previous_history = request.get('history', [])
         
-        # Build context based on available information
-        enhanced_context = f"CONTEXT TYPE: {context_type}\nUSER QUESTION: {question}\n\n"
+        # Validate model type
+        if model_type not in ['fast', 'smart']:
+            model_type = 'fast'
         
-        if context_type == 'website_scan' and scan_result:
-            enhanced_context += f"""
-WEBSITE SCAN RESULTS:
-• Target: {scan_result.get('url', 'N/A')}
-• HTTPS: {'✅ Enabled' if scan_result.get('https', False) else '❌ Disabled'}
-• Security Score: {scan_result.get('security_score', 'N/A')}/100
-• Issues Found: {len(scan_result.get('flags', []))} vulnerabilities
+        # Build enhanced context with automatic scan result detection
+        enhanced_context = f"MODEL TYPE: {model_type}\nUSER QUESTION: {question}\n\n"
+        
+        # Auto-detect and use available scan results
+        if context_type == 'auto':
+            # Check for repository analysis first (most comprehensive)
+            if hasattr(RepoAnalysis, 'latest_analysis') and RepoAnalysis.latest_analysis:
+                context_type = 'repo_analysis'
+                enhanced_context += "🔍 **AUTOMATICALLY DETECTED: Repository Analysis Available**\n\n"
+            # Check for website scan results
+            elif hasattr(WebsiteScan, 'latest_scan') and WebsiteScan.latest_scan:
+                context_type = 'website_scan'
+                enhanced_context += "🌐 **AUTOMATICALLY DETECTED: Website Scan Available**\n\n"
+            else:
+                context_type = 'general'
+                enhanced_context += "🤖 **GENERAL SECURITY CONSULTATION** - No recent scan data available.\n\n"
+        
+        # Repository Analysis Context (from /analyze-repo)
+        if context_type == 'repo_analysis' and hasattr(RepoAnalysis, 'latest_analysis') and RepoAnalysis.latest_analysis:
+            analysis_data = RepoAnalysis.latest_analysis
+            
+            if isinstance(analysis_data, dict):
+                enhanced_context += f"""
+📁 **REPOSITORY SECURITY ANALYSIS:**
+• Repository: {analysis_data.get('repository_info', {}).get('name', 'Unknown')}
+• Security Score: {analysis_data.get('overall_security_score', 'N/A')}/100 ({analysis_data.get('security_level', 'Unknown')})
+• Language: {analysis_data.get('repository_info', {}).get('language', 'Unknown')}
 
-SECURITY ISSUES:
-{chr(10).join([f'• {flag}' for flag in scan_result.get('flags', [])]) if scan_result.get('flags') else '• No critical issues detected'}
+📊 **SECURITY SUMMARY:**
+• Files Scanned: {analysis_data.get('security_summary', {}).get('total_files_scanned', 0)}
+• Secrets Found: {analysis_data.get('security_summary', {}).get('secrets_found', 0)}
+• Static Issues: {analysis_data.get('security_summary', {}).get('static_issues_found', 0)}
+• Vulnerable Dependencies: {analysis_data.get('security_summary', {}).get('vulnerable_dependencies', 0)}
+• Code Quality Issues: {analysis_data.get('security_summary', {}).get('code_quality_issues', 0)}
+
+🚨 **CRITICAL FINDINGS:**
+SECRET SCAN RESULTS: {len(analysis_data.get('secret_scan_results', []))} secrets found
+{chr(10).join([f"• {s.get('file', 'unknown')}: {s.get('secret_type', 'unknown')} (Line {s.get('line', 'N/A')})" for s in analysis_data.get('secret_scan_results', [])[:5]])}
+
+CODE QUALITY ISSUES: {len(analysis_data.get('code_quality_results', []))} patterns found
+{chr(10).join([f"• {c.get('file', 'unknown')}: {c.get('pattern', 'unknown')} - {c.get('severity', 'Unknown')} ({c.get('description', 'No description')})" for c in analysis_data.get('code_quality_results', [])[:5]])}
+
+DEPENDENCY VULNERABILITIES: {len(analysis_data.get('dependency_scan_results', {}).get('vulnerable_packages', []))} packages
+{chr(10).join([f"• {d.get('package', 'unknown')}: {d.get('severity', 'Unknown')} - {d.get('advisory', 'Update recommended')}" for d in analysis_data.get('dependency_scan_results', {}).get('vulnerable_packages', [])[:5]])}
+
+STATIC ANALYSIS: {len(analysis_data.get('static_analysis_results', []))} issues found
+{chr(10).join([f"• {str(s)[:100]}" for s in analysis_data.get('static_analysis_results', [])[:3]])}
+
+📋 **RECOMMENDATIONS:**
+{chr(10).join([f"• {rec}" for rec in analysis_data.get('recommendations', [])[:5]])}
+
+🔍 **SENSITIVE FILES:**
+{chr(10).join([f"• {f.get('file', 'unknown')} - {f.get('risk', 'Unknown')} risk" for f in analysis_data.get('file_security_scan', {}).get('sensitive_files', [])[:5]])}
+"""
+            else:
+                enhanced_context += f"""
+📁 **REPOSITORY ANALYSIS RESULTS:**
+{str(analysis_data)[:2000]}...
 """
         
-        elif context_type == 'repo_analysis' and RepoAnalysis.latest_analysis:
-            enhanced_context += f"""
-REPOSITORY ANALYSIS RESULTS:
-{RepoAnalysis.latest_analysis}
+        # Website Scan Context (from /scan or manual)
+        elif context_type == 'website_scan':
+            scan_result = request.get('scan_result', None)
+            
+            # Use provided scan_result or stored scan data
+            if scan_result:
+                scan_data = scan_result
+                website_data = None
+            elif hasattr(WebsiteScan, 'latest_scan') and WebsiteScan.latest_scan:
+                scan_data = WebsiteScan.latest_scan.get('scan_result', {})
+                website_data = WebsiteScan.latest_scan
+            else:
+                scan_data = None
+                website_data = None
+            
+            if scan_data:
+                enhanced_context += f"""
+🌐 **WEBSITE SECURITY SCAN:**
+• Target: {scan_data.get('url', 'N/A')}
+• Security Score: {scan_data.get('security_score', 'N/A')}/100 ({scan_data.get('security_level', 'Unknown')})
+• HTTPS: {'✅ Enabled' if scan_data.get('https', False) else '❌ Disabled'}
+• Vulnerabilities: {len(scan_data.get('flags', []))} issues found
+• Security Headers: {len(scan_data.get('headers', {}))} detected
+
+🚨 **SECURITY ISSUES:**
+{chr(10).join([f'• {flag}' for flag in scan_data.get('flags', [])]) if scan_data.get('flags') else '• No critical issues detected'}
+
+🔒 **SECURITY HEADERS:**
+{chr(10).join([f'• {header}: {value}' for header, value in scan_data.get('headers', {}).items()]) if scan_data.get('headers') else '• No security headers detected'}
+
+📄 **PAGES CRAWLED:**
+{chr(10).join([f'• {page}' for page in website_data.get('pages', [])[:5]]) if website_data else '• No pages data'}
+
+💡 **AI SUGGESTIONS:**
+{website_data.get('ai_assistant_advice', 'No AI suggestions available') if website_data else 'No AI suggestions available'}
 """
+            else:
+                enhanced_context += "🌐 **WEBSITE SCAN:** No scan result available.\n"
         
+        # General Context
         elif context_type == 'general':
-            enhanced_context += "GENERAL SECURITY CONSULTATION - No specific scan data available.\n"
+            enhanced_context += """
+🔒 **GENERAL SECURITY CONSULTATION**
+No specific scan data available. I can help with:
+• General security best practices
+• Common vulnerability explanations
+• Security implementation guidance
+• Code review suggestions
+• Security tool recommendations
+
+To get specific analysis, please run:
+• `/analyze-repo` for repository security analysis
+• `/scan` for website security scanning
+"""
         
-        history = [{'type': 'user', 'parts': [enhanced_context + f"\nProvide a helpful response to: {question}"]}]
+        # Build conversation history
+        if previous_history:
+            history = previous_history.copy()
+            history.append({'type': 'user', 'parts': [enhanced_context + f"\n\nBased on the above security analysis, provide a helpful response to: {question}"]})
+        else:
+            history = [{'type': 'user', 'parts': [enhanced_context + f"\n\nBased on the above security analysis, provide a helpful response to: {question}"]}]
         
         response = await run_in_threadpool(get_chat_response, history, model_type)
         
-        return {"response": response}
+        # Add response to history
+        history.append({'type': 'assistant', 'parts': [response]})
+        
+        return {
+            "response": response,
+            "model_used": model_type,
+            "context_detected": context_type,
+            "scan_data_available": context_type in ['repo_analysis', 'website_scan'],
+            "history": history
+        }
         
     except Exception as e:
-        return {"response": f"❌ Error: {str(e)}"}
+        return {
+            "response": f"❌ Error: {str(e)}",
+            "model_used": model_type if 'model_type' in locals() else 'unknown',
+            "context_detected": 'error',
+            "scan_data_available": False,
+            "history": []
+        }
 
 @app.get("/health")
 async def health_check():
