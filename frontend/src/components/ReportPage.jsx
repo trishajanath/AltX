@@ -2,8 +2,9 @@ import React, { useState } from 'react';
 import SecurityIssueFormatter from './SecurityIssueFormatter';
 import ChatResponseFormatter from './ChatResponseFormatter';
 import PageWrapper from './PageWrapper';
-
+import usePreventZoom from './usePreventZoom';
 const ReportPage = ({ scanResult }) => {
+  usePreventZoom();
   const [chatInput, setChatInput] = useState('');
   const [chatHistory, setChatHistory] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -17,6 +18,23 @@ const ReportPage = ({ scanResult }) => {
     setIsLoading(true);
 
     try {
+      // Check if user is asking for summary and we have existing summary
+      const isAskingForSummary = userMessage.toLowerCase().includes('summar') || 
+                                userMessage.toLowerCase().includes('overview') ||
+                                userMessage.toLowerCase().includes('report');
+      
+      if (isAskingForSummary && (scanResult.summary || scanResult.ai_assistant_advice)) {
+        // Use existing summary instead of generating new one
+        const existingSummary = scanResult.summary || scanResult.ai_assistant_advice;
+        setChatHistory(prev => [...prev, { 
+          type: 'ai', 
+          message: `📋 **Here's your detailed security analysis summary:**\n\n${existingSummary}`, 
+          timestamp: new Date() 
+        }]);
+        setIsLoading(false);
+        return;
+      }
+
       const response = await fetch('http://localhost:8000/ai-chat', {
         method: 'POST',
         headers: {
@@ -24,7 +42,8 @@ const ReportPage = ({ scanResult }) => {
         },
         body: JSON.stringify({ 
           question: userMessage, 
-          scan_result: scanResult 
+          scan_result: scanResult,
+          context: 'website_scan'
         }),
       });
       
@@ -49,17 +68,24 @@ const ReportPage = ({ scanResult }) => {
   const generateSmartResponse = (question, result) => {
     const q = question.toLowerCase();
     
+    // Handle summary requests with existing data
+    if ((q.includes('summar') || q.includes('overview') || q.includes('report')) && 
+        (result?.summary || result?.ai_assistant_advice)) {
+      return `📋 **Security Analysis Summary:**\n\n${result.summary || result.ai_assistant_advice}`;
+    }
+    
     if (q.includes('vulnerabilit') || q.includes('security')) {
-      return `Based on your scan results, I found ${result?.scan_result?.vulnerabilities?.high || 0} high-priority and ${result?.scan_result?.vulnerabilities?.medium || 0} medium-priority vulnerabilities. Focus on addressing the high-priority issues first.`;
+      const flagsCount = result?.scan_result?.flags?.length || 0;
+      return `Based on your scan results, I found ${flagsCount} security issues that need attention. ${flagsCount > 0 ? 'Focus on addressing the most critical ones first.' : 'Great job - no major vulnerabilities detected!'}`;
     }
     if (q.includes('fix') || q.includes('how to')) {
       return `Here are key steps to improve security: 1) Implement missing security headers, 2) Ensure HTTPS is properly configured, 3) Update vulnerable dependencies, 4) Enable proper input validation.`;
     }
     if (q.includes('score') || q.includes('rating')) {
-      return `Your security score is ${result?.security_score || result?.scan_result?.security_score || 'not available'}. Scores above 85 are considered excellent.`;
+      return `Your security score is ${result?.security_score || result?.scan_result?.security_score || 'not available'}/100. Scores above 85 are considered excellent, 70-85 is good, 50-70 needs improvement.`;
     }
     
-    return `I'm here to help you understand your security scan results and provide remediation guidance.`;
+    return `I'm here to help you understand your security scan results and provide remediation guidance. Ask me about specific vulnerabilities, how to improve your score, or request a summary of the analysis.`;
   };
 
   const getVulnerabilityColor = (level) => {
@@ -143,6 +169,25 @@ const ReportPage = ({ scanResult }) => {
           </div>
         </div>
 
+        {/* AI Summary Section */}
+        {(scanResult.summary || scanResult.ai_assistant_advice) && (
+          <div className="card">
+            <h3>🤖 AI Security Analysis Summary</h3>
+            <div style={{ 
+              background: 'rgba(0, 245, 195, 0.05)', 
+              border: '1px solid rgba(0, 245, 195, 0.1)',
+              borderRadius: '8px',
+              padding: '20px',
+              marginTop: '16px'
+            }}>
+              <ChatResponseFormatter 
+                message={scanResult.summary || scanResult.ai_assistant_advice}
+                type="ai"
+              />
+            </div>
+          </div>
+        )}
+
         {/* Security Issues Formatted Display */}
         {scanResult.scan_result?.flags && (
           <div className="card">
@@ -222,6 +267,57 @@ const ReportPage = ({ scanResult }) => {
             >
               Send
             </button>
+          </div>
+
+          {/* Quick Action Buttons */}
+          <div style={{ marginTop: '16px' }}>
+            <div style={{ fontSize: '14px', color: '#a1a1aa', marginBottom: '8px' }}>
+              Quick actions:
+            </div>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              {(scanResult.summary || scanResult.ai_assistant_advice) && (
+                <button
+                  className="btn btn-ghost"
+                  style={{ fontSize: '12px', padding: '6px 12px' }}
+                  onClick={() => {
+                    setChatInput('Summarize the analysis');
+                    setTimeout(() => handleChat(), 100);
+                  }}
+                >
+                  📋 Show Summary
+                </button>
+              )}
+              <button
+                className="btn btn-ghost"
+                style={{ fontSize: '12px', padding: '6px 12px' }}
+                onClick={() => {
+                  setChatInput('What are the main vulnerabilities?');
+                  setTimeout(() => handleChat(), 100);
+                }}
+              >
+                🔍 Main Issues
+              </button>
+              <button
+                className="btn btn-ghost"
+                style={{ fontSize: '12px', padding: '6px 12px' }}
+                onClick={() => {
+                  setChatInput('How can I improve my security score?');
+                  setTimeout(() => handleChat(), 100);
+                }}
+              >
+                🛠️ How to Fix
+              </button>
+              <button
+                className="btn btn-ghost"
+                style={{ fontSize: '12px', padding: '6px 12px' }}
+                onClick={() => {
+                  setChatInput('Explain my security score');
+                  setTimeout(() => handleChat(), 100);
+                }}
+              >
+                📊 Score Details
+              </button>
+            </div>
           </div>
         </div>
         </div>

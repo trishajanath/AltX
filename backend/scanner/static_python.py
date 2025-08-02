@@ -16,10 +16,9 @@ def run_bandit(repo_path: str):
         return results
 
     try:
-        # Execute bandit and capture the JSON output
-        # The '-f json' flag tells bandit to output in JSON format.
-        # The '-r' flag makes it run recursively.
-        command = ["bandit", "-r", str(repo_path_obj), "-f", "json"]
+        # Try to run bandit as a module first (more reliable on Windows)
+        import sys
+        command = [sys.executable, "-m", "bandit", "-r", str(repo_path_obj), "-f", "json"]
         
         # Using capture_output=True and text=True for cleaner handling
         process = subprocess.run(

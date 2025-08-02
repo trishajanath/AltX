@@ -355,6 +355,17 @@ async def analyze_repo_comprehensive(request: RepoAnalysisRequest):
         # Create temporary directory for cloning
         temp_dir = tempfile.mkdtemp()
         
+        # Verify temp directory is writable
+        try:
+            test_file = os.path.join(temp_dir, 'test_write.tmp')
+            with open(test_file, 'w') as f:
+                f.write('test')
+            os.remove(test_file)
+        except Exception as e:
+            return {"error": f"Temporary directory is not writable: {temp_dir}\nError: {e}\nTry running VS Code as administrator or check folder permissions."}
+        
+        print(f"📁 Created temporary directory: {temp_dir}")
+        
         try:
             # Clone the repository for comprehensive analysis
             print(f"🔄 Cloning repository: {repo_url}")
@@ -364,7 +375,43 @@ async def analyze_repo_comprehensive(request: RepoAnalysisRequest):
             if not clone_url.endswith('.git'):
                 clone_url += '.git'
             
-            repo = git.Repo.clone_from(clone_url, temp_dir)
+            # Clone repository with proper error handling
+            import git
+            from git import Repo, GitCommandError
+            
+            try:
+                # Simple clone first - ensure we use the temp_dir we created
+                repo = git.Repo.clone_from(clone_url, temp_dir)
+                print(f"✅ Repository cloned successfully to {temp_dir}")
+                
+                # Configure the cloned repo for Windows compatibility
+                try:
+                    with repo.config_writer() as config_writer:
+                        config_writer.set_value("core", "filemode", "false")
+                        config_writer.set_value("core", "autocrlf", "true")
+                        config_writer.set_value("core", "safecrlf", "false")
+                except Exception as config_error:
+                    print(f"⚠️ Could not configure Git settings: {config_error}")
+                
+            except GitCommandError as git_error:
+                # Try with different clone options
+                print(f"⚠️ Initial clone failed, trying with depth limit: {git_error}")
+                try:
+                    # Try shallow clone to reduce potential file permission issues
+                    repo = git.Repo.clone_from(clone_url, temp_dir, depth=1)
+                    print(f"✅ Repository cloned using shallow clone to {temp_dir}")
+                    
+                    # Configure the cloned repo
+                    try:
+                        with repo.config_writer() as config_writer:
+                            config_writer.set_value("core", "filemode", "false")
+                            config_writer.set_value("core", "autocrlf", "true")
+                    except Exception as config_error:
+                        print(f"⚠️ Could not configure Git settings: {config_error}")
+                        
+                except GitCommandError as shallow_error:
+                    print(f"⚠️ Shallow clone also failed: {shallow_error}")
+                    raise Exception(f"All Git clone methods failed. Last error: {shallow_error}")
             
             # Get basic repo info from GitHub API
             repo_url_clean = repo_url.rstrip('/').replace('.git', '')
@@ -555,16 +602,96 @@ async def analyze_repo_comprehensive(request: RepoAnalysisRequest):
             return comprehensive_results
             
         except git.exc.GitCommandError as e:
-            return {"error": f"Git clone failed: {str(e)}"}
+            error_msg = str(e)
+            if "Access is denied" in error_msg:
+                return {"error": f"Access denied during Git clone. This might be due to:\n• Repository permissions\n• Windows file system restrictions\n• Antivirus software blocking Git operations\n\nTry running VS Code as administrator or temporarily disable antivirus scanning for the temp directory.\n\nOriginal error: {error_msg}"}
+            elif "not found" in error_msg.lower():
+                return {"error": f"Repository not found. Please verify:\n• Repository URL is correct\n• Repository is public (or you have access)\n• GitHub is accessible from your network\n\nOriginal error: {error_msg}"}
+            elif "authentication" in error_msg.lower():
+                return {"error": f"Authentication failed. For private repositories:\n• Ensure you have access rights\n• Consider using GitHub token authentication\n\nOriginal error: {error_msg}"}
+            else:
+                return {"error": f"Git clone failed: {error_msg}"}
         except Exception as e:
-            return {"error": f"Repository analysis failed: {str(e)}"}
+            error_msg = str(e)
+            if "Access is denied" in error_msg:
+                return {"error": f"Windows access denied error. Try:\n• Running VS Code as administrator\n• Checking antivirus settings\n• Ensuring temp directory is writable\n\nOriginal error: {error_msg}"}
+            else:
+                return {"error": f"Repository analysis failed: {error_msg}"}
         finally:
-            # Clean up temporary directory
+            # Enhanced cleanup for Git repositories on Windows
             if os.path.exists(temp_dir):
                 try:
-                    shutil.rmtree(temp_dir)
+                    import stat
+                    import time
+                    
+                    def force_remove_readonly(func, path, exc_info):
+                        """Enhanced readonly handler for Git objects"""
+                        try:
+                            if os.path.exists(path):
+                                # Make file writable
+                                os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+                                # Try the original function again
+                                func(path)
+                        except Exception as e:
+                            print(f"⚠️ Could not remove {path}: {e}")
+                    
+                    def cleanup_git_directory(directory):
+                        """Special cleanup for Git directories"""
+                        try:
+                            # First, try to make all files in .git writable
+                            git_dir = os.path.join(directory, '.git')
+                            if os.path.exists(git_dir):
+                                for root, dirs, files in os.walk(git_dir):
+                                    for file in files:
+                                        file_path = os.path.join(root, file)
+                                        try:
+                                            os.chmod(file_path, stat.S_IWRITE | stat.S_IREAD)
+                                        except Exception:
+                                            pass
+                        except Exception:
+                            pass
+                    
+                    # Special handling for Git directories
+                    cleanup_git_directory(temp_dir)
+                    
+                    # Wait a moment for file handles to close
+                    time.sleep(0.1)
+                    
+                    # Remove the directory
+                    shutil.rmtree(temp_dir, onerror=force_remove_readonly)
+                    print(f"✅ Temporary directory cleaned up: {temp_dir}")
+                    
                 except Exception as e:
-                    print(f"Warning: Could not clean up temp directory: {e}")
+                    # Try alternative cleanup methods
+                    try:
+                        import subprocess
+                        print(f"⚠️ Standard cleanup failed, trying alternative method: {e}")
+                        
+                        if os.name == 'nt':  # Windows
+                            # Use rmdir with force options
+                            result = subprocess.run([
+                                'rmdir', '/s', '/q', temp_dir
+                            ], shell=True, capture_output=True, text=True)
+                            
+                            if result.returncode == 0:
+                                print(f"✅ Directory cleaned up using rmdir")
+                            else:
+                                # Try powershell as last resort
+                                ps_result = subprocess.run([
+                                    'powershell', '-Command', 
+                                    f'Remove-Item -Recurse -Force "{temp_dir}" -ErrorAction SilentlyContinue'
+                                ], capture_output=True, text=True)
+                                
+                                if ps_result.returncode == 0:
+                                    print(f"✅ Directory cleaned up using PowerShell")
+                                else:
+                                    print(f"⚠️ Could not fully clean temp directory: {temp_dir}")
+                        else:
+                            subprocess.run(['rm', '-rf', temp_dir], check=False)
+                            
+                    except Exception as e2:
+                        print(f"⚠️ Warning: Could not clean up temp directory {temp_dir}: {e2}")
+                        print(f"💡 You may need to manually delete: {temp_dir}")
                 
     except Exception as e:
         return {"error": f"Analysis setup failed: {str(e)}"}

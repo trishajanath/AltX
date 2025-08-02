@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { use } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Rocket, Shield, GitBranch, BrainCircuit, BarChart3, Zap, ArrowRight } from 'lucide-react';
 import PageWrapper from './PageWrapper';
+import usePreventZoom from './usePreventZoom';
 
 // --- Feature Card Component ---
 const FeatureCard = ({ icon, title, children, onClick }) => (
@@ -19,6 +20,7 @@ const FeatureCard = ({ icon, title, children, onClick }) => (
 
 // --- Home Page Component ---
 const HomePage = () => {
+    usePreventZoom();
     const navigate = useNavigate();
     
     const features = [
@@ -34,6 +36,12 @@ const HomePage = () => {
         <PageWrapper>
             <style>
                 {`
+                    .page-container {
+                        max-width: 1200px;
+                        margin: 0 auto;
+                        padding: 0 1rem;
+                    }
+
                     /* --- Hero Section --- */
                     .hero-section {
                         min-height: 100vh;
@@ -244,11 +252,11 @@ const HomePage = () => {
                             One-click GitHub deployments with real-time AI security analysis. Monitor vulnerabilities, get intelligent recommendations, and chat with our AI security advisor.
                         </p>
                         <div className="hero-actions">
-                            <button onClick={() => navigate('/deploy')} className="btn btn-primary">
-                                🚀 Deploy Project
+                            <button onClick={() => navigate('/deploy')} className="btn btn-secondary">
+                                 Deploy Project
                             </button>
                             <button onClick={() => navigate('/security')} className="btn btn-secondary">
-                                🔒 Security Scan
+                                 Security Scan
                             </button>
                         </div>
                     </section>
@@ -271,30 +279,7 @@ const HomePage = () => {
                     </section>
 
                     {/* Stats Section */}
-                    <section className="stats-section">
-                        <div className="stats-card">
-                             <h2 className="section-title">Trusted by Developers Worldwide</h2>
-                             <p className="section-subtitle">
-                                Join thousands of developers who deploy with confidence using our AI-powered security platform.
-                             </p>
-                             <div className="stats-grid">
-                                <div className="stat-item">
-                                    <div className="stat-value">10,000+</div>
-                                    <div className="stat-label">Projects Deployed</div>
-                                </div>
-                                 <div className="stat-divider"></div>
-                                <div className="stat-item">
-                                    <div className="stat-value">50,000+</div>
-                                    <div className="stat-label">Security Scans</div>
-                                </div>
-                                 <div className="stat-divider"></div>
-                                <div className="stat-item">
-                                    <div className="stat-value">99.9%</div>
-                                    <div className="stat-label">Uptime</div>
-                                </div>
-                             </div>
-                        </div>
-                    </section>
+
                 </div>
             </div>
         </PageWrapper>
