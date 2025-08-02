@@ -418,7 +418,7 @@ const RepoAnalysisPage = () => {
           {/* Example URLs */}
           <div style={{ marginTop: '12px' }}>
             <div style={{ fontSize: '12px', color: '#a1a1aa', marginBottom: '6px' }}>
-              📝 Example URLs (these will be automatically cleaned):
+                  Example URLs (these will be automatically cleaned):
             </div>
             <div style={{ fontSize: '11px', color: '#6b7280', lineHeight: '1.4' }}>
               • https://github.com/user/repo<br/>
@@ -429,7 +429,7 @@ const RepoAnalysisPage = () => {
 
           <div className="scan-options">
             <div className="option-group">
-              <label style={{ color: '#a1a1aa', marginRight: '8px' }}>AI Model:</label>
+              <label style={{ color: '#a1a1aa', marginRight: '9px'}}>AI Model:</label>
               <select 
                 value={modelType} 
                 onChange={(e) => setModelType(e.target.value)}
@@ -447,17 +447,7 @@ const RepoAnalysisPage = () => {
               </select>
             </div>
             
-            <div className="option-group">
-              <label style={{ color: '#a1a1aa', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <input
-                  type="checkbox"
-                  checked={deepScan}
-                  onChange={(e) => setDeepScan(e.target.checked)}
-                  disabled={isScanning}
-                />
-                Deep Scan (Includes secret detection & static analysis)
-              </label>
-            </div>
+
           </div>
         </div>
 

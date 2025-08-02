@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import SecurityIssueFormatter from './SecurityIssueFormatter';
 import ChatResponseFormatter from './ChatResponseFormatter';
 import PageWrapper from './PageWrapper';
 import usePreventZoom from './usePreventZoom';
 const ReportPage = ({ scanResult }) => {
   usePreventZoom();
+  const navigate = useNavigate();
   const [chatInput, setChatInput] = useState('');
   const [chatHistory, setChatHistory] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -100,19 +102,76 @@ const ReportPage = ({ scanResult }) => {
 
   if (!scanResult) {
     return (
-      <div className="page">
-        <div className="container">
-          <div className="hero">
-            <h1>Security Reports</h1>
-            <p>No scan results available. Please run a security scan or deployment first.</p>
-          </div>
-          <div style={{ textAlign: 'center', marginTop: '40px' }}>
-            <button className="btn btn-primary" onClick={() => window.location.reload()}>
-              Start New Scan
-            </button>
+      <PageWrapper>
+        <style>
+          {`      
+                    .hero-section {
+            min-height: 80vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            padding: 3rem 0;
+          }       
+          
+          .hero-content {
+            max-width: 800px;
+            margin: 0 auto;
+          }
+          
+          .hero-title {
+            font-size: 2.5rem;
+            font-weight: 900;
+            letter-spacing: -0.05em;
+            color: var(--text-light);
+            text-shadow: 0 0 15px rgba(0, 245, 195, 0.4), 0 0 30px rgba(0, 245, 195, 0.2);
+            margin-bottom: 1.5rem;
+            line-height: 1.1;
+          }  
+          .btn {
+              padding: 0.75rem 1.5rem;
+              border-radius: 0.5rem;
+              font-weight: 600;
+              font-size: 1rem;
+              cursor: pointer;
+              transition: all 0.3s ease;
+              border: none;
+              display: inline-flex;
+              align-items: center;
+              justify-content: center;
+            }
+          .btn-secondary {
+            background-color: transparent;
+            color: var(--text-light);
+            border: 1px solid var(--card-border);
+            padding: 1rem 1.5rem;
+            font-size: 1.1rem;
+          }
+          .btn-secondary:hover:not(:disabled) {
+            background-color: var(--card-bg-hover);
+            border-color: var(--card-border-hover);
+          }
+          .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+          }
+        `}
+      </style>
+        <div className="hero-section">
+          <div className="hero-content">
+            <div className="hero-title">
+              <h1>Security Reports</h1>
+              <p>No scan results available. Please run a security scan or deployment first.</p>
+            </div>
+            <div style={{ textAlign: 'center', marginTop: '40px' }}>
+              <button className="btn btn-secondary" onClick={() => navigate('/security')}>
+                Start New Scan
+              </button>
+            </div>
           </div>
         </div>
-      </div>
+      </PageWrapper>
     );
   }
 
@@ -191,7 +250,7 @@ const ReportPage = ({ scanResult }) => {
         {/* Security Issues Formatted Display */}
         {scanResult.scan_result?.flags && (
           <div className="card">
-            <h3>🔍 Security Issues Analysis</h3>
+            <h3 className="hero-title">Security Issues Analysis</h3>
             <SecurityIssueFormatter 
               issues={scanResult.scan_result.flags} 
               scanResult={scanResult.scan_result}
@@ -261,7 +320,7 @@ const ReportPage = ({ scanResult }) => {
               style={{ flex: 1 }}
             />
             <button 
-              className="btn btn-primary" 
+              className="btn btn-secondary" 
               onClick={handleChat}
               disabled={isLoading || !chatInput.trim()}
             >
