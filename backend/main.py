@@ -10,11 +10,12 @@ import tempfile
 import json
 import re
 from scanner.file_security_scanner import scan_for_sensitive_files, scan_file_contents_for_secrets
+from scanner.directory_scanner import scan_common_paths
 
 # --- Local Imports ---
 from ai_assistant import get_chat_response, RepoAnalysis
 from scanner import scan_url
-from crawler import crawl_site
+from scanner.hybrid_crawler import crawl_hybrid 
 from nlp_suggester import suggest_fixes
 import ai_assistant
 try:
@@ -267,26 +268,37 @@ def is_likely_false_positive(file_path: str, secret_type: str, match: str) -> bo
 
 # --- ENDPOINTS ---
 
+
 @app.post("/scan")
 async def scan(request: ScanRequest):
     """Scan a website for security vulnerabilities and store results for AI chat"""
     url = request.url
     
-    pages = await run_in_threadpool(crawl_site, url)
-    scan_result = await run_in_threadpool(scan_url, url)
-    suggestions = await run_in_threadpool(suggest_fixes, scan_result['headers'])
-    ai_advice = await run_in_threadpool(
-        ai_assistant.analyze_scan_with_llm,
-        scan_result["https"],
-        scan_result["flags"],
-        scan_result["headers"],
-        request.model_type
-    )
-    
-    security_level = scan_result.get("security_level", "Unknown")
-    security_score = scan_result.get("security_score", 0)
-    
-    summary = f"""🔒 **Security Scan Complete**
+    try:
+        # --- HYBRID CRAWLER INTEGRATION ---
+        # Replace the old crawler call with the new hybrid one.
+        # Since crawl_hybrid is async, we can await it directly.
+        pages = await crawl_hybrid(url)
+        
+        # The rest of the scanning proceeds as before
+        scan_result = await run_in_threadpool(scan_url, url)
+        
+        # Correctly call the async directory scanner
+        exposed_paths = await scan_common_paths(url)
+        
+        suggestions = await run_in_threadpool(suggest_fixes, scan_result['headers'])
+        ai_advice = await run_in_threadpool(
+            ai_assistant.analyze_scan_with_llm,
+            scan_result["https"],
+            scan_result["flags"],
+            scan_result["headers"],
+            request.model_type
+        )
+        
+        security_level = scan_result.get("security_level", "Unknown")
+        security_score = scan_result.get("security_score", 0)
+        
+        summary = f"""🔒 **Security Scan Complete**
 
 📊 **Scan Results Summary:**
 • Target: {url}
@@ -295,25 +307,35 @@ async def scan(request: ScanRequest):
 • Vulnerabilities: {len(scan_result["flags"])} issues found
 • Pages Crawled: {len(pages)} pages
 • Security Headers: {len(scan_result["headers"])} detected
+• Exposed Paths: {len(exposed_paths)} found
 
 🚨 **Key Issues Found:**
 {chr(10).join([f'• {flag}' for flag in scan_result["flags"][:5]]) if scan_result["flags"] else '• No critical issues detected'}
 
+🚪 **Potentially Exposed Paths:**
+{chr(10).join([f'• Found accessible path: {p["path"]}' for p in exposed_paths[:3]]) if exposed_paths else '• No common sensitive paths were found.'}
+
 💡 **Ready to help with specific security questions about this scan!**"""
-    
-    scan_response = {
-        "url": url,
-        "pages": pages,
-        "scan_result": scan_result,
-        "suggestions": suggestions,
-        "ai_assistant_advice": ai_advice,
-        "summary": summary
-    }
-    
-    # Store results for AI chat context
-    WebsiteScan.latest_scan = scan_response
-    
-    return scan_response
+        
+        scan_response = {
+            "url": url,
+            "pages": pages,
+            "scan_result": scan_result,
+            "exposed_paths": exposed_paths,
+            "suggestions": suggestions,
+            "ai_assistant_advice": ai_advice,
+            "summary": summary
+        }
+        
+        WebsiteScan.latest_scan = scan_response
+        return scan_response
+        
+    except Exception as e:
+        # Return a more structured error response
+        error_detail = f"Scan failed for {url}: {str(e)}"
+        print(f"❌ {error_detail}")
+        raise HTTPException(status_code=500, detail=error_detail)
+
 
 @app.post("/analyze-repo")
 async def analyze_repo_comprehensive(request: RepoAnalysisRequest):

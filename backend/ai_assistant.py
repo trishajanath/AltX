@@ -195,12 +195,36 @@ def get_chat_response(history: List[Dict], model_type: str = 'fast') -> str:
 **Security Findings:** {len(RepoAnalysis.latest_analysis.security_findings)} issues found
 **Recent Findings:** {', '.join(RepoAnalysis.latest_analysis.security_findings[:3])}"""
         
-        # Build conversation history
+        # Build conversation history with proper error handling
         formatted_history = [{'parts': [{'text': context}], 'role': 'model'}]
         for msg in history:
-            content = msg.get('parts', [{}])[0].get('text', '') if isinstance(msg.get('parts'), list) else msg.get('parts', {}).get('text', '')
-            role = 'user' if msg.get('type') == 'user' or msg.get('role') == 'user' else 'model'
-            formatted_history.append({'parts': [{'text': str(content)}], 'role': role})
+            try:
+                # Handle different message formats
+                if isinstance(msg.get('parts'), list):
+                    # Handle parts as list of dicts: [{"text": "content"}]
+                    if len(msg['parts']) > 0 and isinstance(msg['parts'][0], dict):
+                        content = msg['parts'][0].get('text', '')
+                    # Handle parts as list with string: ["content"]
+                    elif len(msg['parts']) > 0 and isinstance(msg['parts'][0], str):
+                        content = msg['parts'][0]
+                    else:
+                        content = str(msg.get('parts', ''))
+                elif isinstance(msg.get('parts'), dict):
+                    # Handle parts as single dict: {"text": "content"}
+                    content = msg['parts'].get('text', '')
+                elif isinstance(msg.get('parts'), str):
+                    # Handle parts as string: "content"
+                    content = msg['parts']
+                else:
+                    # Fallback: try to get message content from other fields
+                    content = msg.get('message', msg.get('content', str(msg.get('parts', ''))))
+                
+                role = 'user' if msg.get('type') == 'user' or msg.get('role') == 'user' else 'model'
+                formatted_history.append({'parts': [{'text': str(content)}], 'role': role})
+            except Exception as e:
+                print(f"Warning: Error processing message in history: {e}")
+                # Skip malformed messages
+                continue
 
         # Use selected model for response
         chat = model.start_chat(history=formatted_history[:-1])
@@ -219,7 +243,6 @@ def get_chat_response(history: List[Dict], model_type: str = 'fast') -> str:
         
     except Exception as e:
         return f"❌ **Chat Error ({model_type} model):** {str(e)}"
-
 # --- Main Analysis Function ---
 def analyze_github_repo(repo_url: str, model_type: str = 'smart') -> str:
     """Analyze GitHub repository with model selection"""
@@ -371,7 +394,7 @@ Simple recommendations for improving security.
 • Use simple, clear language
 """
         
-        history = [{"type": "user", "parts": [security_prompt]}]
+        history = [{"type": "user", "parts": [{"text": security_prompt}]}]
         return get_chat_response(history, model_type)
 
     except Exception as e:
