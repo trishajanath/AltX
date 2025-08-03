@@ -72,7 +72,10 @@ async def scan(request: ScanRequest):
         scan_result = await run_in_threadpool(scan_url, url)
         
         # Correctly call the async directory scanner
-        exposed_paths = await scan_common_paths(url)
+        scan_data = await scan_common_paths(url)
+        exposed_paths = scan_data['accessible_paths']
+        waf_info = scan_data['waf_analysis']
+        dns_security = scan_data['dns_security']        
         
         suggestions = await run_in_threadpool(suggest_fixes, scan_result['headers'])
         ai_advice = await run_in_threadpool(
@@ -92,14 +95,25 @@ async def scan(request: ScanRequest):
         # Enhanced summary with SSL certificate information (using imported function)
         summary = f"""🔒 **Security Scan Complete**
 
-📊 **Integrated Security Assessment:**
-• Target: {url}
+📊 **Target Analysis:**
+• Domain: {scan_data['scan_summary']['domain']}
 • Overall Security Score: {security_score}/100 ({security_level})
 • HTTPS: {'✅ Enabled' if scan_result["https"] else '❌ Disabled'}
 • Vulnerabilities: {len(scan_result["flags"])} issues found
 • Pages Crawled: {len(pages)} pages
 • Security Headers: {len(scan_result["headers"])} detected
 • Exposed Paths: {len(exposed_paths)} found
+
+🛡️ **Web Application Firewall (WAF):**
+• WAF Detected: {'✅ Yes' if waf_info['waf_detected'] else '❌ No'}
+• WAF Type: {waf_info.get('waf_type', 'None detected')}
+• Protection Level: {waf_info.get('protection_level', 'Unknown')}
+• Blocked Requests: {waf_info.get('blocked_requests', 0)}/{waf_info.get('total_requests', 0)}
+
+🔐 **DNS Security Features:**
+• DNSSEC: {'✅ Enabled' if dns_security['dnssec'].get('enabled') else '❌ Disabled'} - {dns_security['dnssec'].get('status', 'Unknown')}
+• DMARC: {'✅ Enabled' if dns_security['dmarc'].get('enabled') else '❌ Not configured'} - {dns_security['dmarc'].get('policy', 'No policy')}
+• DKIM: {'✅ Found' if dns_security['dkim'].get('selectors_found') else '❌ Not found'} - {len(dns_security['dkim'].get('selectors_found', []))} selectors
 
 🔐 **SSL/TLS Security Analysis:**
 {_format_ssl_analysis(ssl_certificate)}
@@ -117,6 +131,8 @@ async def scan(request: ScanRequest):
             "pages": pages,
             "scan_result": scan_result,
             "exposed_paths": exposed_paths,
+            "waf_analysis": waf_info,          # NEW: WAF detection results
+            "dns_security": dns_security,      # NEW: DNSSEC, DMARC, DKIM results
             "suggestions": suggestions,
             "ai_assistant_advice": ai_advice,
             "summary": summary
@@ -587,11 +603,24 @@ STATIC ANALYSIS: {len(analysis_data.get('static_analysis_results', []))} issues 
 • Vulnerabilities: {len(scan_data.get('flags', []))} issues found
 • Security Headers: {len(scan_data.get('headers', {}))} detected
 
+🛡️ **WAF ANALYSIS:**
+• WAF Detected: {'✅ Yes' if website_data.get('waf_analysis', {}).get('waf_detected') else '❌ No'}
+• WAF Type: {website_data.get('waf_analysis', {}).get('waf_type', 'None detected')}
+• Protection Level: {website_data.get('waf_analysis', {}).get('protection_level', 'Unknown')}
+
+🔐 **DNS SECURITY:**
+• DNSSEC: {'✅ Enabled' if website_data.get('dns_security', {}).get('dnssec', {}).get('enabled') else '❌ Disabled'}
+• DMARC: {'✅ Enabled' if website_data.get('dns_security', {}).get('dmarc', {}).get('enabled') else '❌ Not configured'}
+• DKIM: {'✅ Found' if website_data.get('dns_security', {}).get('dkim', {}).get('selectors_found') else '❌ Not found'}
+
 🚨 **SECURITY ISSUES:**
 {chr(10).join([f'• {flag}' for flag in scan_data.get('flags', [])]) if scan_data.get('flags') else '• No critical issues detected'}
 
 🔒 **SECURITY HEADERS:**
 {chr(10).join([f'• {header}: {value}' for header, value in scan_data.get('headers', {}).items()]) if scan_data.get('headers') else '• No security headers detected'}
+
+🚪 **EXPOSED PATHS:**
+{chr(10).join([f'• {p["path"]} (Status: {p["status_code"]})' for p in website_data.get('exposed_paths', [])[:5]]) if website_data else '• No exposed paths found'}
 
 📄 **PAGES CRAWLED:**
 {chr(10).join([f'• {page}' for page in website_data.get('pages', [])[:5]]) if website_data else '• No pages data'}
