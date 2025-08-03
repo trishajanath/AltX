@@ -14,7 +14,13 @@ from scanner.directory_scanner import scan_common_paths
 
 # --- Local Imports ---
 from ai_assistant import get_chat_response, RepoAnalysis
-from scanner import scan_url
+from scanner.file_scanner import (
+    scan_url, 
+    _format_ssl_analysis,
+    scan_dependencies,
+    scan_code_quality_patterns,
+    is_likely_false_positive
+)
 from scanner.hybrid_crawler import crawl_hybrid 
 from nlp_suggester import suggest_fixes
 import ai_assistant
@@ -42,7 +48,6 @@ app.add_middleware(
 class WebsiteScan:
     latest_scan = None
 
-# --- Request Models ---
 class ScanRequest(BaseModel):
     url: str
     model_type: str = 'fast'
@@ -52,223 +57,8 @@ class RepoAnalysisRequest(BaseModel):
     model_type: str = 'smart'
     deep_scan: bool = True
 
+
 # --- Enhanced Security Analysis Functions ---
-def scan_dependencies(directory_path: str) -> Dict:
-    """Scan for vulnerable dependencies in package files"""
-    
-    vulnerable_patterns = {
-        'package.json': {
-            'lodash': {'versions': ['<4.17.19'], 'severity': 'High'},
-            'axios': {'versions': ['<0.21.1'], 'severity': 'Critical'},
-            'jquery': {'versions': ['<3.5.0'], 'severity': 'Medium'},
-            'express': {'versions': ['<4.17.1'], 'severity': 'High'},
-            'react': {'versions': ['<16.13.0'], 'severity': 'Medium'},
-            'angular': {'versions': ['<10.0.0'], 'severity': 'Medium'},
-        },
-        'requirements.txt': {
-            'django': {'versions': ['<2.2.13'], 'severity': 'Critical'},
-            'flask': {'versions': ['<1.1.0'], 'severity': 'High'},
-            'requests': {'versions': ['<2.20.0'], 'severity': 'Medium'},
-            'pillow': {'versions': ['<6.2.0'], 'severity': 'High'},
-            'urllib3': {'versions': ['<1.24.2'], 'severity': 'High'},
-            'pyyaml': {'versions': ['<5.1'], 'severity': 'Critical'},
-        }
-    }
-    
-    findings = {
-        'dependency_files_found': [],
-        'vulnerable_packages': [],
-        'total_dependencies': 0,
-        'security_advisory_count': 0
-    }
-    
-    try:
-        for root, dirs, files in os.walk(directory_path):
-            if '.git' in root:
-                continue
-                
-            for file in files:
-                if file in vulnerable_patterns:
-                    file_path = os.path.join(root, file)
-                    relative_path = os.path.relpath(file_path, directory_path)
-                    
-                    findings['dependency_files_found'].append({
-                        'file': relative_path,
-                        'type': file
-                    })
-                    
-                    # Analyze dependencies
-                    try:
-                        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                            content = f.read()
-                            
-                            if file == 'package.json':
-                                data = json.loads(content)
-                                deps = {**data.get('dependencies', {}), **data.get('devDependencies', {})}
-                                findings['total_dependencies'] += len(deps)
-                                
-                                for pkg_name, version in deps.items():
-                                    if pkg_name in vulnerable_patterns[file]:
-                                        findings['vulnerable_packages'].append({
-                                            'package': pkg_name,
-                                            'current_version': version,
-                                            'file': relative_path,
-                                            'severity': vulnerable_patterns[file][pkg_name]['severity'],
-                                            'advisory': f"Update {pkg_name} to latest version"
-                                        })
-                                        
-                            elif file == 'requirements.txt':
-                                lines = [l.strip() for l in content.split('\n') if l.strip() and not l.startswith('#')]
-                                findings['total_dependencies'] += len(lines)
-                                
-                                for line in lines:
-                                    pkg_name = line.split('==')[0].split('>=')[0].split('<=')[0].strip()
-                                    if pkg_name in vulnerable_patterns[file]:
-                                        findings['vulnerable_packages'].append({
-                                            'package': pkg_name,
-                                            'current_version': line,
-                                            'file': relative_path,
-                                            'severity': vulnerable_patterns[file][pkg_name]['severity'],
-                                            'advisory': f"Update {pkg_name} to latest version"
-                                        })
-                    except Exception as e:
-                        pass
-        
-        findings['security_advisory_count'] = len(findings['vulnerable_packages'])
-        return findings
-        
-    except Exception as e:
-        return {
-            'error': f"Error scanning dependencies: {str(e)}",
-            'dependency_files_found': [],
-            'vulnerable_packages': [],
-            'total_dependencies': 0,
-            'security_advisory_count': 0
-        }
-
-def scan_code_quality_patterns(directory_path: str) -> List[Dict]:
-    """Scan for insecure coding patterns across multiple languages"""
-    
-    patterns = {
-        'python': {
-            'eval_usage': {'pattern': r'eval\s*\(', 'severity': 'Critical', 'description': 'Use of eval() can lead to code injection'},
-            'exec_usage': {'pattern': r'exec\s*\(', 'severity': 'Critical', 'description': 'Use of exec() can lead to code injection'},
-            'shell_injection': {'pattern': r'os\.system\s*\(', 'severity': 'High', 'description': 'Potential shell injection vulnerability'},
-            'sql_injection': {'pattern': r'cursor\.execute\s*\(\s*["\'].*%.*["\']', 'severity': 'Critical', 'description': 'Potential SQL injection vulnerability'},
-            'pickle_usage': {'pattern': r'pickle\.loads?\s*\(', 'severity': 'High', 'description': 'Unsafe deserialization with pickle'},
-            'subprocess_shell': {'pattern': r'subprocess\.\w+\(.*shell=True', 'severity': 'High', 'description': 'Subprocess with shell=True can be dangerous'},
-            'input_function': {'pattern': r'\binput\s*\(', 'severity': 'Medium', 'description': 'input() function can be vulnerable in Python 2'},
-        },
-        'javascript': {
-            'eval_usage': {'pattern': r'eval\s*\(', 'severity': 'Critical', 'description': 'Use of eval() can lead to code injection'},
-            'document_write': {'pattern': r'document\.write\s*\(', 'severity': 'Medium', 'description': 'document.write can lead to XSS'},
-            'inner_html': {'pattern': r'innerHTML\s*=', 'severity': 'Medium', 'description': 'innerHTML assignment can lead to XSS'},
-            'local_storage': {'pattern': r'localStorage\.setItem', 'severity': 'Low', 'description': 'Sensitive data in localStorage'},
-            'console_log': {'pattern': r'console\.log\s*\(', 'severity': 'Low', 'description': 'Remove console.log in production'},
-            'function_constructor': {'pattern': r'new\s+Function\s*\(', 'severity': 'High', 'description': 'Function constructor can lead to code injection'},
-            'settimeout_string': {'pattern': r'setTimeout\s*\(\s*["\']', 'severity': 'High', 'description': 'setTimeout with string argument can lead to code injection'},
-        }
-    }
-    
-    findings = []
-    
-    try:
-        for root, dirs, files in os.walk(directory_path):
-            if '.git' in root:
-                continue
-                
-            for file in files:
-                file_path = os.path.join(root, file)
-                relative_path = os.path.relpath(file_path, directory_path)
-                
-                # Determine file type
-                lang = None
-                if file.endswith('.py'):
-                    lang = 'python'
-                elif file.endswith(('.js', '.jsx', '.ts', '.tsx')):
-                    lang = 'javascript'
-                
-                if lang and lang in patterns:
-                    try:
-                        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                            content = f.read()
-                            
-                            for pattern_name, pattern_info in patterns[lang].items():
-                                matches = list(re.finditer(pattern_info['pattern'], content, re.IGNORECASE))
-                                
-                                for match in matches:
-                                    line_num = content[:match.start()].count('\n') + 1
-                                    findings.append({
-                                        'file': relative_path,
-                                        'line': line_num,
-                                        'pattern': pattern_name,
-                                        'severity': pattern_info['severity'],
-                                        'description': pattern_info['description'],
-                                        'code_snippet': match.group()[:100],
-                                        'language': lang
-                                    })
-                    except Exception:
-                        pass
-        
-        return findings
-        
-    except Exception as e:
-        return [{"error": f"Error scanning code quality: {str(e)}"}]
-
-def is_likely_false_positive(file_path: str, secret_type: str, match: str) -> bool:
-    """Enhanced general-purpose false positive filter"""
-    
-    # Package management files (contains hashes, not secrets)
-    package_files = ['package-lock.json', 'yarn.lock', 'composer.lock', 'Pipfile.lock', 'poetry.lock']
-    if any(pkg_file in file_path.lower() for pkg_file in package_files):
-        if secret_type in ['aws_secret_key', 'aws_access_key']:
-            return True
-    
-    # Build/dist/cache directories
-    if any(dir_name in file_path.lower() for dir_name in ['node_modules', 'dist/', 'build/', '.cache/', 'vendor/']):
-        return True
-    
-    # Data/configuration files (often contain encoded data)
-    data_extensions = ['.json', '.xml', '.csv', '.log', '.dump', '.backup']
-    data_keywords = ['data', 'config', 'settings', 'cache', 'temp', 'log', 'backup', 'dump']
-    
-    file_lower = file_path.lower()
-    if (any(ext in file_lower for ext in data_extensions) and 
-        any(keyword in file_lower for keyword in data_keywords)):
-        if secret_type in ['aws_secret_key', 'aws_access_key']:
-            return True
-    
-    # Base64 encoded data (universal pattern)
-    if secret_type in ['aws_secret_key'] and len(match) >= 20:
-        # Base64 characteristics: contains +, /, = and high alphanumeric ratio
-        has_base64_chars = any(char in match for char in ['+', '/', '='])
-        alphanumeric_ratio = sum(c.isalnum() for c in match) / len(match)
-        
-        if has_base64_chars or alphanumeric_ratio > 0.9:
-            return True
-    
-    # Non-AWS patterns (anything that doesn't look like real AWS credentials)
-    if secret_type in ['aws_secret_key']:
-        # Real AWS access keys start with 'AKIA'
-        # Real AWS secret keys are 40 chars, mixed case, no special pattern
-        if not match.startswith('AKIA') and len(match) == 40:
-            # If it has patterns typical of encoded data, it's likely a false positive
-            return True
-    
-    # Test/demo/example patterns
-    test_indicators = ['test', 'demo', 'example', 'sample', 'mock', 'fake', 'dummy', 'placeholder']
-    if any(indicator in match.lower() or indicator in file_path.lower() for indicator in test_indicators):
-        return True
-    
-    # Very short matches
-    if len(match.strip()) < 20:
-        return True
-    
-    return False
-
-# --- ENDPOINTS ---
-
-
 @app.post("/scan")
 async def scan(request: ScanRequest):
     """Scan a website for security vulnerabilities and store results for AI chat"""
@@ -276,11 +66,9 @@ async def scan(request: ScanRequest):
     
     try:
         # --- HYBRID CRAWLER INTEGRATION ---
-        # Replace the old crawler call with the new hybrid one.
-        # Since crawl_hybrid is async, we can await it directly.
         pages = await crawl_hybrid(url)
         
-        # The rest of the scanning proceeds as before
+        # Enhanced scanning with SSL certificate analysis
         scan_result = await run_in_threadpool(scan_url, url)
         
         # Correctly call the async directory scanner
@@ -298,16 +86,23 @@ async def scan(request: ScanRequest):
         security_level = scan_result.get("security_level", "Unknown")
         security_score = scan_result.get("security_score", 0)
         
+        # Extract SSL analysis data
+        ssl_certificate = scan_result.get("ssl_certificate", {})
+        
+        # Enhanced summary with SSL certificate information (using imported function)
         summary = f"""🔒 **Security Scan Complete**
 
-📊 **Scan Results Summary:**
+📊 **Integrated Security Assessment:**
 • Target: {url}
-• Security Score: {security_score}/100 ({security_level})
+• Overall Security Score: {security_score}/100 ({security_level})
 • HTTPS: {'✅ Enabled' if scan_result["https"] else '❌ Disabled'}
 • Vulnerabilities: {len(scan_result["flags"])} issues found
 • Pages Crawled: {len(pages)} pages
 • Security Headers: {len(scan_result["headers"])} detected
 • Exposed Paths: {len(exposed_paths)} found
+
+🔐 **SSL/TLS Security Analysis:**
+{_format_ssl_analysis(ssl_certificate)}
 
 🚨 **Key Issues Found:**
 {chr(10).join([f'• {flag}' for flag in scan_result["flags"][:5]]) if scan_result["flags"] else '• No critical issues detected'}
@@ -321,6 +116,7 @@ async def scan(request: ScanRequest):
             "url": url,
             "pages": pages,
             "scan_result": scan_result,
+            "ssl_details": ssl_certificate,  # SSL details for reference
             "exposed_paths": exposed_paths,
             "suggestions": suggestions,
             "ai_assistant_advice": ai_advice,
@@ -331,7 +127,6 @@ async def scan(request: ScanRequest):
         return scan_response
         
     except Exception as e:
-        # Return a more structured error response
         error_detail = f"Scan failed for {url}: {str(e)}"
         print(f"❌ {error_detail}")
         raise HTTPException(status_code=500, detail=error_detail)
