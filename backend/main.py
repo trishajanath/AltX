@@ -11,6 +11,9 @@ import json
 import re
 from scanner.file_security_scanner import scan_for_sensitive_files, scan_file_contents_for_secrets
 from scanner.directory_scanner import scan_common_paths
+from owasp_mapper import map_to_owasp_top10
+from datetime import datetime 
+import time
 
 # --- Local Imports ---
 from ai_assistant import get_chat_response, RepoAnalysis
@@ -56,6 +59,11 @@ class RepoAnalysisRequest(BaseModel):
     repo_url: str
     model_type: str = 'smart'
     deep_scan: bool = True
+
+class OWASPMappingRequest(BaseModel):
+    url: str
+    repo_url: Optional[str] = None
+    model_type: str = "fast"
 
 
 # --- Enhanced Security Analysis Functions ---
@@ -675,7 +683,53 @@ To get specific analysis, please run:
             "scan_data_available": False,
             "history": []
         }
-
+@app.post("/owasp-mapping")
+async def owasp_mapping():
+    """
+    Map detected security issues to OWASP Top 10 categories
+    Uses the latest scan and repo analysis results automatically
+    """
+    try:
+        # Get the latest scan results from stored data
+        scan_results = None
+        if hasattr(WebsiteScan, 'latest_scan') and WebsiteScan.latest_scan:
+            scan_results = WebsiteScan.latest_scan
+        
+        # Get the latest repository results from stored data
+        repo_results = None
+        if hasattr(RepoAnalysis, 'latest_analysis') and RepoAnalysis.latest_analysis:
+            repo_results = RepoAnalysis.latest_analysis
+        
+        # Check if we have any data to analyze
+        if not scan_results and not repo_results:
+            return {
+                "success": False,
+                "error": "No scan results available. Please run /scan or /analyze-repo first.",
+                "owasp_mapping": None,
+                "metadata": {
+                    "scan_available": False,
+                    "repo_available": False,
+                    "timestamp": datetime.now().isoformat()
+                }
+            }
+        
+        # Map to OWASP Top 10
+        owasp_mapping = map_to_owasp_top10(scan_results, repo_results)
+        
+        return {
+            "success": True,
+            "owasp_mapping": owasp_mapping,
+            "metadata": {
+                "scan_available": scan_results is not None,
+                "repo_available": repo_results is not None,
+                "scan_url": scan_results.get('url') if scan_results else None,
+                "repo_name": repo_results.get('repository_info', {}).get('name') if repo_results else None,
+                "timestamp": datetime.now().isoformat()
+            }
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"OWASP mapping failed: {str(e)}")
 @app.get("/health")
 async def health_check():
     """Check if the API is running"""
