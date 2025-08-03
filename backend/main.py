@@ -116,7 +116,6 @@ async def scan(request: ScanRequest):
             "url": url,
             "pages": pages,
             "scan_result": scan_result,
-            "ssl_details": ssl_certificate,  # SSL details for reference
             "exposed_paths": exposed_paths,
             "suggestions": suggestions,
             "ai_assistant_advice": ai_advice,

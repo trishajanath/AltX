@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import SecurityIssueFormatter from './SecurityIssueFormatter';
 import ChatResponseFormatter from './ChatResponseFormatter';
@@ -10,6 +10,17 @@ const ReportPage = ({ scanResult }) => {
   const [chatInput, setChatInput] = useState('');
   const [chatHistory, setChatHistory] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
+
+  // Initialize chat with AI analysis if available
+  useEffect(() => {
+    if (scanResult?.ai_assistant_advice && chatHistory.length === 0) {
+      setChatHistory([{
+        type: 'ai',
+        message: `🔍 **Initial Security Analysis**\n\n${scanResult.ai_assistant_advice}\n\n💬 Feel free to ask me any questions about your security scan results!`,
+        timestamp: new Date()
+      }]);
+    }
+  }, [scanResult, chatHistory.length]);
 
   const handleChat = async () => {
     if (!chatInput.trim()) return;
@@ -157,7 +168,7 @@ const ReportPage = ({ scanResult }) => {
             cursor: not-allowed;
           }
         `}
-      </style>
+        </style>
         <div className="hero-section">
           <div className="hero-content">
             <div className="hero-title">
@@ -177,208 +188,372 @@ const ReportPage = ({ scanResult }) => {
 
   return (
     <PageWrapper>
+      <style>
+          {`      
+          .report-page {
+            padding: 2rem 0;
+            min-height: 100vh;
+          }
+          
+          .report-hero {
+            text-align: center;
+            margin-bottom: 2rem;
+            padding: 1rem 0;
+          }
+          
+          .report-hero h1 {
+            font-size: 2rem;
+            font-weight: 900;
+            letter-spacing: -0.05em;
+            color: var(--text-light);
+            text-shadow: 0 0 15px rgba(0, 245, 195, 0.4), 0 0 30px rgba(0, 245, 195, 0.2);
+            margin-bottom: 0.5rem;
+            line-height: 1.1;
+          }
+          
+          .report-hero p {
+            font-size: 1rem;
+            color: var(--text-dark);
+            margin: 0;
+          }
+          
+          .report-layout {
+            display: grid;
+            grid-template-columns: 1fr 500px;
+            gap: 2rem;
+            max-width: 1500px;
+            margin: 0 auto;
+          }
+          
+          .report-main {
+            min-height: 0;
+          }
+          
+          .report-sidebar {
+            position: sticky;
+            top: 2rem;
+            height: fit-content;
+          }
+          
+          @media (max-width: 1200px) {
+            .report-layout {
+              grid-template-columns: 1fr;
+              gap: 2rem;
+            }
+            
+            .report-sidebar {
+              position: static;
+            }
+          }
+          
+          .card {
+            background: var(--card-bg);
+            backdrop-filter: blur(8px);
+            border: 1px solid var(--card-border);
+            border-radius: 1rem;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            transition: all 0.3s ease;
+          }
+          
+          .card:hover {
+            border-color: var(--card-border-hover);
+            background-color: var(--card-bg-hover);
+            transform: translateY(-0.25rem);
+          }
+          
+          .card h3 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--text-light);
+            margin: 0 0 1.5rem 0;
+          }
+          
+          .btn {
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            font-weight: 600;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+          }
+          
+          .btn-secondary {
+            background-color: transparent;
+            color: var(--text-light);
+            border: 1px solid var(--card-border);
+          }
+          
+          .btn-secondary:hover:not(:disabled) {
+            background-color: var(--card-bg-hover);
+            border-color: var(--card-border-hover);
+          }
+          
+          .btn-ghost {
+            background-color: rgba(0, 0, 0, 0.4);
+            color: var(--text-light);
+            border: 1px solid rgba(0, 245, 195, 0.2);
+            backdrop-filter: blur(4px);
+          }
+          
+          .btn-ghost:hover {
+            background-color: rgba(0, 245, 195, 0.1);
+            border-color: rgba(0, 245, 195, 0.4);
+            color: var(--primary-green);
+          }
+          
+          .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+          }
+          
+          .input {
+            background-color: var(--card-bg);
+            border: 1px solid var(--card-border);
+            color: var(--text-light);
+            border-radius: 0.5rem;
+            padding: 0.75rem 1rem;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(4px);
+          }
+          
+          .input:focus {
+            border-color: var(--primary-green);
+            box-shadow: 0 0 0 3px rgba(0, 245, 195, 0.1);
+            outline: none;
+          }
+          
+          .input::placeholder {
+            color: var(--text-dark);
+          }
+        `}
+      </style>
+      
       <div className="page-container">
         <div className="content-wrapper">
-          <div className="hero">
-            <h1>Security Report</h1>
-            <p>Comprehensive analysis for {scanResult.url || scanResult.deploymentUrl}</p>
-          </div>
+          <div className="report-page">
+            <div className="report-hero">
+              <h1>Security Report</h1>
+              <p>Comprehensive analysis for {scanResult.url || scanResult.deploymentUrl}</p>
+            </div>
 
-        <div className="card">
-          <h3>Security Overview</h3>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px' }}>
-            <div style={{ 
-              background: 'rgba(0, 212, 255, 0.1)', 
-              border: '1px solid rgba(0, 212, 255, 0.2)',
-              borderRadius: '8px',
-              padding: '20px',
-              textAlign: 'center'
-            }}>
-              <div style={{ fontSize: '28px', fontWeight: '700', color: '#00d4ff' }}>
-                {scanResult.security_score || scanResult.scan_result?.security_score || 'N/A'}
+            <div className="report-layout">
+              <div className="report-main">
+                <div className="card">
+                  <h3>Security Overview</h3>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px' }}>
+                    <div style={{ 
+                      background: 'rgba(0, 212, 255, 0.1)', 
+                      border: '1px solid rgba(0, 212, 255, 0.2)',
+                      borderRadius: '8px',
+                      padding: '20px',
+                      textAlign: 'center'
+                    }}>
+                      <div style={{ fontSize: '28px', fontWeight: '700', color: '#00d4ff' }}>
+                        {scanResult.security_score || scanResult.scan_result?.security_score || 'N/A'}
+                      </div>
+                      <div style={{ color: '#a1a1aa' }}>Security Score</div>
+                    </div>
+                    
+                    <div style={{ 
+                      background: 'rgba(34, 197, 94, 0.1)', 
+                      border: '1px solid rgba(34, 197, 94, 0.2)',
+                      borderRadius: '8px',
+                      padding: '20px',
+                      textAlign: 'center'
+                    }}>
+                      <div style={{ fontSize: '28px', fontWeight: '700', color: '#22c55e' }}>
+                        {scanResult.scan_result?.https ? '✓' : '✗'}
+                      </div>
+                      <div style={{ color: '#a1a1aa' }}>HTTPS Status</div>
+                    </div>
+
+                    <div style={{ 
+                      background: 'rgba(147, 51, 234, 0.1)', 
+                      border: '1px solid rgba(147, 51, 234, 0.2)',
+                      borderRadius: '8px',
+                      padding: '20px',
+                      textAlign: 'center'
+                    }}>
+                      <div style={{ fontSize: '28px', fontWeight: '700', color: '#9333ea' }}>
+                        {scanResult.scan_result?.ssl_certificate?.valid ? '✅' : 
+                         scanResult.scan_result?.https ? '⚠️' : '❌'}
+                      </div>
+                      <div style={{ color: '#a1a1aa' }}>SSL Certificate</div>
+                      {scanResult.scan_result?.ssl_certificate?.certificate_details && (
+                        <div style={{ fontSize: '12px', color: '#a1a1aa', marginTop: '8px' }}>
+                          {scanResult.scan_result.ssl_certificate.certificate_details.days_until_expiry !== undefined && (
+                            <div>
+                              {scanResult.scan_result.ssl_certificate.certificate_details.days_until_expiry > 0 
+                                ? `${scanResult.scan_result.ssl_certificate.certificate_details.days_until_expiry} days left`
+                                : 'Expired'
+                              }
+                            </div>
+                          )}
+                          {scanResult.scan_result.ssl_certificate.cipher_info?.bits && (
+                            <div>{scanResult.scan_result.ssl_certificate.cipher_info.bits}-bit encryption</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* AI Summary Section */}
+                {(scanResult.summary || scanResult.ai_assistant_advice) && (
+                  <div className="card">
+                    <h3>🤖 AI Security Analysis Summary</h3>
+                    <div style={{ 
+                      background: 'rgba(0, 245, 195, 0.05)', 
+                      border: '1px solid rgba(0, 245, 195, 0.1)',
+                      borderRadius: '8px',
+                      padding: '20px',
+                      marginTop: '16px'
+                    }}>
+                      <ChatResponseFormatter 
+                        message={scanResult.summary || scanResult.ai_assistant_advice}
+                        type="ai"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Security Issues Formatted Display */}
+                {scanResult.scan_result?.flags && (
+                  <div className="card">
+                    <h3>Security Issues Analysis</h3>
+                    <SecurityIssueFormatter 
+                      issues={scanResult.scan_result.flags} 
+                      scanResult={scanResult.scan_result}
+                    />
+                  </div>
+                )}
               </div>
-              <div style={{ color: '#a1a1aa' }}>Security Score</div>
-            </div>
-            
-            <div style={{ 
-              background: 'rgba(34, 197, 94, 0.1)', 
-              border: '1px solid rgba(34, 197, 94, 0.2)',
-              borderRadius: '8px',
-              padding: '20px',
-              textAlign: 'center'
-            }}>
-              <div style={{ fontSize: '28px', fontWeight: '700', color: '#22c55e' }}>
-                {scanResult.scan_result?.https ? '✓' : '✗'}
+
+              <div className="report-sidebar">
+                <div className="card">
+                  <h3>AI Security Advisor</h3>
+
+                  <div style={{ 
+                    background: 'rgba(0, 0, 0, 0.3)', 
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    borderRadius: '8px',
+                    padding: '20px',
+                    height: '400px',
+                    overflowY: 'auto',
+                    marginBottom: '20px'
+                  }}>
+                    {chatHistory.length === 0 ? (
+                      <div style={{ 
+                        color: '#a1a1aa', 
+                        fontStyle: 'italic',
+                        textAlign: 'center',
+                        padding: '50px 20px',
+                        fontSize: '16px',
+                        lineHeight: '1.5'
+                      }}>
+                        💬 Ask me anything about your security scan results...
+                        <br />
+                        <span style={{ fontSize: '14px', opacity: '0.8' }}>
+                          I can help explain vulnerabilities, suggest fixes, or provide detailed analysis.
+                        </span>
+                      </div>
+                    ) : (
+                      chatHistory.map((chat, index) => (
+                        <div key={index} style={{ marginBottom: '20px', fontSize: '15px', lineHeight: '1.5' }}>
+                          <ChatResponseFormatter 
+                            message={chat.message}
+                            type={chat.type}
+                          />
+                        </div>
+                      ))
+                    )}
+                    {isLoading && (
+                      <div style={{ color: '#a1a1aa', fontStyle: 'italic', fontSize: '15px' }}>
+                        🤖 AI is analyzing...
+                      </div>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
+                    <input
+                      type="text"
+                      className="input"
+                      placeholder="Ask about security issues, vulnerabilities, or how to improve..."
+                      value={chatInput}
+                      onChange={(e) => setChatInput(e.target.value)}
+                      onKeyPress={(e) => e.key === 'Enter' && handleChat()}
+                      disabled={isLoading}
+                      style={{ flex: 1, fontSize: '15px', padding: '12px 15px', height: '48px' }}
+                    />
+                    <button 
+                      className="btn btn-secondary" 
+                      onClick={handleChat}
+                      disabled={isLoading || !chatInput.trim()}
+                      style={{ fontSize: '14px', padding: '12px 20px', height: '48px' }}
+                    >
+                      Send
+                    </button>
+                  </div>
+
+                  {/* Quick Action Buttons */}
+                  <div>
+                    <div style={{ fontSize: '14px', color: '#a1a1aa', marginBottom: '12px', fontWeight: '500' }}>
+                      Quick actions:
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                      {(scanResult.summary || scanResult.ai_assistant_advice) && (
+                        <button
+                          className="btn btn-ghost"
+                          style={{ fontSize: '13px', padding: '10px 12px' }}
+                          onClick={() => {
+                            setChatInput('Summarize the analysis');
+                            setTimeout(() => handleChat(), 100);
+                          }}
+                        >
+                          📋 Summary
+                        </button>
+                      )}
+                      <button
+                        className="btn btn-ghost"
+                        style={{ fontSize: '13px', padding: '10px 12px' }}
+                        onClick={() => {
+                          setChatInput('What are the main vulnerabilities?');
+                          setTimeout(() => handleChat(), 100);
+                        }}
+                      >
+                        🔍 Issues
+                      </button>
+                      <button
+                        className="btn btn-ghost"
+                        style={{ fontSize: '11px', padding: '6px 8px' }}
+                        onClick={() => {
+                          setChatInput('How can I improve my security score?');
+                          setTimeout(() => handleChat(), 100);
+                        }}
+                      >
+                        🛠️ Fix
+                      </button>
+                      <button
+                        className="btn btn-ghost"
+                        style={{ fontSize: '13px', padding: '10px 12px' }}
+                        onClick={() => {
+                          setChatInput('Explain my security score');
+                          setTimeout(() => handleChat(), 100);
+                        }}
+                      >
+                        📊 Score
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
-              <div style={{ color: '#a1a1aa' }}>HTTPS Status</div>
-            </div>
-
-            <div style={{ 
-              background: 'rgba(147, 51, 234, 0.1)', 
-              border: '1px solid rgba(147, 51, 234, 0.2)',
-              borderRadius: '8px',
-              padding: '20px',
-              textAlign: 'center'
-            }}>
-              <div style={{ fontSize: '28px', fontWeight: '700', color: '#9333ea' }}>
-                {scanResult.scan_result?.ssl_valid ? '✓' : '✗'}
-              </div>
-              <div style={{ color: '#a1a1aa' }}>SSL Certificate</div>
             </div>
           </div>
-        </div>
-
-        {/* AI Summary Section */}
-        {(scanResult.summary || scanResult.ai_assistant_advice) && (
-          <div className="card">
-            <h3>🤖 AI Security Analysis Summary</h3>
-            <div style={{ 
-              background: 'rgba(0, 245, 195, 0.05)', 
-              border: '1px solid rgba(0, 245, 195, 0.1)',
-              borderRadius: '8px',
-              padding: '20px',
-              marginTop: '16px'
-            }}>
-              <ChatResponseFormatter 
-                message={scanResult.summary || scanResult.ai_assistant_advice}
-                type="ai"
-              />
-            </div>
-          </div>
-        )}
-
-        {/* Security Issues Formatted Display */}
-        {scanResult.scan_result?.flags && (
-          <div className="card">
-            <h3 className="hero-title">Security Issues Analysis</h3>
-            <SecurityIssueFormatter 
-              issues={scanResult.scan_result.flags} 
-              scanResult={scanResult.scan_result}
-            />
-          </div>
-        )}
-
-        <div className="card">
-          <h3>AI Security Advisor</h3>
-          
-          {scanResult.ai_assistant_advice && (
-            <div style={{ 
-              background: 'rgba(0, 212, 255, 0.1)', 
-              border: '1px solid rgba(0, 212, 255, 0.2)',
-              borderRadius: '8px',
-              padding: '20px',
-              marginBottom: '24px'
-            }}>
-              <h4 style={{ marginBottom: '12px', color: '#00d4ff' }}>Initial Analysis</h4>
-              <p>{scanResult.ai_assistant_advice}</p>
-            </div>
-          )}
-
-          <div style={{ 
-            background: 'rgba(0, 0, 0, 0.3)', 
-            border: '1px solid rgba(255, 255, 255, 0.1)',
-            borderRadius: '8px',
-            padding: '20px',
-            maxHeight: '300px',
-            overflowY: 'auto',
-            marginBottom: '20px'
-          }}>
-            {chatHistory.length === 0 ? (
-              <div style={{ 
-                color: '#a1a1aa', 
-                fontStyle: 'italic',
-                textAlign: 'center',
-                padding: '40px 20px'
-              }}>
-                💬 Ask me anything about your security scan results...
-              </div>
-            ) : (
-              chatHistory.map((chat, index) => (
-                <ChatResponseFormatter 
-                  key={index}
-                  message={chat.message}
-                  type={chat.type}
-                />
-              ))
-            )}
-            {isLoading && (
-              <div style={{ color: '#a1a1aa', fontStyle: 'italic' }}>
-                🤖 AI is analyzing...
-              </div>
-            )}
-          </div>
-
-          <div style={{ display: 'flex', gap: '12px' }}>
-            <input
-              type="text"
-              className="input"
-              placeholder="Ask about vulnerabilities, security headers, or remediation steps..."
-              value={chatInput}
-              onChange={(e) => setChatInput(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handleChat()}
-              disabled={isLoading}
-              style={{ flex: 1 }}
-            />
-            <button 
-              className="btn btn-secondary" 
-              onClick={handleChat}
-              disabled={isLoading || !chatInput.trim()}
-            >
-              Send
-            </button>
-          </div>
-
-          {/* Quick Action Buttons */}
-          <div style={{ marginTop: '16px' }}>
-            <div style={{ fontSize: '14px', color: '#a1a1aa', marginBottom: '8px' }}>
-              Quick actions:
-            </div>
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              {(scanResult.summary || scanResult.ai_assistant_advice) && (
-                <button
-                  className="btn btn-ghost"
-                  style={{ fontSize: '12px', padding: '6px 12px' }}
-                  onClick={() => {
-                    setChatInput('Summarize the analysis');
-                    setTimeout(() => handleChat(), 100);
-                  }}
-                >
-                  📋 Show Summary
-                </button>
-              )}
-              <button
-                className="btn btn-ghost"
-                style={{ fontSize: '12px', padding: '6px 12px' }}
-                onClick={() => {
-                  setChatInput('What are the main vulnerabilities?');
-                  setTimeout(() => handleChat(), 100);
-                }}
-              >
-                🔍 Main Issues
-              </button>
-              <button
-                className="btn btn-ghost"
-                style={{ fontSize: '12px', padding: '6px 12px' }}
-                onClick={() => {
-                  setChatInput('How can I improve my security score?');
-                  setTimeout(() => handleChat(), 100);
-                }}
-              >
-                🛠️ How to Fix
-              </button>
-              <button
-                className="btn btn-ghost"
-                style={{ fontSize: '12px', padding: '6px 12px' }}
-                onClick={() => {
-                  setChatInput('Explain my security score');
-                  setTimeout(() => handleChat(), 100);
-                }}
-              >
-                📊 Score Details
-              </button>
-            </div>
-          </div>
-        </div>
         </div>
       </div>
     </PageWrapper>
