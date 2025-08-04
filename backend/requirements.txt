@@ -1,11 +1,70 @@
+# Core FastAPI and Web Framework
 fastapi
 uvicorn
 requests
 beautifulsoup4
 pydantic
-google-generativeai
-python-dotenv
 httpx
+
+# AI and Language Models
+google-generativeai
+
+# Environment and Configuration
+python-dotenv
+
+# GitHub Integration
 PyGithub
+
+# Security Scanning Tools
 bandit
+safety
+
+# Network and DNS
 dnspython
+
+# Git Operations
+GitPython
+
+# RAG Database and Vector Store
+langchain
+langchain-community
+langchain-chroma
+sentence-transformers
+chromadb
+
+# Document Processing
+pypdf
+python-docx
+
+# Token Management
+tiktoken
+
+# Data Processing and Analysis
+pandas
+numpy
+
+# Async Operations
+aiofiles
+aiohttp
+
+# Text Processing
+nltk
+regex
+
+# Database (if needed for future features)
+sqlalchemy
+alembic
+
+# Testing (optional but recommended)
+pytest
+pytest-asyncio
+
+# Code Quality
+black
+flake8
+
+# Additional Utilities
+colorama
+tqdm
+rich
+langchain-huggingface

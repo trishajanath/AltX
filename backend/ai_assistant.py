@@ -1,10 +1,12 @@
 import google.generativeai as genai
 import os
-from typing import List, Dict, Optional, ClassVar, Union
+from typing import List, Dict, Optional, ClassVar, Union, Any
 from dotenv import load_dotenv
 from github import Github
 from github.GithubException import GithubException
 from dataclasses import dataclass
+from rag_query import get_secure_coding_patterns
+import json
 
 # --- PHASE 1 IMPORTS ---
 import git
@@ -25,6 +27,23 @@ class RepoAnalysis:
     open_issues: int
     # Updated to handle both dict (new comprehensive format) and RepoAnalysis (legacy format)
     latest_analysis: ClassVar[Optional[Union[Dict, 'RepoAnalysis']]] = None
+
+@dataclass
+class WebsiteScan:
+    """Store website scan results for AI context"""
+    url: str
+    timestamp: str
+    scan_result: Dict[str, Any]
+    security_score: Optional[int] = None
+    # Class variable to store latest scan
+    latest_scan: ClassVar[Optional[Dict[str, Any]]] = None
+
+@dataclass
+class FixRequest:
+    """Request model for automated fix generation"""
+    repo_url: str
+    issue: Dict[str, Any]
+    branch_name: Optional[str] = None
 
 # Load environment variables from a .env file
 load_dotenv()
@@ -509,3 +528,57 @@ Simple examples and code snippets.
         
     except Exception as e:
         return f"❌ **Website Analysis Error ({model_type} model):** {str(e)}"
+    
+# Add this function after the existing functions
+
+def format_analysis_for_context(analysis_data: Dict[str, Any]) -> str:
+    """Format comprehensive analysis data for AI context"""
+    try:
+        if not analysis_data:
+            return "No analysis data available"
+        
+        repo_info = analysis_data.get('repository_info', {})
+        security_summary = analysis_data.get('security_summary', {})
+        
+        context = f"""
+**REPOSITORY ANALYSIS CONTEXT:**
+• Repository: {repo_info.get('name', 'Unknown')}
+• Language: {repo_info.get('language', 'Unknown')}
+• Security Score: {analysis_data.get('overall_security_score', 'N/A')}/100
+• Security Level: {analysis_data.get('security_level', 'Unknown')}
+
+**SECURITY METRICS:**
+• Files Scanned: {security_summary.get('total_files_scanned', 0)}
+• Secrets Found: {security_summary.get('secrets_found', 0)}
+• Static Issues: {security_summary.get('static_issues_found', 0)}
+• Code Quality Issues: {security_summary.get('code_quality_issues', 0)}
+• Vulnerable Dependencies: {security_summary.get('vulnerable_dependencies', 0)}
+
+**KEY FINDINGS:**
+"""
+        
+        # Add secret scan results
+        secrets = analysis_data.get('secret_scan_results', [])
+        if secrets:
+            context += f"\n🔑 SECRETS ({len(secrets)} found):\n"
+            for secret in secrets[:5]:  # Limit to first 5
+                context += f"• {secret.get('file', 'unknown')}: {secret.get('secret_type', 'unknown')} (Line {secret.get('line', 'N/A')})\n"
+        
+        # Add code quality issues
+        code_issues = analysis_data.get('code_quality_results', [])
+        if code_issues:
+            context += f"\n📝 CODE QUALITY ({len(code_issues)} issues):\n"
+            for issue in code_issues[:5]:  # Limit to first 5
+                context += f"• {issue.get('file', 'unknown')}: {issue.get('pattern', 'unknown')} - {issue.get('severity', 'Unknown')}\n"
+        
+        # Add recommendations
+        recommendations = analysis_data.get('recommendations', [])
+        if recommendations:
+            context += f"\n💡 TOP RECOMMENDATIONS:\n"
+            for rec in recommendations[:5]:  # Limit to first 5
+                context += f"• {rec}\n"
+        
+        return context.strip()
+        
+    except Exception as e:
+        return f"Error formatting analysis context: {str(e)}"

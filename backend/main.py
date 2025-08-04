@@ -4,7 +4,7 @@ import git
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 from starlette.concurrency import run_in_threadpool
 import tempfile
 import json
@@ -14,6 +14,12 @@ from scanner.directory_scanner import scan_common_paths
 from owasp_mapper import map_to_owasp_top10
 from datetime import datetime 
 import time
+import base64
+from github import Github
+from rag_query import get_secure_coding_patterns
+import tempfile
+from rag_query import get_secure_coding_patterns  # Add this
+from ai_assistant import FixRequest  # Add this import
 
 # --- Local Imports ---
 from ai_assistant import get_chat_response, RepoAnalysis
@@ -64,6 +70,11 @@ class OWASPMappingRequest(BaseModel):
     url: str
     repo_url: Optional[str] = None
     model_type: str = "fast"
+
+class FixRequest(BaseModel):
+    repo_url: str
+    issue: Dict[str, Any]
+    branch_name: Optional[str] = None
 
 
 # --- Enhanced Security Analysis Functions ---
@@ -514,12 +525,14 @@ async def analyze_repo_comprehensive(request: RepoAnalysisRequest):
     except Exception as e:
         return {"error": f"Analysis setup failed: {str(e)}"}
 
+# REPLACE your existing @app.post("/ai-chat") endpoint with this enhanced version
+
 @app.post("/ai-chat")
 async def unified_ai_chat(request: dict):
-    """Unified AI chat endpoint that automatically uses latest scan results as context"""
+    """Enhanced AI chat endpoint - RAG-powered Explainer and Fixer Initiator"""
     try:
         question = request.get('question', '')
-        context_type = request.get('context', 'auto')  # 'auto', 'general', 'website_scan', 'repo_analysis'
+        context_type = request.get('context', 'auto')
         model_type = request.get('model_type', 'fast')
         previous_history = request.get('history', [])
         
@@ -527,16 +540,26 @@ async def unified_ai_chat(request: dict):
         if model_type not in ['fast', 'smart']:
             model_type = 'fast'
         
+        # Check if this is a fix request
+        is_fix_request = any(phrase in question.lower() for phrase in [
+            'fix this', 'fix the', 'propose fix', 'create fix', 'generate fix',
+            'fix it', 'resolve this', 'solve this', 'patch this', 'auto fix'
+        ])
+        
+        # Check if this is an explanation request
+        is_explanation_request = any(phrase in question.lower() for phrase in [
+            'what is', 'explain', 'what does', 'how does', 'tell me about',
+            'describe', 'meaning of', 'definition'
+        ])
+        
         # Build enhanced context with automatic scan result detection
         enhanced_context = f"MODEL TYPE: {model_type}\nUSER QUESTION: {question}\n\n"
         
         # Auto-detect and use available scan results
         if context_type == 'auto':
-            # Check for repository analysis first (most comprehensive)
             if hasattr(RepoAnalysis, 'latest_analysis') and RepoAnalysis.latest_analysis:
                 context_type = 'repo_analysis'
                 enhanced_context += "🔍 **AUTOMATICALLY DETECTED: Repository Analysis Available**\n\n"
-            # Check for website scan results
             elif hasattr(WebsiteScan, 'latest_scan') and WebsiteScan.latest_scan:
                 context_type = 'website_scan'
                 enhanced_context += "🌐 **AUTOMATICALLY DETECTED: Website Scan Available**\n\n"
@@ -544,7 +567,183 @@ async def unified_ai_chat(request: dict):
                 context_type = 'general'
                 enhanced_context += "🤖 **GENERAL SECURITY CONSULTATION** - No recent scan data available.\n\n"
         
-        # Repository Analysis Context (from /analyze-repo)
+        # Handle RAG-powered explanation requests
+        if is_explanation_request:
+            print("🔍 Processing explanation request with RAG...")
+            
+            # Query RAG for detailed explanation
+            rag_context = await run_in_threadpool(get_secure_coding_patterns, question)
+            
+            enhanced_context += f"""
+🧠 **RAG-ENHANCED EXPLANATION:**
+{rag_context}
+
+Please provide a comprehensive explanation using the above security knowledge.
+"""
+
+        # Handle fix requests for repository analysis
+        if is_fix_request and context_type == 'repo_analysis':
+            analysis_data = RepoAnalysis.latest_analysis
+            
+            if not analysis_data:
+                return {
+                    "response": "❌ No repository analysis available. Please run `/analyze-repo` first to scan for issues to fix.",
+                    "model_used": model_type,
+                    "context_detected": context_type,
+                    "scan_data_available": False,
+                    "history": previous_history,
+                    "action_taken": None
+                }
+            
+            # Try to identify which issue the user wants to fix
+            repo_url = analysis_data.get('repository_info', {}).get('url', '')
+            
+            # Collect all fixable issues
+            fixable_issues = []
+            
+            # Add secret scan results
+            for secret in analysis_data.get('secret_scan_results', []):
+                fixable_issues.append({
+                    'file': secret.get('file', ''),
+                    'line': secret.get('line', ''),
+                    'type': 'Secret Detection',
+                    'description': f"Hardcoded {secret.get('secret_type', 'secret')} found",
+                    'vulnerable_code': secret.get('match', ''),
+                    'severity': 'Critical'
+                })
+            
+            # Add static analysis results
+            for issue in analysis_data.get('static_analysis_results', []):
+                if isinstance(issue, dict):
+                    fixable_issues.append({
+                        'file': issue.get('filename', ''),
+                        'line': issue.get('line_number', ''),
+                        'type': 'Static Analysis',
+                        'description': issue.get('issue_text', str(issue)),
+                        'vulnerable_code': '',
+                        'severity': issue.get('issue_severity', 'Medium')
+                    })
+            
+            # Add code quality issues
+            for issue in analysis_data.get('code_quality_results', []):
+                fixable_issues.append({
+                    'file': issue.get('file', ''),
+                    'line': issue.get('line', ''),
+                    'type': 'Code Quality',
+                    'description': issue.get('description', issue.get('pattern', '')),
+                    'vulnerable_code': issue.get('code_snippet', ''),
+                    'severity': issue.get('severity', 'Medium')
+                })
+            
+            if not fixable_issues:
+                return {
+                    "response": "✅ Great news! No fixable security issues were found in the latest repository scan. Your code appears to be secure based on our analysis.",
+                    "model_used": model_type,
+                    "context_detected": context_type,
+                    "scan_data_available": True,
+                    "history": previous_history,
+                    "action_taken": None
+                }
+            
+            # If user specified a particular issue type or file, try to match it
+            target_issue = None
+            question_lower = question.lower()
+            
+            # Look for specific mentions
+            for issue in fixable_issues:
+                if (issue['file'].lower() in question_lower or 
+                    issue['type'].lower() in question_lower or
+                    any(word in issue['description'].lower() for word in question_lower.split())):
+                    target_issue = issue
+                    break
+            
+            # If no specific issue identified, pick the most critical one
+            if not target_issue:
+                # Sort by severity: Critical > High > Medium > Low
+                severity_order = {'Critical': 0, 'High': 1, 'Medium': 2, 'Low': 3}
+                fixable_issues.sort(key=lambda x: severity_order.get(x['severity'], 4))
+                target_issue = fixable_issues[0]
+            
+            # Call the propose-fix endpoint
+            try:
+                fix_request = FixRequest(
+                    repo_url=repo_url,
+                    issue=target_issue
+                )
+                
+                fix_response = await propose_fix(fix_request)
+                
+                if fix_response['success']:
+                    pr_url = fix_response['pull_request']['url']
+                    pr_number = fix_response['pull_request']['number']
+                    changes_made = fix_response['fix_details']['changes_made']
+                    
+                    response = f"""🔧 **RAG-Powered Fix Generated Successfully!**
+
+✅ I've created an automated security fix using advanced AI and secure coding patterns:
+
+**Issue Fixed:**
+• **File:** `{target_issue['file']}`
+• **Type:** {target_issue['type']}
+• **Description:** {target_issue['description']}
+
+**AI-Generated Changes:**
+{chr(10).join([f'• {change}' for change in changes_made])}
+
+**🚀 Pull Request Created:**
+**[#{pr_number} - Review Automated Fix]({pr_url})**
+
+**✨ RAG-Enhanced Features:**
+• 🧠 Applied secure coding patterns from OWASP guidelines
+• 🛡️ Context-aware vulnerability remediation
+• 📚 Knowledge base of 1000+ security best practices
+
+**Next Steps:**
+1. 📋 Review the automated changes in the pull request
+2. 🧪 Test the fix to ensure functionality is preserved
+3. ✅ Merge the PR once you're satisfied with the changes
+
+This fix was generated using RAG (Retrieval-Augmented Generation) technology, combining AI reasoning with a curated database of security expertise.
+
+Need me to explain any part of the fix or have questions about the security issue?"""
+                    
+                    return {
+                        "response": response,
+                        "model_used": model_type,
+                        "context_detected": context_type,
+                        "scan_data_available": True,
+                        "history": previous_history + [
+                            {'type': 'user', 'parts': [question]},
+                            {'type': 'assistant', 'parts': [response]}
+                        ],
+                        "action_taken": {
+                            "type": "fix_generated",
+                            "pull_request_url": pr_url,
+                            "issue_fixed": target_issue,
+                            "rag_enhanced": True
+                        }
+                    }
+                else:
+                    return {
+                        "response": f"❌ Failed to generate fix: {fix_response.get('error', 'Unknown error')}",
+                        "model_used": model_type,
+                        "context_detected": context_type,
+                        "scan_data_available": True,
+                        "history": previous_history,
+                        "action_taken": None
+                    }
+                    
+            except Exception as e:
+                return {
+                    "response": f"❌ Error generating fix: {str(e)}\n\nWould you like me to explain the security issue instead?",
+                    "model_used": model_type,
+                    "context_detected": context_type,
+                    "scan_data_available": True,
+                    "history": previous_history,
+                    "action_taken": None
+                }
+        
+        # Repository Analysis Context (Enhanced with RAG capabilities)
         if context_type == 'repo_analysis' and hasattr(RepoAnalysis, 'latest_analysis') and RepoAnalysis.latest_analysis:
             analysis_data = RepoAnalysis.latest_analysis
             
@@ -575,6 +774,11 @@ DEPENDENCY VULNERABILITIES: {len(analysis_data.get('dependency_scan_results', {}
 STATIC ANALYSIS: {len(analysis_data.get('static_analysis_results', []))} issues found
 {chr(10).join([f"• {str(s)[:100]}" for s in analysis_data.get('static_analysis_results', [])[:3]])}
 
+🤖 **RAG-POWERED CAPABILITIES:**
+- Ask me to "fix this issue" and I'll automatically create a pull request with the solution
+- I can explain any security finding using curated OWASP knowledge
+- I provide context-aware remediation guidance
+
 📋 **RECOMMENDATIONS:**
 {chr(10).join([f"• {rec}" for rec in analysis_data.get('recommendations', [])[:5]])}
 
@@ -587,7 +791,7 @@ STATIC ANALYSIS: {len(analysis_data.get('static_analysis_results', []))} issues 
 {str(analysis_data)[:2000]}...
 """
         
-        # Website Scan Context (from /scan or manual)
+        # Website Scan Context (Enhanced with RAG capabilities)
         elif context_type == 'website_scan':
             scan_result = request.get('scan_result', None)
             
@@ -633,6 +837,11 @@ STATIC ANALYSIS: {len(analysis_data.get('static_analysis_results', []))} issues 
 📄 **PAGES CRAWLED:**
 {chr(10).join([f'• {page}' for page in website_data.get('pages', [])[:5]]) if website_data else '• No pages data'}
 
+🧠 **RAG-ENHANCED CAPABILITIES:**
+- I can explain any security finding using curated OWASP knowledge
+- Ask about specific vulnerabilities for detailed explanations
+- Get implementation guidance for security fixes
+
 💡 **AI SUGGESTIONS:**
 {website_data.get('ai_assistant_advice', 'No AI suggestions available') if website_data else 'No AI suggestions available'}
 """
@@ -644,23 +853,28 @@ STATIC ANALYSIS: {len(analysis_data.get('static_analysis_results', []))} issues 
             enhanced_context += """
 🔒 **GENERAL SECURITY CONSULTATION**
 No specific scan data available. I can help with:
-• General security best practices
-• Common vulnerability explanations
+• General security best practices  
+• Common vulnerability explanations (RAG-enhanced)
 • Security implementation guidance
 • Code review suggestions
 • Security tool recommendations
 
+🧠 **RAG-ENHANCED:** I have access to comprehensive security knowledge including OWASP guidelines, secure coding patterns, and vulnerability remediation techniques.
+
 To get specific analysis, please run:
-• `/analyze-repo` for repository security analysis
+• `/analyze-repo` for repository security analysis (with automated fix generation)
 • `/scan` for website security scanning
 """
         
-        # Build conversation history
+        # Add RAG capability notice to responses
+        enhanced_context += "\n\n🧠 **RAG-ENHANCED AI:** I now have access to a comprehensive security knowledge base for detailed explanations and automated fixes!"
+        
+        # Build conversation history and get response
         if previous_history:
             history = previous_history.copy()
-            history.append({'type': 'user', 'parts': [enhanced_context + f"\n\nBased on the above security analysis, provide a helpful response to: {question}"]})
+            history.append({'type': 'user', 'parts': [enhanced_context + f"\n\nBased on the above security analysis and knowledge base, provide a helpful response to: {question}"]})
         else:
-            history = [{'type': 'user', 'parts': [enhanced_context + f"\n\nBased on the above security analysis, provide a helpful response to: {question}"]}]
+            history = [{'type': 'user', 'parts': [enhanced_context + f"\n\nBased on the above security analysis and knowledge base, provide a helpful response to: {question}"]}]
         
         response = await run_in_threadpool(get_chat_response, history, model_type)
         
@@ -672,7 +886,9 @@ To get specific analysis, please run:
             "model_used": model_type,
             "context_detected": context_type,
             "scan_data_available": context_type in ['repo_analysis', 'website_scan'],
-            "history": history
+            "history": history,
+            "action_taken": None,
+            "rag_enhanced": True
         }
         
     except Exception as e:
@@ -681,7 +897,8 @@ To get specific analysis, please run:
             "model_used": model_type if 'model_type' in locals() else 'unknown',
             "context_detected": 'error',
             "scan_data_available": False,
-            "history": []
+            "history": [],
+            "action_taken": None
         }
 @app.post("/owasp-mapping")
 async def owasp_mapping():
@@ -730,6 +947,228 @@ async def owasp_mapping():
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"OWASP mapping failed: {str(e)}")
+    
+@app.post("/propose-fix")
+async def propose_fix(request: FixRequest):
+    """
+    RAG-powered automated code remediation endpoint
+    Takes a specific security issue and creates a PR with the fix
+    """
+    try:
+        repo_url = request.repo_url
+        issue = request.issue
+        
+        # Extract repo info
+        repo_url_clean = repo_url.rstrip('/').replace('.git', '')
+        parts = repo_url_clean.split('/')
+        
+        if len(parts) < 5 or not github_client:
+            raise HTTPException(status_code=400, detail="Invalid repo URL or GitHub client not available")
+        
+        owner, repo_name = parts[-2], parts[-1]
+        
+        # Get the repository
+        try:
+            github_repo = github_client.get_repo(f"{owner}/{repo_name}")
+        except Exception as e:
+            raise HTTPException(status_code=404, detail=f"Repository not found or not accessible: {str(e)}")
+        
+        # Create temporary directory for cloning
+        temp_dir = tempfile.mkdtemp()
+        
+        try:
+            print(f"🔧 Starting fix process for {repo_url}")
+            
+            # Clone the repository
+            repo = git.Repo.clone_from(repo_url, temp_dir)
+            
+            # Get the file content
+            issue_file = issue.get('file', '')
+            if not issue_file:
+                raise HTTPException(status_code=400, detail="Issue must specify a file path")
+            
+            file_path = os.path.join(temp_dir, issue_file)
+            if not os.path.exists(file_path):
+                raise HTTPException(status_code=404, detail=f"File {issue_file} not found in repository")
+            
+            # Read the vulnerable file content
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                original_content = f.read()
+            
+            # Query RAG database for secure coding patterns
+            print("🔍 Querying RAG database for secure patterns...")
+            rag_query = f"{issue.get('type', 'security')} {issue.get('description', '')}"
+            secure_patterns = await run_in_threadpool(get_secure_coding_patterns, rag_query)
+            
+            # Construct the "Fixer" AI prompt
+            fixer_prompt = f"""
+You are a security code remediation expert. Your task is to fix a specific security vulnerability in code.
+
+**VULNERABILITY DETAILS:**
+- File: {issue.get('file', 'unknown')}
+- Line: {issue.get('line', 'unknown')}
+- Type: {issue.get('type', 'unknown')}
+- Description: {issue.get('description', 'No description')}
+- Vulnerable Code: {issue.get('vulnerable_code', 'Not specified')}
+
+**CURRENT FILE CONTENT:**
+```
+{original_content}
+```
+
+**SECURE CODING PATTERNS (from RAG database):**
+{secure_patterns}
+
+**INSTRUCTIONS:**
+1. Identify the exact vulnerability in the code
+2. Apply the most appropriate secure coding pattern from the RAG database
+3. Generate a complete, fixed version of the file
+4. Ensure the fix doesn't break existing functionality
+5. Add security comments where appropriate
+6. Preserve all imports, functions, and logic that aren't security-related
+
+**RESPONSE FORMAT:**
+Return ONLY a JSON object with this exact structure:
+{{
+    "fixed_content": "complete fixed file content here",
+    "changes_made": [
+        "Replaced eval() with ast.literal_eval() for safe evaluation",
+        "Added input validation before processing"
+    ],
+    "security_impact": "Prevents code injection attacks by removing unsafe eval() usage",
+    "commit_message": "fix: resolve {issue.get('type', 'security')} vulnerability in {issue.get('file', 'file')}"
+}}
+"""
+
+            # Call the AI to generate the fix
+            print("🤖 Generating security fix with AI...")
+            ai_response = await run_in_threadpool(get_chat_response, [
+                {'type': 'user', 'parts': [fixer_prompt]}
+            ], 'smart')  # Use smart model for fixing
+            
+            # Parse the AI response
+            try:
+                # Extract JSON from AI response
+                json_start = ai_response.find('{')
+                json_end = ai_response.rfind('}') + 1
+                if json_start != -1 and json_end != -1:
+                    fix_data = json.loads(ai_response[json_start:json_end])
+                else:
+                    raise ValueError("No JSON found in AI response")
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Failed to parse AI response: {str(e)}")
+            
+            # Apply the fix to the file
+            fixed_content = fix_data.get('fixed_content', '')
+            if not fixed_content:
+                raise HTTPException(status_code=500, detail="AI did not provide fixed content")
+            
+            # Write the fixed content
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(fixed_content)
+            
+            print("✅ Fix applied to local file")
+            
+            # Create a new branch
+            branch_name = request.branch_name or f"fix/{issue.get('type', 'security').lower().replace(' ', '-')}-{issue.get('file', 'file').replace('/', '-').replace('.', '-')}"
+            
+            # Check if branch already exists
+            try:
+                github_repo.get_branch(branch_name)
+                # Branch exists, add timestamp to make it unique
+                import time
+                branch_name = f"{branch_name}-{int(time.time())}"
+            except:
+                pass  # Branch doesn't exist, which is what we want
+            
+            # Create branch and commit
+            repo.git.checkout('-b', branch_name)
+            repo.git.add(issue_file)
+            
+            commit_message = fix_data.get('commit_message', f"fix: resolve security vulnerability in {issue_file}")
+            repo.git.commit('-m', commit_message)
+            
+            # Push the branch
+            origin = repo.remote('origin')
+            origin.push(branch_name)
+            
+            print(f"✅ Pushed fix to branch: {branch_name}")
+            
+            # Create pull request
+            pr_title = f"🔒 Security Fix: {issue.get('description', 'Vulnerability remediation')}"
+            pr_body = f"""
+## 🛡️ Automated Security Fix
+
+**Vulnerability Fixed:**
+- **File:** `{issue.get('file', 'unknown')}`
+- **Line:** {issue.get('line', 'unknown')}
+- **Type:** {issue.get('type', 'Security Issue')}
+- **Description:** {issue.get('description', 'No description')}
+
+**Changes Made:**
+{chr(10).join([f'- {change}' for change in fix_data.get('changes_made', [])])}
+
+**Security Impact:**
+{fix_data.get('security_impact', 'Improves application security')}
+
+**Generated by:** AltX Security Scanner - Automated Remediation
+**Powered by:** RAG-enhanced AI code analysis
+
+---
+
+⚠️ **Please review this automated fix carefully before merging.**
+
+🔍 **Testing Recommended:**
+- Run existing tests to ensure functionality is preserved
+- Perform security testing to verify the vulnerability is resolved
+- Review the code changes for any potential side effects
+"""
+
+            pull_request = github_repo.create_pull(
+                title=pr_title,
+                body=pr_body,
+                head=branch_name,
+                base='main'  # Adjust if your default branch is different
+            )
+            
+            print(f"✅ Pull request created: {pull_request.html_url}")
+            
+            return {
+                "success": True,
+                "pull_request": {
+                    "url": pull_request.html_url,
+                    "number": pull_request.number,
+                    "title": pr_title,
+                    "branch": branch_name
+                },
+                "fix_details": {
+                    "file_fixed": issue_file,
+                    "vulnerability_type": issue.get('type'),
+                    "changes_made": fix_data.get('changes_made', []),
+                    "security_impact": fix_data.get('security_impact'),
+                    "commit_message": commit_message
+                },
+                "metadata": {
+                    "repo_url": repo_url,
+                    "timestamp": datetime.now().isoformat(),
+                    "ai_model_used": "smart",
+                    "rag_patterns_used": True
+                }
+            }
+            
+        finally:
+            # Cleanup
+            if os.path.exists(temp_dir):
+                try:
+                    shutil.rmtree(temp_dir)
+                except:
+                    pass
+                    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Fix generation failed: {str(e)}")
+    
 @app.get("/health")
 async def health_check():
     """Check if the API is running"""
