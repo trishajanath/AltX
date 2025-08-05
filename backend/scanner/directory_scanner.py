@@ -18,49 +18,106 @@ COMMON_PATHS = [
     "/debug", "/console", "/status", "/health", "/metrics"
 ]
 
-# Enhanced WAF detection patterns
+# Enhanced WAF detection patterns with cookie-based and advanced detection
 WAF_SIGNATURES = {
     'cloudflare': {
         'headers': ['cf-ray', 'cf-cache-status', '__cfduid', 'cf-request-id', 'server'],
         'header_values': {'server': ['cloudflare', 'cloudflare-nginx']},
+        'cookies': ['__cfduid', '__cfuid', '__cf_bm', 'cf_clearance'],
         'error_codes': [403, 503, 520, 521, 522, 523, 524],
         'content_patterns': ['cloudflare', 'ray id', 'cf-error', 'attention required'],
-        'error_pages': ['cloudflare error', 'checking your browser']
+        'error_pages': ['cloudflare error', 'checking your browser'],
+        'custom_error_messages': ['please enable cookies', 'checking your browser']
     },
     'aws_waf': {
-        'headers': ['x-amzn-requestid', 'x-amz-cf-id', 'x-amzn-trace-id', 'server'],
-        'header_values': {'server': ['awselb', 'amazon']},
-        'error_codes': [403],
-        'content_patterns': ['aws', 'blocked by aws waf', 'amazon cloudfront'],
-        'error_pages': ['request blocked']
+        'headers': ['x-amzn-requestid', 'x-amz-cf-id', 'x-amzn-trace-id', 'x-amzn-errortype'],
+        'header_values': {'server': ['awselb/2.0', 'amazon', 'awselb', 'amazonS3']},
+        'cookies': ['AWSALB', 'AWSALBCORS', 'aws-waf-token'],
+        'error_codes': [403, 503],
+        'content_patterns': ['blocked by aws waf', 'amazon cloudfront error', 'aws waf blocked', 'accessdeniedexception'],
+        'error_pages': ['request blocked by aws waf', 'cloudfront error'],
+        'custom_error_messages': ['forbidden', 'access denied by aws waf']
     },
     'mod_security': {
         'headers': ['mod_security', 'x-mod-security', 'server'],
         'header_values': {'server': ['apache', 'nginx']},
-        'error_codes': [403, 406],
+        'cookies': ['mod_security_session'],
+        'error_codes': [403, 406, 501],
         'content_patterns': ['mod_security', 'modsecurity', 'not acceptable', 'security violation'],
-        'error_pages': ['mod_security action']
+        'error_pages': ['mod_security action'],
+        'custom_error_messages': ['not acceptable', 'security violation detected']
     },
     'incapsula': {
         'headers': ['x-iinfo', 'incap_ses', 'x-cdn', 'x-cache'],
         'header_values': {'x-cdn': ['incapsula'], 'x-iinfo': ['incapsula']},
+        'cookies': ['incap_ses', 'nlbi', 'visid_incap'],
         'error_codes': [403],
         'content_patterns': ['incapsula', 'incap_ses', 'imperva', 'access denied'],
-        'error_pages': ['incapsula incident id']
+        'error_pages': ['incapsula incident id'],
+        'custom_error_messages': ['access denied', 'incapsula incident']
     },
     'sucuri': {
         'headers': ['x-sucuri-id', 'x-sucuri-cache', 'server'],
         'header_values': {'server': ['sucuri']},
+        'cookies': ['sucuri_cloudproxy_uuid'],
         'error_codes': [403],
         'content_patterns': ['sucuri', 'access denied', 'website firewall', 'blocked by sucuri'],
-        'error_pages': ['sucuri website firewall']
+        'error_pages': ['sucuri website firewall'],
+        'custom_error_messages': ['blocked by sucuri', 'website firewall blocked']
     },
     'akamai': {
         'headers': ['akamai-ghost-ip', 'akamai-edgescape', 'x-akamai', 'server'],
         'header_values': {'server': ['akamaighost']},
+        'cookies': ['ak_bmsc', 'bm_sz', 'abck'],
         'error_codes': [403],
         'content_patterns': ['akamai', 'reference #', 'edge server'],
-        'error_pages': ['akamai error']
+        'error_pages': ['akamai error'],
+        'custom_error_messages': ['reference #', 'akamai error']
+    },
+    'citrix_netscaler': {
+        'headers': ['citrix-aag', 'ns-cache', 'server'],
+        'header_values': {'server': ['netscaler', 'citrix-aag']},
+        'cookies': ['ns_af', 'citrix_ns_id', 'nsid', 'aaatokenid'],  # ns_af is the key Citrix cookie!
+        'error_codes': [403, 302],
+        'content_patterns': ['citrix', 'netscaler', 'access gateway', 'you shouldn\'t be here'],
+        'error_pages': ['citrix access denied', 'netscaler error'],
+        'custom_error_messages': ['you shouldn\'t be here', 'citrix access gateway']
+    },
+    'f5_bigip': {
+        'headers': ['f5-cache-status', 'server'],
+        'header_values': {'server': ['bigip', 'f5', 'f5-ltm']},
+        'cookies': ['bigipserver', 'f5avraaaaaaaaaaaaaaaa', 'bigip'],
+        'error_codes': [403],
+        'content_patterns': ['f5', 'bigip', 'application security policy'],
+        'error_pages': ['f5 error', 'bigip blocked'],
+        'custom_error_messages': ['application security policy', 'f5 application firewall']
+    },
+    'barracuda': {
+        'headers': ['x-barracuda-url', 'server'],
+        'header_values': {'server': ['barracuda']},
+        'cookies': ['barra_counter', 'barracuda_', 'barra'],
+        'error_codes': [403],
+        'content_patterns': ['barracuda', 'web application firewall'],
+        'error_pages': ['barracuda blocked'],
+        'custom_error_messages': ['barracuda web application firewall']
+    },
+    'fortinet': {
+        'headers': ['fortigate-authcookie', 'x-fortinet-guard'],
+        'header_values': {'server': ['fortinet', 'fortigate']},
+        'cookies': ['fortiwafsid', 'fortinet_session'],
+        'error_codes': [403],
+        'content_patterns': ['fortinet', 'fortigate', 'fortiweb'],
+        'error_pages': ['fortinet blocked'],
+        'custom_error_messages': ['fortinet security', 'blocked by fortigate']
+    },
+    'varnish': {
+        'headers': ['x-varnish', 'via', 'server'],
+        'header_values': {'server': ['varnish'], 'via': ['varnish']},
+        'cookies': ['varnish_sess'],
+        'error_codes': [403, 503],
+        'content_patterns': ['varnish', 'you shouldn\'t be here'],
+        'error_pages': ['varnish error'],
+        'custom_error_messages': ['you shouldn\'t be here']  # Classic Varnish message!
     }
 }
 
@@ -73,65 +130,112 @@ class SecurityAnalyzer:
         self.waf_probe_tested = False
 
     def analyze_waf_response(self, response: httpx.Response) -> Dict:
-        """Enhanced WAF detection with multiple detection methods"""
+        """Enhanced WAF detection with cookie analysis, header fingerprinting, and error message detection"""
         waf_info = {
             'waf_detected': False,
             'waf_type': None,
             'blocked': False,
             'evidence': [],
-            'confidence': 0
+            'confidence': 0,
+            'detection_methods': []
         }
         
         headers_lower = {k.lower(): v.lower() for k, v in response.headers.items()}
         
+        # Extract cookies from Set-Cookie headers for analysis
+        cookies = {}
+        set_cookie_headers = response.headers.get_list('set-cookie') if hasattr(response.headers, 'get_list') else []
+        if not set_cookie_headers and 'set-cookie' in response.headers:
+            set_cookie_headers = [response.headers['set-cookie']]
+        
+        for cookie_header in set_cookie_headers:
+            if '=' in cookie_header:
+                cookie_name = cookie_header.split('=')[0].strip()
+                cookies[cookie_name.lower()] = cookie_header
+        
         for waf_name, signatures in WAF_SIGNATURES.items():
             evidence = []
             confidence = 0
+            detected_methods = []
             
-            # Check headers
+            # Method 1: Cookie-based detection (HIGH CONFIDENCE - as per your example)
+            for cookie_name in signatures.get('cookies', []):
+                if cookie_name.lower() in cookies:
+                    evidence.append(f"WAF Cookie: {cookie_name}")
+                    confidence += 60  # High confidence for cookie detection
+                    detected_methods.append('cookie_detection')
+                    # Special case for Citrix NetScaler ns_af cookie
+                    if cookie_name.lower() == 'ns_af':
+                        evidence.append("Citrix NetScaler App Firewall cookie detected")
+                        confidence += 40  # Extra points for specific WAF cookie
+            
+            # Method 2: Header-based detection
             for header in signatures['headers']:
                 if header.lower() in headers_lower:
-                    evidence.append(f"Header: {header}")
+                    evidence.append(f"WAF Header: {header}")
                     confidence += 30
+                    detected_methods.append('header_detection')
             
-            # Check header values
+            # Method 3: Header value analysis
             for header, values in signatures.get('header_values', {}).items():
                 if header.lower() in headers_lower:
                     for value in values:
                         if value.lower() in headers_lower[header.lower()]:
                             evidence.append(f"Header Value: {header}={value}")
                             confidence += 40
+                            detected_methods.append('header_value_detection')
             
-            # Check status codes
+            # Method 4: Status code analysis
             if response.status_code in signatures['error_codes']:
-                evidence.append(f"Status Code: {response.status_code}")
+                evidence.append(f"WAF Status Code: {response.status_code}")
                 confidence += 20
+                detected_methods.append('status_code_detection')
             
-            # Check content patterns
+            # Method 5: Content pattern matching
             try:
                 content = response.text.lower()
+                
+                # Check for content patterns
                 for pattern in signatures['content_patterns']:
                     if pattern.lower() in content:
                         evidence.append(f"Content Pattern: {pattern}")
                         confidence += 25
+                        detected_methods.append('content_pattern_detection')
                 
                 # Check for specific error pages
                 for error_page in signatures.get('error_pages', []):
                     if error_page.lower() in content:
                         evidence.append(f"Error Page: {error_page}")
                         confidence += 50
+                        detected_methods.append('error_page_detection')
+                
+                # Method 6: Custom error message detection (NEW - as per your examples)
+                for custom_msg in signatures.get('custom_error_messages', []):
+                    if custom_msg.lower() in content:
+                        evidence.append(f"Custom Error Message: '{custom_msg}'")
+                        confidence += 45  # High confidence for custom messages
+                        detected_methods.append('custom_error_detection')
                         
             except:
                 pass
             
+            # Method 7: Session timeout detection (rapid session expiry)
+            cache_control = headers_lower.get('cache-control', '')
+            expires = headers_lower.get('expires', '')
+            if ('no-cache' in cache_control and 'no-store' in cache_control) or 'max-age=0' in cache_control:
+                evidence.append("Rapid session expiry detected")
+                confidence += 15
+                detected_methods.append('session_timeout_detection')
+            
             # If confidence is high enough, mark as detected
-            if confidence >= 40 and evidence:
+            if confidence >= 60 and evidence:  # Keep threshold at 60 for accuracy
                 waf_info.update({
                     'waf_detected': True,
                     'waf_type': waf_name,
                     'evidence': evidence,
                     'confidence': confidence,
-                    'blocked': response.status_code in [403, 406, 429]
+                    'blocked': response.status_code in [403, 406, 429],
+                    'detection_methods': detected_methods
                 })
                 if waf_info['blocked']:
                     self.blocked_requests += 1
@@ -209,18 +313,18 @@ class SecurityAnalyzer:
                     
                     # Method 2: Major content differences (content substitution WAFs)
                     length_ratio = length_diff / baseline_length if baseline_length > 0 else 0
-                    if length_ratio > 0.3:  # More than 30% difference in content size
+                    if length_ratio > 0.1 and length_diff > 1000:  # More than 10% difference AND at least 1KB
                         probe_info['waf_confirmed'] = True
                         probe_info['evidence'].append(f"Major content size difference: {test_query} -> {probe_length} bytes vs baseline {baseline_length} bytes ({length_ratio:.1%} difference)")
                         probe_info['confidence_boost'] += 40
                         probe_info['detection_method'] = 'content_substitution'
                     
-                    # Method 3: Subtle content modifications (silent WAFs like Netflix)
-                    elif length_diff > 20:  # More than 20 bytes difference
+                    # Method 3: Significant content modifications (not micro-changes)
+                    elif length_diff > 500:  # More than 500 bytes difference (not tiny changes)
                         probe_info['waf_confirmed'] = True
-                        probe_info['evidence'].append(f"Subtle content modification detected: {test_query} -> {length_diff} bytes difference ({length_ratio:.3%})")
+                        probe_info['evidence'].append(f"Significant content modification detected: {test_query} -> {length_diff} bytes difference ({length_ratio:.3%})")
                         probe_info['confidence_boost'] += 35
-                        probe_info['detection_method'] = 'subtle_content_modification'
+                        probe_info['detection_method'] = 'content_modification'
                         
                     # Method 4: Content word analysis (sophisticated content filtering)
                     if baseline_length > 1000 and probe_length > 100:  # Only if we have substantial content
@@ -259,6 +363,20 @@ class SecurityAnalyzer:
                         probe_info['evidence'].append(f"WAF content indicators found: {', '.join(found_indicators)}")
                         probe_info['confidence_boost'] += 25
                     
+                    # Method 7: Session timeout detection (rapid session expiry as WAF indicator)
+                    probe_cache_control = probe_headers.get('cache-control', '').lower()
+                    baseline_cache_control = baseline_headers.get('cache-control', '').lower()
+                    
+                    # Check for aggressive cache control changes
+                    if ('no-cache' in probe_cache_control and 'no-cache' not in baseline_cache_control) or \
+                       ('max-age=0' in probe_cache_control and 'max-age=0' not in baseline_cache_control):
+                        probe_info['evidence'].append(f"Session timeout behavior detected: cache-control changed to {probe_cache_control}")
+                        probe_info['confidence_boost'] += 20
+                        probe_info['detection_method'] = 'session_timeout_detection'
+                    
+                    # Method 8: Response time analysis (WAFs may add latency)
+                    # Note: This would require timing measurements, which we can add if needed
+                    
                     # If we found evidence, break early
                     if probe_info['waf_confirmed']:
                         break
@@ -269,34 +387,26 @@ class SecurityAnalyzer:
                     probe_info['debug_info'].append(f"Probe error for {test_query}: {str(e)}")
                     continue
             
-            # CRITICAL FIX: Final analysis for consistent small changes (Netflix pattern)
+            # FIXED: Final analysis for actual WAF detection (not micro-changes)
             if not probe_info['waf_confirmed']:
-                # Check for consistent content modifications across multiple probes
+                # Check for consistent significant modifications across multiple probes
                 if len(content_diffs) >= 3:
-                    # Method 1: Any probe with significant differences (20+ bytes)
-                    significant_diffs = [diff for diff in content_diffs if diff > 20]
+                    # Method 1: Any probe with significant differences (500+ bytes)
+                    significant_diffs = [diff for diff in content_diffs if diff > 500]
                     if significant_diffs:
                         probe_info['waf_confirmed'] = True
-                        probe_info['evidence'].append(f"Content modification pattern detected: {len(content_diffs)} probes with differences {content_diffs}")
+                        probe_info['evidence'].append(f"Content modification pattern detected: {len(significant_diffs)} probes with significant differences {significant_diffs}")
                         probe_info['confidence_boost'] += 50
-                        probe_info['detection_method'] = 'subtle_content_modification'
-                        probe_info['debug_info'].append(f"✅ WAF DETECTED: Content differences indicate request processing")
+                        probe_info['detection_method'] = 'content_modification'
+                        probe_info['debug_info'].append(f"✅ WAF DETECTED: Significant content differences indicate request processing")
                     
-                    # Method 2: Multiple small changes still indicate processing (10+ bytes)
-                    elif len([d for d in content_diffs if d > 10]) >= 4:  # 4+ probes with 10+ byte differences
+                    # Method 2: Multiple large changes (200+ bytes)
+                    elif len([d for d in content_diffs if d > 200]) >= 3:  # 3+ probes with 200+ byte differences
                         probe_info['waf_confirmed'] = True
-                        probe_info['evidence'].append(f"Multiple content variations detected: {content_diffs} - indicates request processing")
+                        probe_info['evidence'].append(f"Multiple content variations detected: {[d for d in content_diffs if d > 200]} - indicates request processing")
                         probe_info['confidence_boost'] += 40
                         probe_info['detection_method'] = 'request_processing_detected'
                         probe_info['debug_info'].append(f"✅ WAF DETECTED: Multiple variations suggest active filtering")
-                    
-                    # Method 3: Even tiny consistent changes suggest processing (5+ bytes)
-                    elif len([d for d in content_diffs if d > 5]) >= 3:  # 3+ probes with 5+ byte differences
-                        probe_info['waf_confirmed'] = True
-                        probe_info['evidence'].append(f"Consistent micro-variations detected: {content_diffs} - suggests request monitoring")
-                        probe_info['confidence_boost'] += 30
-                        probe_info['detection_method'] = 'micro_content_variation'
-                        probe_info['debug_info'].append(f"✅ WAF DETECTED: Micro-variations indicate request monitoring")
                 
                 if not probe_info['waf_confirmed']:
                     probe_info['debug_info'].append("No WAF confirmed - all probes returned similar responses")
@@ -672,7 +782,8 @@ async def scan_common_paths(url: str) -> Dict:
                         'waf_detected': True,
                         'waf_type': waf_analysis['waf_type'],
                         'evidence': waf_analysis['evidence'],
-                        'confidence': waf_analysis['confidence']
+                        'confidence': waf_analysis['confidence'],
+                        'detection_methods': waf_analysis.get('detection_methods', [])
                     })
                 
                 # Check if path is accessible
@@ -726,20 +837,79 @@ async def scan_common_paths(url: str) -> Dict:
         else:
             print(f"❌ No WAF detected via active probe")
     
-    # Finalize results
+    # Finalize WAF analysis with comprehensive detection summary
     scan_results['waf_analysis']['blocked_requests'] = analyzer.blocked_requests
     
-    # Finalize results
-    scan_results['waf_analysis']['blocked_requests'] = analyzer.blocked_requests
-    
+    # Enhanced WAF Detection Summary (based on your manual/automated detection techniques)
     if scan_results['waf_analysis']['waf_detected']:
         confidence = scan_results['waf_analysis']['confidence']
+        waf_type = scan_results['waf_analysis'].get('waf_type', 'Unknown')
+        evidence = scan_results['waf_analysis'].get('evidence', [])
+        detection_methods = scan_results['waf_analysis'].get('detection_methods', [])
+        
+        # Determine protection level based on confidence and evidence
         if confidence >= 80:
             scan_results['waf_analysis']['protection_level'] = 'High'
         elif confidence >= 50:
             scan_results['waf_analysis']['protection_level'] = 'Medium'
         else:
             scan_results['waf_analysis']['protection_level'] = 'Low'
+        
+        # Add detection method summary
+        scan_results['waf_analysis']['detection_summary'] = {
+            'primary_detection_method': detection_methods[0] if detection_methods else 'unknown',
+            'all_detection_methods': detection_methods,
+            'evidence_count': len(evidence),
+            'manual_verification_possible': True,  # Always possible to manually verify
+            'automated_tools_compatible': True,     # Our detection is compatible with automated tools
+        }
+        
+        # Special handling for high-confidence detections (like cookie-based)
+        if 'cookie_detection' in detection_methods:
+            scan_results['waf_analysis']['detection_summary']['manual_verification_method'] = 'Check browser cookies for WAF-specific cookies'
+            if 'ns_af' in str(evidence).lower():
+                scan_results['waf_analysis']['detection_summary']['manual_verification_method'] = 'Check for ns_af cookie indicating Citrix NetScaler App Firewall'
+        
+        if 'custom_error_detection' in detection_methods:
+            scan_results['waf_analysis']['detection_summary']['manual_verification_method'] = 'Send malicious requests and observe custom error messages'
+        
+        if 'header_detection' in detection_methods:
+            scan_results['waf_analysis']['detection_summary']['manual_verification_method'] = 'Inspect HTTP response headers for WAF-specific headers'
+        
+        # Add automation tool recommendations
+        scan_results['waf_analysis']['detection_summary']['recommended_tools'] = []
+        if confidence >= 70:
+            scan_results['waf_analysis']['detection_summary']['recommended_tools'].extend([
+                'wafw00f - WAF fingerprinting tool',
+                'Nmap http-waf-detect script',
+                'Manual cookie inspection'
+            ])
+        
+        print(f"✅ WAF DETECTED: {waf_type} (Confidence: {confidence}%, Protection: {scan_results['waf_analysis']['protection_level']})")
+        print(f"   Detection Methods: {', '.join(detection_methods)}")
+        print(f"   Evidence: {len(evidence)} indicators found")
+        
+        # Manual verification guidance
+        if 'cookie_detection' in detection_methods:
+            print(f"   💡 Manual Verification: Check browser cookies for WAF-specific cookies")
+        if 'custom_error_detection' in detection_methods:
+            print(f"   💡 Manual Verification: Send test payloads and observe custom error messages")
+    else:
+        scan_results['waf_analysis']['protection_level'] = 'None'
+        scan_results['waf_analysis']['detection_summary'] = {
+            'primary_detection_method': 'none',
+            'all_detection_methods': [],
+            'evidence_count': 0,
+            'manual_verification_possible': True,
+            'automated_tools_compatible': True,
+            'manual_verification_method': 'Send malicious payloads and check for blocking or error responses',
+            'recommended_tools': [
+                'wafw00f - Comprehensive WAF detection',
+                'Nmap http-waf-detect script',
+                'Manual payload testing'
+            ]
+        }
+        print(f"❌ NO WAF DETECTED - Consider implementing WAF protection")
     
     scan_results['scan_summary']['scan_duration'] = round(time.time() - start_time, 2)
     

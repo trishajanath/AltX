@@ -157,6 +157,11 @@ async def scan(request: ScanRequest):
             "summary": summary
         }
         
+        # Debug logging to see what we're returning
+        print(f"🔍 DEBUG - WAF Analysis Data: {waf_info}")
+        print(f"🔍 DEBUG - DNS Security Data: {dns_security}")
+        print(f"🔍 DEBUG - Scan Response Keys: {list(scan_response.keys())}")
+        
         WebsiteScan.latest_scan = scan_response
         return scan_response
         
@@ -265,21 +270,32 @@ async def analyze_repo_comprehensive(request: RepoAnalysisRequest):
             print("🔍 Performing comprehensive file security scan...")
             file_scan_results = await run_in_threadpool(scan_for_sensitive_files, temp_dir)
             
-            # 2. Deep content scanning for secrets (with false positive filtering)
+            # 2. Deep content scanning for secrets (with proper directory filtering)
             secret_scan_results = []
             if deep_scan:
                 print("🕵️ Performing deep content scanning for secrets...")
                 scanned_files = 0
+                skip_dirs = {
+                    'venv', 'env', '.env', 'virtualenv', '__pycache__', 
+                    'node_modules', '.git', '.svn', 'build', 'dist', 'target',
+                    '.gradle', '.maven', 'vendor', '.next', '.nuxt', 'coverage',
+                    'logs', 'tmp', 'temp', '.tmp', '.temp', '.DS_Store', 
+                    '.vscode', '.idea', 'docker-data'
+                }
+                
                 for root, dirs, files in os.walk(temp_dir):
-                    # Skip .git directory
-                    if '.git' in root:
+                    # Filter out directories we should skip
+                    dirs[:] = [d for d in dirs if not any(skip_pattern in d.lower() for skip_pattern in skip_dirs)]
+                    
+                    # Skip if current directory contains excluded patterns
+                    if any(skip_pattern in root.lower() for skip_pattern in skip_dirs):
                         continue
                     
                     for file in files:
-                        if scanned_files >= 50:  # Limit to prevent timeout
+                        if scanned_files >= 100:  # Increased limit since we're filtering better
                             break
                         
-                        if file.endswith(('.py', '.js', '.json', '.yml', '.yaml', '.env', '.config', '.txt', '.md')):
+                        if file.endswith(('.py', '.js', '.ts', '.jsx', '.tsx', '.json', '.yml', '.yaml', '.env', '.config', '.txt', '.md', '.sh', '.bat')):
                             file_path = os.path.join(root, file)
                             secrets = await run_in_threadpool(scan_file_contents_for_secrets, file_path)
                             
@@ -394,7 +410,7 @@ async def analyze_repo_comprehensive(request: RepoAnalysisRequest):
                 "Low"
             )
             
-            # Enhanced recommendations
+            # Enhanced recommendations with gitignore guidance
             recommendations = []
             
             if file_scan_results.get('sensitive_files'):
@@ -408,6 +424,17 @@ async def analyze_repo_comprehensive(request: RepoAnalysisRequest):
             
             if dependency_scan_results.get('vulnerable_packages'):
                 recommendations.append("📦 HIGH: Update vulnerable dependencies")
+            
+            # Add gitignore recommendations for excluded directories
+            if file_scan_results.get('excluded_directories'):
+                excluded_count = len(file_scan_results['excluded_directories'])
+                recommendations.append(f"📁 HIGH: Found {excluded_count} build/dependency directories (venv, __pycache__, node_modules) - Ensure these are in .gitignore")
+            
+            if file_scan_results.get('gitignore_recommendations'):
+                high_priority_gitignore = [rec for rec in file_scan_results['gitignore_recommendations'] if rec['priority'] == 'High']
+                if high_priority_gitignore:
+                    patterns = [rec['pattern'] for rec in high_priority_gitignore[:3]]
+                    recommendations.append(f"📋 HIGH: Add to .gitignore: {', '.join(patterns)}")
             
             critical_code_issues = [r for r in code_quality_results if r.get('severity') in ['Critical', 'High']]
             if critical_code_issues:
@@ -423,7 +450,7 @@ async def analyze_repo_comprehensive(request: RepoAnalysisRequest):
             if not any('security.md' in f.get('type', '') for f in file_scan_results.get('security_files_found', [])):
                 recommendations.append("📋 LOW: Add SECURITY.md file with security policy")
             
-            comprehensive_results["recommendations"] = recommendations[:8]
+            comprehensive_results["recommendations"] = recommendations[:10]  # Increased to show more recommendations
             
             # Store results for AI chat context
             RepoAnalysis.latest_analysis = comprehensive_results
@@ -1169,6 +1196,26 @@ Return ONLY a JSON object with this exact structure:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fix generation failed: {str(e)}")
     
+@app.get("/debug-scan")
+async def debug_scan():
+    """Debug endpoint to check stored scan data"""
+    if hasattr(WebsiteScan, 'latest_scan') and WebsiteScan.latest_scan:
+        scan_data = WebsiteScan.latest_scan
+        return {
+            "has_scan_data": True,
+            "keys": list(scan_data.keys()),
+            "waf_analysis_keys": list(scan_data.get('waf_analysis', {}).keys()) if scan_data.get('waf_analysis') else None,
+            "dns_security_keys": list(scan_data.get('dns_security', {}).keys()) if scan_data.get('dns_security') else None,
+            "waf_detected": scan_data.get('waf_analysis', {}).get('waf_detected'),
+            "dns_has_data": bool(scan_data.get('dns_security')),
+            "url": scan_data.get('url')
+        }
+    else:
+        return {
+            "has_scan_data": False,
+            "message": "No scan data stored"
+        }
+
 @app.get("/health")
 async def health_check():
     """Check if the API is running"""

@@ -32,6 +32,9 @@ langchain-chroma
 langchain-huggingface
 sentence-transformers
 chromadb
+tensorflow==2.15.0
+transformers==4.36.0
+tf-keras
 
 # Document Processing
 pypdf

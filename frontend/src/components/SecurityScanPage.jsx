@@ -159,6 +159,9 @@ Ready to start? Enter a URL above and select your preferred analysis model!`,
           suggestions: result.suggestions || [],
           ai_assistant_advice: result.ai_assistant_advice,
           summary: result.summary,
+          // Include WAF and DNS security analysis data from backend
+          waf_analysis: result.waf_analysis,
+          dns_security: result.dns_security,
           // Calculate security score from scan_result if not provided
           security_score: result.scan_result?.security_score || 
                          (result.scan_result ? Math.max(0, 100 - (result.scan_result.flags?.length || 0) * 10) : 75)

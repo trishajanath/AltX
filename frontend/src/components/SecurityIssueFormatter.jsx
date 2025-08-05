@@ -1,5 +1,4 @@
 import React from 'react';
-import PageWrapper from './PageWrapper';
 
 const SecurityIssueFormatter = ({ issues, scanResult }) => {
   // Configuration for severity levels (color and icon)
@@ -49,7 +48,7 @@ const SecurityIssueFormatter = ({ issues, scanResult }) => {
   const allIssues = Object.values(categories).flat();
 
   return (
-    <PageWrapper>
+    <>
       <style>
         {`
           :root {
@@ -469,7 +468,7 @@ const SecurityIssueFormatter = ({ issues, scanResult }) => {
           </div>
         </div>
       </div>
-    </PageWrapper>
+    </>
   );
 };
 

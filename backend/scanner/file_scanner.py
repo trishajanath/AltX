@@ -591,7 +591,40 @@ def _format_ssl_analysis(ssl_certificate: dict) -> str:
 
 # --- Enhanced Security Analysis Functions ---
 def scan_dependencies(directory_path: str) -> Dict:
-    """Scan for vulnerable dependencies in package files"""
+    """Scan for vulnerable dependencies in package files with proper directory filtering"""
+    
+    # Directories to skip completely
+    skip_directories = {
+        'venv', 'env', '.env', 'virtualenv', 'venv_*', 'env_*',  # Python virtual environments
+        '__pycache__', '*.egg-info', '.tox', '.pytest_cache', '.coverage',  # Python build/test artifacts
+        'node_modules', 'bower_components', '.npm', 'npm-debug.log*',  # Node.js dependencies
+        '.git', '.svn', '.hg', '.bzr',  # Version control
+        'build', 'dist', 'target', 'out', 'bin', 'obj',  # Build directories
+        '.gradle', '.maven', '.ivy2',  # Java build tools
+        'vendor', 'Godeps', '_workspace',  # Go dependencies
+        '.next', '.nuxt', 'coverage', '.nyc_output',  # Frontend frameworks
+        'logs', '*.log', 'tmp', 'temp', '.tmp', '.temp',  # Temporary files
+        '.DS_Store', 'Thumbs.db', '*.swp', '*.swo',  # OS/Editor files
+        '.vscode', '.idea', '*.sublime-*', '.atom',  # IDE files
+        'docker-data', 'postgres-data', 'mysql-data'  # Docker volumes
+    }
+    
+    def should_skip_directory(dir_path, dir_name):
+        """Check if directory should be skipped"""
+        dir_lower = dir_name.lower()
+        
+        # Check against skip patterns
+        for skip_pattern in skip_directories:
+            if skip_pattern.startswith('*') and dir_lower.endswith(skip_pattern[1:]):
+                return True
+            elif skip_pattern.endswith('*') and dir_lower.startswith(skip_pattern[:-1]):
+                return True
+            elif skip_pattern == dir_lower:
+                return True
+            elif skip_pattern in dir_lower:
+                return True
+        
+        return False
     
     vulnerable_patterns = {
         'package.json': {
@@ -621,8 +654,15 @@ def scan_dependencies(directory_path: str) -> Dict:
     
     try:
         for root, dirs, files in os.walk(directory_path):
-            if '.git' in root:
-                continue
+            # Filter out directories that should be skipped
+            dirs_to_remove = []
+            for dir_name in dirs:
+                if should_skip_directory(root, dir_name):
+                    dirs_to_remove.append(dir_name)
+            
+            # Remove directories from the dirs list to prevent os.walk from entering them
+            for dir_name in dirs_to_remove:
+                dirs.remove(dir_name)
                 
             for file in files:
                 if file in vulnerable_patterns:
@@ -684,7 +724,40 @@ def scan_dependencies(directory_path: str) -> Dict:
         }
 
 def scan_code_quality_patterns(directory_path: str) -> List[Dict]:
-    """Scan for insecure coding patterns across multiple languages"""
+    """Scan for insecure coding patterns across multiple languages with proper directory filtering"""
+    
+    # Directories to skip completely
+    skip_directories = {
+        'venv', 'env', '.env', 'virtualenv', 'venv_*', 'env_*',  # Python virtual environments
+        '__pycache__', '*.egg-info', '.tox', '.pytest_cache', '.coverage',  # Python build/test artifacts
+        'node_modules', 'bower_components', '.npm', 'npm-debug.log*',  # Node.js dependencies
+        '.git', '.svn', '.hg', '.bzr',  # Version control
+        'build', 'dist', 'target', 'out', 'bin', 'obj',  # Build directories
+        '.gradle', '.maven', '.ivy2',  # Java build tools
+        'vendor', 'Godeps', '_workspace',  # Go dependencies
+        '.next', '.nuxt', 'coverage', '.nyc_output',  # Frontend frameworks
+        'logs', '*.log', 'tmp', 'temp', '.tmp', '.temp',  # Temporary files
+        '.DS_Store', 'Thumbs.db', '*.swp', '*.swo',  # OS/Editor files
+        '.vscode', '.idea', '*.sublime-*', '.atom',  # IDE files
+        'docker-data', 'postgres-data', 'mysql-data'  # Docker volumes
+    }
+    
+    def should_skip_directory(dir_path, dir_name):
+        """Check if directory should be skipped"""
+        dir_lower = dir_name.lower()
+        
+        # Check against skip patterns
+        for skip_pattern in skip_directories:
+            if skip_pattern.startswith('*') and dir_lower.endswith(skip_pattern[1:]):
+                return True
+            elif skip_pattern.endswith('*') and dir_lower.startswith(skip_pattern[:-1]):
+                return True
+            elif skip_pattern == dir_lower:
+                return True
+            elif skip_pattern in dir_lower:
+                return True
+        
+        return False
     
     patterns = {
         'python': {
@@ -711,8 +784,15 @@ def scan_code_quality_patterns(directory_path: str) -> List[Dict]:
     
     try:
         for root, dirs, files in os.walk(directory_path):
-            if '.git' in root:
-                continue
+            # Filter out directories that should be skipped
+            dirs_to_remove = []
+            for dir_name in dirs:
+                if should_skip_directory(root, dir_name):
+                    dirs_to_remove.append(dir_name)
+            
+            # Remove directories from the dirs list to prevent os.walk from entering them
+            for dir_name in dirs_to_remove:
+                dirs.remove(dir_name)
                 
             for file in files:
                 file_path = os.path.join(root, file)
