@@ -1,0 +1,761 @@
+SonarSource Security Rules Database - Live Data
+==================================================
+Last Updated: 2025-08-06 23:10:27
+Languages Processed: 20
+Successful Fetches: 20
+Source: https://rules.sonarsource.com
+
+OVERVIEW:
+SonarSource provides comprehensive static analysis rules covering:
+- Security vulnerabilities (OWASP Top 10, CWE, SANS Top 25)
+- Code quality issues
+- Bug detection
+- Maintainability concerns
+
+The rules are continuously updated and cover modern frameworks and technologies.
+
+SECURITY FOCUS AREAS:
+- Injection flaws (SQL, Command, LDAP, etc.)
+- Cross-Site Scripting (XSS)
+- Authentication and session management
+- Access control issues
+- Security misconfigurations
+- Sensitive data exposure
+- Cryptographic failures
+- Input validation
+- Error handling and logging
+- Component vulnerabilities
+
+LANGUAGE-SPECIFIC RULES:
+
+
+JAVA SECURITY RULES:
+==================================================
+Found 735 individual rules for JAVA:
+
+Rule 1: Functions should not be defined with a variable number of arguments
+URL: https://rules.sonarsource.com/java/RSPEC-923/
+Description: Why is this an issue?More Info...
+Language: JAVA
+------------------------------
+
+Rule 2: Return values should not be ignored when they contain the operation status code
+URL: https://rules.sonarsource.com/java/RSPEC-899/
+Description: Why is this an issue?More Info...
+Language: JAVA
+------------------------------
+
+Rule 3: Equality operators should not be used in "for" loop termination conditions
+URL: https://rules.sonarsource.com/java/RSPEC-888/
+Description: Why is this an issue?More Info...
+Language: JAVA
+------------------------------
+
+Rule 4: Increment (++) and decrement (--) operators should not be used in a method call or mixed with other operators in an expression
+URL: https://rules.sonarsource.com/java/RSPEC-881/
+Description: Why is this an issue?More Info...
+Language: JAVA
+------------------------------
+
+Rule 5: Limited dependence should be placed on operator precedence
+URL: https://rules.sonarsource.com/java/RSPEC-864/
+Description: Why is this an issue?More Info...
+Language: JAVA
+------------------------------
+
+
+
+JAVASCRIPT SECURITY RULES:
+==================================================
+Found 422 individual rules for JAVASCRIPT:
+
+Rule 1: Function calls should not pass extra arguments
+URL: https://rules.sonarsource.com/javascript/RSPEC-930/
+Description: Why is this an issue?More Info...
+Language: JAVASCRIPT
+------------------------------
+
+Rule 2: "continue" should not be used
+URL: https://rules.sonarsource.com/javascript/RSPEC-909/
+Description: Why is this an issue?...
+Language: JAVASCRIPT
+------------------------------
+
+Rule 3: Non-empty statements should change control flow or have at least one side-effect
+URL: https://rules.sonarsource.com/javascript/RSPEC-905/
+Description: Why is this an issue?How can I fix it?More Info...
+Language: JAVASCRIPT
+------------------------------
+
+Rule 4: Equality operators should not be used in "for" loop termination conditions
+URL: https://rules.sonarsource.com/javascript/RSPEC-888/
+Description: Why is this an issue?More Info...
+Language: JAVASCRIPT
+------------------------------
+
+Rule 5: Increment (++) and decrement (--) operators should not be used in a method call or mixed with other operators in an expression
+URL: https://rules.sonarsource.com/javascript/RSPEC-881/
+Description: Why is this an issue?...
+Language: JAVASCRIPT
+------------------------------
+
+
+
+TYPESCRIPT SECURITY RULES:
+==================================================
+Found 427 individual rules for TYPESCRIPT:
+
+Rule 1: "continue" should not be used
+URL: https://rules.sonarsource.com/typescript/RSPEC-909/
+Description: Why is this an issue?...
+Language: TYPESCRIPT
+------------------------------
+
+Rule 2: Non-empty statements should change control flow or have at least one side-effect
+URL: https://rules.sonarsource.com/typescript/RSPEC-905/
+Description: Why is this an issue?How can I fix it?More Info...
+Language: TYPESCRIPT
+------------------------------
+
+Rule 3: Equality operators should not be used in "for" loop termination conditions
+URL: https://rules.sonarsource.com/typescript/RSPEC-888/
+Description: Why is this an issue?More Info...
+Language: TYPESCRIPT
+------------------------------
+
+Rule 4: Increment (++) and decrement (--) operators should not be used in a method call or mixed with other operators in an expression
+URL: https://rules.sonarsource.com/typescript/RSPEC-881/
+Description: Why is this an issue?...
+Language: TYPESCRIPT
+------------------------------
+
+Rule 5: Comma operator should not be used
+URL: https://rules.sonarsource.com/typescript/RSPEC-878/
+Description: Why is this an issue?More Info...
+Language: TYPESCRIPT
+------------------------------
+
+
+
+PYTHON SECURITY RULES:
+==================================================
+Found 383 individual rules for PYTHON:
+
+Rule 1: Functions and methods should only return expected values
+URL: https://rules.sonarsource.com/python/RSPEC-935/
+Description: Why is this an issue?How can I fix it?More Info...
+Language: PYTHON
+------------------------------
+
+Rule 2: The number and name of arguments passed to a function should match its parameters
+URL: https://rules.sonarsource.com/python/RSPEC-930/
+Description: Why is this an issue?More Info...
+Language: PYTHON
+------------------------------
+
+Rule 3: Non-empty statements should change control flow or have at least one side-effect
+URL: https://rules.sonarsource.com/python/RSPEC-905/
+Description: Why is this an issue?How can I fix it?More Info...
+Language: PYTHON
+------------------------------
+
+Rule 4: Issue suppression comment should have the correct format
+URL: https://rules.sonarsource.com/python/RSPEC-7632/
+Description: Why is this an issue?How can I fix it?More Info...
+Language: PYTHON
+------------------------------
+
+Rule 5: Populating a dictionary with a constant value should be done with dict.fromkeys() method call
+URL: https://rules.sonarsource.com/python/RSPEC-7519/
+Description: Why is this an issue?How can I fix it?More Info...
+Language: PYTHON
+------------------------------
+
+
+
+CSHARP SECURITY RULES:
+==================================================
+Found 494 individual rules for CSHARP:
+
+Rule 1: Parameter names should match base declaration and other partial definitions
+URL: https://rules.sonarsource.com/csharp/RSPEC-927/
+Description: Why is this an issue?More Info...
+Language: CSHARP
+------------------------------
+
+Rule 2: "goto" statement should not be used
+URL: https://rules.sonarsource.com/csharp/RSPEC-907/
+Description: Why is this an issue?...
+Language: CSHARP
+------------------------------
+
+Rule 3: Increment (++) and decrement (--) operators should not be used in a method call or mixed with other operators in an expression
+URL: https://rules.sonarsource.com/csharp/RSPEC-881/
+Description: Why is this an issue?...
+Language: CSHARP
+------------------------------
+
+Rule 4: Literal suffixes should be upper case
+URL: https://rules.sonarsource.com/csharp/RSPEC-818/
+Description: Why is this an issue?...
+Language: CSHARP
+------------------------------
+
+Rule 5: Locks should be released within the same method
+URL: https://rules.sonarsource.com/csharp/RSPEC-7133/
+Description: Why is this an issue?More Info...
+Language: CSHARP
+------------------------------
+
+
+
+PHP SECURITY RULES:
+==================================================
+Found 274 individual rules for PHP:
+
+Rule 1: The number of arguments passed to a function should match the number of parameters
+URL: https://rules.sonarsource.com/php/RSPEC-930/
+Description: Why is this an issue?More Info...
+Language: PHP
+------------------------------
+
+Rule 2: "goto" statement should not be used
+URL: https://rules.sonarsource.com/php/RSPEC-907/
+Description: Why is this an issue?...
+Language: PHP
+------------------------------
+
+Rule 3: Non-empty statements should change control flow or have at least one side-effect
+URL: https://rules.sonarsource.com/php/RSPEC-905/
+Description: Why is this an issue?How can I fix it?More Info...
+Language: PHP
+------------------------------
+
+Rule 4: Increment (++) and decrement (--) operators should not be used in a method call or mixed with other operators in an expression
+URL: https://rules.sonarsource.com/php/RSPEC-881/
+Description: Why is this an issue?...
+Language: PHP
+------------------------------
+
+Rule 5: Variables should be initialized before use
+URL: https://rules.sonarsource.com/php/RSPEC-836/
+Description: Why is this an issue?More Info...
+Language: PHP
+------------------------------
+
+
+
+GO SECURITY RULES:
+==================================================
+Found 71 individual rules for GO:
+
+Rule 1: Credentials should not be hard-coded
+URL: https://rules.sonarsource.com/go/RSPEC-6437/
+Description: Why is this an issue?How can I fix it?More Info...
+Language: GO
+------------------------------
+
+Rule 2: Hard-coded secrets are security-sensitive
+URL: https://rules.sonarsource.com/go/RSPEC-6418/
+Description: IDE extension that lets you fix coding issues before they exist!...
+Language: GO
+------------------------------
+
+Rule 3: Constructing arguments of system commands from user input is security-sensitive
+URL: https://rules.sonarsource.com/go/RSPEC-6350/
+Description: IDE extension that lets you fix coding issues before they exist!...
+Language: GO
+------------------------------
+
+Rule 4: Extracting archives should not lead to zip slip vulnerabilities
+URL: https://rules.sonarsource.com/go/RSPEC-6096/
+Description: Why is this an issue?How can I fix it?More Info...
+Language: GO
+------------------------------
+
+Rule 5: JWT should be signed and verified with strong cipher algorithms
+URL: https://rules.sonarsource.com/go/RSPEC-5659/
+Description: Why is this an issue?How can I fix it?More Info...
+Language: GO
+------------------------------
+
+
+
+KOTLIN SECURITY RULES:
+==================================================
+Found 176 individual rules for KOTLIN:
+
+Rule 1: Return values should not be ignored when they contain the operation status code
+URL: https://rules.sonarsource.com/kotlin/RSPEC-899/
+Description: Why is this an issue?More Info...
+Language: KOTLIN
+------------------------------
+
+Rule 2: Sensitive information should not be logged in production builds
+URL: https://rules.sonarsource.com/kotlin/RSPEC-7610/
+Description: Why is this an issue?How can I fix it?More Info...
+Language: KOTLIN
+------------------------------
+
+Rule 3: WebViews should not be vulnerable to cross-app scripting attacks
+URL: https://rules.sonarsource.com/kotlin/RSPEC-7606/
+Description: Why is this an issue?How can I fix it?More Info...
+Language: KOTLIN
+------------------------------
+
+Rule 4: Processing persistent unique identifiers is security-sensitive
+URL: https://rules.sonarsource.com/kotlin/RSPEC-7435/
+Description: IDE extension that lets you fix coding issues before they exist!...
+Language: KOTLIN
+------------------------------
+
+Rule 5: Android production release targets should not be debuggable
+URL: https://rules.sonarsource.com/kotlin/RSPEC-7416/
+Description: Why is this an issue?How can I fix it?More Info...
+Language: KOTLIN
+------------------------------
+
+
+
+SWIFT SECURITY RULES:
+==================================================
+Found 119 individual rules for SWIFT:
+
+Rule 1: Increment (++) and decrement (--) operators should not be used in a method call or mixed with other operators in an expression
+URL: https://rules.sonarsource.com/swift/RSPEC-881/
+Description: Why is this an issue?...
+Language: SWIFT
+------------------------------
+
+Rule 2: Cipher algorithms should be robust
+URL: https://rules.sonarsource.com/swift/RSPEC-5547/
+Description: Why is this an issue?How can I fix it?More Info...
+Language: SWIFT
+------------------------------
+
+Rule 3: Using weak hashing algorithms is security-sensitive
+URL: https://rules.sonarsource.com/swift/RSPEC-4790/
+Description: IDE extension that lets you fix coding issues before they exist!...
+Language: SWIFT
+------------------------------
+
+Rule 4: Parentheses should be omitted when trailing closure is the only argument
+URL: https://rules.sonarsource.com/swift/RSPEC-4233/
+Description: Why is this an issue?...
+Language: SWIFT
+------------------------------
+
+Rule 5: Tuples should not be too large
+URL: https://rules.sonarsource.com/swift/RSPEC-4188/
+Description: Why is this an issue?...
+Language: SWIFT
+------------------------------
+
+
+
+RUBY SECURITY RULES:
+==================================================
+Found 42 individual rules for RUBY:
+
+Rule 1: Multi-line comments should not be empty
+URL: https://rules.sonarsource.com/ruby/RSPEC-4663/
+Description: Why is this an issue?...
+Language: RUBY
+------------------------------
+
+Rule 2: Methods should not have identical implementations
+URL: https://rules.sonarsource.com/ruby/RSPEC-4144/
+Description: Why is this an issue?...
+Language: RUBY
+------------------------------
+
+Rule 3: All branches in a conditional structure should not have exactly the same implementation
+URL: https://rules.sonarsource.com/ruby/RSPEC-3923/
+Description: Why is this an issue?...
+Language: RUBY
+------------------------------
+
+Rule 4: Cognitive Complexity of functions should not be too high
+URL: https://rules.sonarsource.com/ruby/RSPEC-3776/
+Description: Why is this an issue?More Info...
+Language: RUBY
+------------------------------
+
+Rule 5: Non-existent operators like "=+" should not be used
+URL: https://rules.sonarsource.com/ruby/RSPEC-2757/
+Description: Why is this an issue?...
+Language: RUBY
+------------------------------
+
+
+
+SCALA SECURITY RULES:
+==================================================
+Found 41 individual rules for SCALA:
+
+Rule 1: Multi-line comments should not be empty
+URL: https://rules.sonarsource.com/scala/RSPEC-4663/
+Description: Why is this an issue?...
+Language: SCALA
+------------------------------
+
+Rule 2: Methods should not have identical implementations
+URL: https://rules.sonarsource.com/scala/RSPEC-4144/
+Description: Why is this an issue?...
+Language: SCALA
+------------------------------
+
+Rule 3: All branches in a conditional structure should not have exactly the same implementation
+URL: https://rules.sonarsource.com/scala/RSPEC-3923/
+Description: Why is this an issue?...
+Language: SCALA
+------------------------------
+
+Rule 4: Cognitive Complexity of functions should not be too high
+URL: https://rules.sonarsource.com/scala/RSPEC-3776/
+Description: Why is this an issue?More Info...
+Language: SCALA
+------------------------------
+
+Rule 5: Scala parser failure
+URL: https://rules.sonarsource.com/scala/RSPEC-2260/
+Description: Why is this an issue?...
+Language: SCALA
+------------------------------
+
+
+
+CPP SECURITY RULES:
+==================================================
+Found 618 individual rules for CPP:
+
+Rule 1: "goto" should jump to labels declared later in the same function
+URL: https://rules.sonarsource.com/cpp/RSPEC-999/
+Description: Why is this an issue?More Info...
+Language: CPP
+------------------------------
+
+Rule 2: The name "main" should not be used for any function other than the global "main" function
+URL: https://rules.sonarsource.com/cpp/RSPEC-998/
+Description: Why is this an issue?More Info...
+Language: CPP
+------------------------------
+
+Rule 3: The global namespace should only contain "main", namespace declarations, and "extern" C declarations
+URL: https://rules.sonarsource.com/cpp/RSPEC-997/
+Description: Why is this an issue?More Info...
+Language: CPP
+------------------------------
+
+Rule 4: Pointer and reference parameters should be "const" if the corresponding object is not modified
+URL: https://rules.sonarsource.com/cpp/RSPEC-995/
+Description: Why is this an issue?More Info...
+Language: CPP
+------------------------------
+
+Rule 5: A variable which is not modified shall be const qualified
+URL: https://rules.sonarsource.com/cpp/RSPEC-994/
+Description: Why is this an issue?More Info...
+Language: CPP
+------------------------------
+
+
+
+C SECURITY RULES:
+==================================================
+Found 317 individual rules for C:
+
+Rule 1: "goto" should jump to labels declared later in the same function
+URL: https://rules.sonarsource.com/c/RSPEC-999/
+Description: Why is this an issue?More Info...
+Language: C
+------------------------------
+
+Rule 2: Pointer and reference parameters should be "const" if the corresponding object is not modified
+URL: https://rules.sonarsource.com/c/RSPEC-995/
+Description: Why is this an issue?More Info...
+Language: C
+------------------------------
+
+Rule 3: "<time.h>" should not be used
+URL: https://rules.sonarsource.com/c/RSPEC-991/
+Description: Why is this an issue?More Info...
+Language: C
+------------------------------
+
+Rule 4: "abort", "exit", "getenv" and "system" from <stdlib.h> should not be used
+URL: https://rules.sonarsource.com/c/RSPEC-990/
+Description: Why is this an issue?More Info...
+Language: C
+------------------------------
+
+Rule 5: "atof", "atoi" and "atol" from <stdlib.h> should not be used
+URL: https://rules.sonarsource.com/c/RSPEC-989/
+Description: Why is this an issue?More Info...
+Language: C
+------------------------------
+
+
+
+CSS SECURITY RULES:
+==================================================
+Found 26 individual rules for CSS:
+
+Rule 1: Expressions within "calc" should be valid
+URL: https://rules.sonarsource.com/css/RSPEC-5362/
+Description: Why is this an issue?...
+Language: CSS
+------------------------------
+
+Rule 2: Selectors should be known
+URL: https://rules.sonarsource.com/css/RSPEC-4670/
+Description: Why is this an issue?...
+Language: CSS
+------------------------------
+
+Rule 3: Single line comment syntax should not be used
+URL: https://rules.sonarsource.com/css/RSPEC-4668/
+Description: Why is this an issue?...
+Language: CSS
+------------------------------
+
+Rule 4: CSS files should not be empty
+URL: https://rules.sonarsource.com/css/RSPEC-4667/
+Description: Why is this an issue?...
+Language: CSS
+------------------------------
+
+Rule 5: Selectors should not be duplicated
+URL: https://rules.sonarsource.com/css/RSPEC-4666/
+Description: Why is this an issue?How can I fix it?More Info...
+Language: CSS
+------------------------------
+
+
+
+HTML SECURITY RULES:
+==================================================
+Found 84 individual rules for HTML:
+
+Rule 1: Label elements should have a text label and an associated control
+URL: https://rules.sonarsource.com/html/RSPEC-6853/
+Description: Why is this an issue?How can I fix it?More Info...
+Language: HTML
+------------------------------
+
+Rule 2: Elements with an interactive role should support focus
+URL: https://rules.sonarsource.com/html/RSPEC-6852/
+Description: Why is this an issue?How can I fix it?More Info...
+Language: HTML
+------------------------------
+
+Rule 3: Images should have a non-redundant alternate description
+URL: https://rules.sonarsource.com/html/RSPEC-6851/
+Description: Why is this an issue?How can I fix it?More Info...
+Language: HTML
+------------------------------
+
+Rule 4: Heading elements should have accessible content
+URL: https://rules.sonarsource.com/html/RSPEC-6850/
+Description: Why is this an issue?How can I fix it?More Info...
+Language: HTML
+------------------------------
+
+Rule 5: Non-interactive DOM elements should not have an interactive handler
+URL: https://rules.sonarsource.com/html/RSPEC-6848/
+Description: Why is this an issue?How can I fix it?More Info...
+Language: HTML
+------------------------------
+
+
+
+DOCKER SECURITY RULES:
+==================================================
+Found 44 individual rules for DOCKER:
+
+Rule 1: Reduce the amount of consecutive RUN instructions
+URL: https://rules.sonarsource.com/docker/RSPEC-7031/
+Description: Why is this an issue?How can I fix it?More Info...
+Language: DOCKER
+------------------------------
+
+Rule 2: Malformed JSON in Exec form leads to unexpected behavior
+URL: https://rules.sonarsource.com/docker/RSPEC-7030/
+Description: Why is this an issue?How can I fix it?More Info...
+Language: DOCKER
+------------------------------
+
+Rule 3: Prefer COPY over ADD for copying local resources
+URL: https://rules.sonarsource.com/docker/RSPEC-7029/
+Description: Why is this an issue?How can I fix it?More Info...
+Language: DOCKER
+------------------------------
+
+Rule 4: Descriptive labels are mandatory
+URL: https://rules.sonarsource.com/docker/RSPEC-7028/
+Description: Why is this an issue?How can I fix it?More Info...
+Language: DOCKER
+------------------------------
+
+Rule 5: Use ADD instruction to retrieve remote resources
+URL: https://rules.sonarsource.com/docker/RSPEC-7026/
+Description: Why is this an issue?How can I fix it?More Info...
+Language: DOCKER
+------------------------------
+
+
+
+TERRAFORM SECURITY RULES:
+==================================================
+Found 52 individual rules for TERRAFORM:
+
+Rule 1: AWS resource tags should have valid format
+URL: https://rules.sonarsource.com/terraform/RSPEC-7452/
+Description: Why is this an issue?How can I fix it?More Info...
+Language: TERRAFORM
+------------------------------
+
+Rule 2: Excluding users or groups activities from audit logs is security-sensitive
+URL: https://rules.sonarsource.com/terraform/RSPEC-6414/
+Description: IDE extension that lets you fix coding issues before they exist!...
+Language: TERRAFORM
+------------------------------
+
+Rule 3: Defining a short log retention duration is security-sensitive
+URL: https://rules.sonarsource.com/terraform/RSPEC-6413/
+Description: IDE extension that lets you fix coding issues before they exist!...
+Language: TERRAFORM
+------------------------------
+
+Rule 4: Unversioned Google Cloud Storage buckets are security-sensitive
+URL: https://rules.sonarsource.com/terraform/RSPEC-6412/
+Description: IDE extension that lets you fix coding issues before they exist!...
+Language: TERRAFORM
+------------------------------
+
+Rule 5: Google Cloud load balancers SSL policies should not offer weak cipher suites
+URL: https://rules.sonarsource.com/terraform/RSPEC-6410/
+Description: Why is this an issue?How can I fix it?More Info...
+Language: TERRAFORM
+------------------------------
+
+
+
+KUBERNETES SECURITY RULES:
+==================================================
+Found 24 individual rules for KUBERNETES:
+
+Rule 1: Environment variables for a container should not be duplicated
+URL: https://rules.sonarsource.com/kubernetes/RSPEC-6907/
+Description: Why is this an issue?How can I fix it?More Info...
+Language: KUBERNETES
+------------------------------
+
+Rule 2: Storage requests should be specified
+URL: https://rules.sonarsource.com/kubernetes/RSPEC-6897/
+Description: Why is this an issue?How can I fix it?More Info...
+Language: KUBERNETES
+------------------------------
+
+Rule 3: Ensure whitespace in-between braces in template directives
+URL: https://rules.sonarsource.com/kubernetes/RSPEC-6893/
+Description: Why is this an issue?How can I fix it?More Info...
+Language: KUBERNETES
+------------------------------
+
+Rule 4: CPU requests should be specified
+URL: https://rules.sonarsource.com/kubernetes/RSPEC-6892/
+Description: Why is this an issue?How can I fix it?More Info...
+Language: KUBERNETES
+------------------------------
+
+Rule 5: Memory requests should be specified
+URL: https://rules.sonarsource.com/kubernetes/RSPEC-6873/
+Description: Why is this an issue?How can I fix it?More Info...
+Language: KUBERNETES
+------------------------------
+
+
+
+DART SECURITY RULES:
+==================================================
+Found 127 individual rules for DART:
+
+Rule 1: Parameter names should match base declaration
+URL: https://rules.sonarsource.com/dart/RSPEC-927/
+Description: Why is this an issue?More Info...
+Language: DART
+------------------------------
+
+Rule 2: Allowing unrestricted navigation in WebViews is security-sensitive
+URL: https://rules.sonarsource.com/dart/RSPEC-7485/
+Description: IDE extension that lets you fix coding issues before they exist!...
+Language: DART
+------------------------------
+
+Rule 3: Processing persistent unique identifiers is security-sensitive
+URL: https://rules.sonarsource.com/dart/RSPEC-7435/
+Description: IDE extension that lets you fix coding issues before they exist!...
+Language: DART
+------------------------------
+
+Rule 4: Exposing native code through JavaScript interfaces is security-sensitive
+URL: https://rules.sonarsource.com/dart/RSPEC-7409/
+Description: IDE extension that lets you fix coding issues before they exist!...
+Language: DART
+------------------------------
+
+Rule 5: "child" properties should be placed last in widget instantiation
+URL: https://rules.sonarsource.com/dart/RSPEC-7124/
+Description: Why is this an issue?How can I fix it?More Info...
+Language: DART
+------------------------------
+
+
+
+RUST SECURITY RULES:
+==================================================
+Found 86 individual rules for RUST:
+
+Rule 1: Match expression conditions should not have boolean type
+URL: https://rules.sonarsource.com/rust/RSPEC-920/
+Description: Why is this an issue?More Info...
+Language: RUST
+------------------------------
+
+Rule 2: Non-empty statements should change control flow or have at least one side-effect
+URL: https://rules.sonarsource.com/rust/RSPEC-905/
+Description: Why is this an issue?How can I fix it?More Info...
+Language: RUST
+------------------------------
+
+Rule 3: Infinite iterators should be finished off with a terminating operation
+URL: https://rules.sonarsource.com/rust/RSPEC-7464/
+Description: Why is this an issue?More Info...
+Language: RUST
+------------------------------
+
+Rule 4: `saturating_sub` should be used to avoid subtraction underflow
+URL: https://rules.sonarsource.com/rust/RSPEC-7463/
+Description: Why is this an issue?More Info...
+Language: RUST
+------------------------------
+
+Rule 5: `mem::uninitialized` and `mem::zeroed()` should not be used to replace values
+URL: https://rules.sonarsource.com/rust/RSPEC-7462/
+Description: Why is this an issue?More Info...
+Language: RUST
+------------------------------
+
+
+
+INTEGRATION NOTES:
+================
+- Use SonarQube/SonarCloud for automated analysis
+- Rules are mapped to industry standards (CWE, OWASP, etc.)
+- Regular updates ensure coverage of latest vulnerabilities
+- IDE plugins available for real-time analysis
+- CI/CD integration supported
+
+For the most current rules, visit: https://rules.sonarsource.com
+Total rules database contains 6000+ rules across 30+ languages.

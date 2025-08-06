@@ -1,0 +1,64 @@
+SonarSource Security Rules Database
+=====================================
+
+URL: https://rules.sonarsource.com/
+
+Description:
+SonarSource provides comprehensive security vulnerability detection rules for multiple programming languages including:
+
+Languages Covered:
+- Java
+- JavaScript/TypeScript
+- Python
+- C/C++
+- C#
+- PHP
+- Go
+- Kotlin
+- Swift
+- Ruby
+- Scala
+- HTML
+- CSS
+- XML
+- YAML
+- Docker
+- Kubernetes
+- Terraform
+- CloudFormation
+- And many more...
+
+Key Features:
+1. **Vulnerability Detection**: Covers OWASP Top 10, CWE (Common Weakness Enumeration), and SANS Top 25
+2. **Code Quality**: Detects bugs, code smells, and maintainability issues
+3. **Security Hotspots**: Identifies security-sensitive code that needs manual review
+4. **Multi-language Support**: Comprehensive coverage across major programming languages
+5. **Regular Updates**: Continuously updated with new vulnerability patterns
+
+Categories of Security Rules:
+- **Injection Flaws**: SQL injection, command injection, LDAP injection
+- **Authentication & Session Management**: Weak authentication, session fixation
+- **Cross-Site Scripting (XSS)**: Reflected, stored, DOM-based XSS
+- **Cross-Site Request Forgery (CSRF)**
+- **Security Misconfigurations**: Default passwords, debug mode enabled
+- **Sensitive Data Exposure**: Hardcoded credentials, unencrypted data
+- **Access Control Issues**: Privilege escalation, path traversal
+- **Cryptographic Issues**: Weak encryption, improper key management
+- **Input Validation**: Buffer overflows, format string vulnerabilities
+- **Error Handling**: Information disclosure through error messages
+
+Usage in Security Analysis:
+This resource should be integrated into automated security scanning tools and used as a reference for:
+- Static code analysis rule development
+- Security code review checklists
+- Vulnerability assessment methodologies
+- Developer training on secure coding practices
+
+Integration Recommendations:
+1. Use SonarQube/SonarCloud for automated scanning
+2. Reference specific rule IDs in security reports
+3. Map findings to CWE/CVE identifiers for standardization
+4. Include in CI/CD pipelines for continuous security assessment
+
+Last Updated: August 2025
+Source: SonarSource - https://www.sonarsource.com/

@@ -50,8 +50,19 @@ def load_documents_by_type(knowledge_base_path: str) -> List[Document]:
     
     return all_documents
 
-def build_database(rebuild_from_scratch: bool = False):
+def build_database(rebuild_from_scratch: bool = False, fetch_web_data: bool = False):
     print("🚀 Starting RAG database build...")
+    
+    # Fetch fresh web data if requested
+    if fetch_web_data:
+        try:
+            from web_scraper import update_knowledge_base_with_web_data
+            print("🌐 Fetching fresh web data...")
+            update_knowledge_base_with_web_data()
+        except ImportError:
+            print("⚠️  Web scraper not available, skipping web data fetch")
+        except Exception as e:
+            print(f"⚠️  Error fetching web data: {e}")
     
     # Configuration
     knowledge_base_path = "knowledge_base"
@@ -137,12 +148,16 @@ def build_database(rebuild_from_scratch: bool = False):
 if __name__ == "__main__":
     import sys
     
-    # Check for rebuild flag
+    # Check for flags
     rebuild = "--rebuild" in sys.argv or "-r" in sys.argv
+    fetch_web = "--web" in sys.argv or "-w" in sys.argv
     
     if rebuild:
         print("🔄 Rebuilding database from scratch...")
-        build_database(rebuild_from_scratch=True)
     else:
         print("➕ Incremental update mode...")
-        build_database(rebuild_from_scratch=False)
+        
+    if fetch_web:
+        print("🌐 Will fetch fresh web data...")
+        
+    build_database(rebuild_from_scratch=rebuild, fetch_web_data=fetch_web)
