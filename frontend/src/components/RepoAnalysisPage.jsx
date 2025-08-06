@@ -19,6 +19,20 @@ const RepoAnalysisPage = () => {
 
   const navigate = useNavigate();
 
+  // Safe render function to handle any type of data
+  const safeRender = (data) => {
+    if (data === null || data === undefined) return '';
+    if (typeof data === 'string' || typeof data === 'number') return data;
+    if (typeof data === 'object') {
+      try {
+        return JSON.stringify(data);
+      } catch (e) {
+        return '[Object]';
+      }
+    }
+    return String(data);
+  };
+
   // Clean and validate GitHub repository URLs
   const cleanRepositoryUrl = (url) => {
     try {
@@ -77,31 +91,79 @@ const RepoAnalysisPage = () => {
       });
 
       const data = await response.json();
+      
+      // Debug log to see the data structure
+      console.log('Analysis result data:', data);
+      if (data.recommendations) {
+        console.log('Recommendations structure:', data.recommendations);
+        data.recommendations.forEach((rec, i) => {
+          console.log(`Recommendation ${i}:`, rec, typeof rec);
+        });
+      }
 
       if (data.error) {
         setError(data.error);
         setAnalysisLogs(prev => [...prev, `❌ Analysis failed: ${data.error}`]);
       } else {
-        setAnalysisResult(data);
-        setAnalysisLogs(prev => [...prev, '✅ Repository analysis completed successfully!']);
+        // Check if we have partial results even with some errors
+        const hasPartialResults = data.repository_info || data.security_summary || 
+                                 data.file_security_scan || data.secret_scan_results ||
+                                 data.static_analysis_results || data.dependency_scan_results;
 
-        if (data.warnings && data.warnings.length > 0) {
-          data.warnings.forEach(warning => {
-            setAnalysisLogs(prev => [...prev, `⚠️ Warning: ${warning}`]);
-          });
+        if (hasPartialResults) {
+          setAnalysisResult(data);
+          
+          // Show completion message based on whether there were critical errors
+          if (data.analysis_errors && data.analysis_errors.length > 0) {
+            setAnalysisLogs(prev => [...prev, '⚠️ Repository analysis completed with some errors - partial results available']);
+            
+            // Log specific analysis errors
+            data.analysis_errors.forEach(error => {
+              setAnalysisLogs(prev => [...prev, `❌ Analysis Error: ${error}`]);
+            });
+          } else {
+            setAnalysisLogs(prev => [...prev, '✅ Repository analysis completed successfully!']);
+          }
+
+          if (data.warnings && data.warnings.length > 0) {
+            data.warnings.forEach(warning => {
+              setAnalysisLogs(prev => [...prev, `⚠️ Warning: ${warning}`]);
+            });
+          }
+        } else {
+          setError('Analysis completed but no results were returned. Please try again.');
+          setAnalysisLogs(prev => [...prev, '❌ No analysis results received']);
         }
 
-        const summary = generateAnalysisSummary(data);
-        setChatMessages([{
-          type: 'ai',
-          message: summary,
-          timestamp: new Date().toLocaleTimeString()
-        }]);
+        // Generate AI summary if we have any results
+        if (hasPartialResults) {
+          const summary = generateAnalysisSummary(data);
+          setChatMessages([{
+            type: 'ai',
+            message: summary,
+            timestamp: new Date().toLocaleTimeString()
+          }]);
+        }
       }
     } catch (err) {
-      const errorMsg = 'Failed to analyze repository. Please check your connection and try again.';
+      console.error('Full error details:', err);
+      console.error('Error name:', err.name);
+      console.error('Error message:', err.message);
+      let errorMsg = 'Failed to analyze repository. ';
+      
+      if (err.name === 'TypeError' && err.message.includes('fetch')) {
+        errorMsg += 'Unable to connect to analysis server. Please ensure the backend is running on http://localhost:8000';
+      } else if (err.message.includes('JSON')) {
+        errorMsg += 'Server returned invalid response. The analysis may have partially completed.';
+      } else if (err.message.includes('network') || err.message.includes('ECONNREFUSED')) {
+        errorMsg += 'Network connection failed. Please check your connection and ensure the backend server is running.';
+      } else {
+        errorMsg += 'Please check your connection and try again.';
+      }
+      
       setError(errorMsg);
       setAnalysisLogs(prev => [...prev, `❌ ${errorMsg}`]);
+      setAnalysisLogs(prev => [...prev, `🔍 Technical Error: ${err.message}`]);
       console.error('Repository analysis error:', err);
     } finally {
       setIsScanning(false);
@@ -113,12 +175,21 @@ const RepoAnalysisPage = () => {
     const level = data.security_level || 'Unknown';
     const summary = data.security_summary || {};
     
-    return `🔍 **Repository Analysis Complete**
+    // Check if analysis had errors
+    const hasErrors = data.analysis_errors && data.analysis_errors.length > 0;
+    const analysisStatus = hasErrors ? '⚠️ **Repository Analysis Complete (with warnings)**' : '🔍 **Repository Analysis Complete**';
+    
+    let analysisNote = '';
+    if (hasErrors) {
+      analysisNote = `\n⚠️ **Note:** Some analysis tools encountered issues but core security scanning completed successfully.\n`;
+    }
+    
+    return `${analysisStatus}${analysisNote}
 
 📊 **Security Summary:**
 • Repository: ${data.repository_info?.name || 'Unknown'}
 • Security Score: ${score}/100 (${level})
-• Language: ${data.repository_info?.language || 'Unknown'}
+• Language: ${data.repository_info?.language || 'Unknown'}${data.repository_info?.stars ? `\n• Stars: ${data.repository_info.stars}` : ''}
 
 🔍 **Scan Results:**
 • Files Scanned: ${summary.total_files_scanned || 0}
@@ -132,7 +203,7 @@ const RepoAnalysisPage = () => {
 • Excluded Directories: ${data.file_security_scan?.excluded_directories?.length || 0}
 • GitIgnore Recommendations: ${data.file_security_scan?.gitignore_recommendations?.length || 0}
 
-💡 **Ready to answer specific questions about this repository analysis!**`;
+💡 **Ready to answer specific questions about this repository analysis!**${hasErrors ? '\n\n🛠️ **Tip:** Some advanced features may have been limited due to system compatibility issues.' : ''}`;
   };
 
   const askAI = async () => {
@@ -235,20 +306,28 @@ const RepoAnalysisPage = () => {
         {`
           :root {
             --primary-green: #00f5c3;
-            --secondary-blue: #00d4ff;
-            --dark-bg: #0a0a0a; 
-            --card-bg: rgba(26, 26, 26, 0.8);
-            --card-bg-hover: rgba(38, 38, 38, 0.9);
+            --background-dark: #0a0a0a;
+            --card-bg: rgba(26, 26, 26, 0.5);
+            --card-bg-hover: rgba(36, 36, 36, 0.7);
             --card-border: rgba(255, 255, 255, 0.1);
-            --card-border-hover: rgba(255, 255, 255, 0.2);
-            --text-light: #f8fafc;
-            --text-muted: #a1a1aa;
+            --card-border-hover: rgba(0, 245, 195, 0.5);
+            --text-light: #f5f5f5;
+            --text-dark: #a3a3a3;
+            --input-bg: #1a1a1a;
+            --input-border: #3a3a3a;
+            --input-focus-border: var(--primary-green);
+          }
+
+          body {
+            background-color: var(--background-dark);
+            color: var(--text-light);
+            font-family: sans-serif;
           }
           
           .page-container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
-            padding: 0 1rem;
+            padding: 0 1.5rem;
           }
           
           .content-wrapper {
@@ -270,7 +349,7 @@ const RepoAnalysisPage = () => {
           }
           
           .hero-title {
-            font-size: 2.5rem;
+            font-size: 5rem;
             font-weight: 900;
             letter-spacing: -0.05em;
             color: var(--text-light);
@@ -280,7 +359,7 @@ const RepoAnalysisPage = () => {
           }
           
           .hero-subtitle {
-            font-size: 1.125rem;
+            font-size: 1.45rem;
             line-height: 1.75rem;
             color: var(--text-dark);
             margin-bottom: 2rem;
@@ -459,11 +538,8 @@ const RepoAnalysisPage = () => {
       <div className="content-wrapper">
         <div className="hero-section">
           <div className="hero-content">
-            <div className="hero-title">
-              <h1>Repository Security Analysis</h1>
-              <p>Comprehensive security analysis for GitHub repositories</p>
-            </div>
-
+            <h1 className="hero-title">Repository Security Analysis</h1>
+            <p className="hero-subtitle">Comprehensive security analysis for GitHub repositories</p>
             {/* Scan Configuration */}
             <div className="card">
               <h3>Repository Analysis</h3>
@@ -604,7 +680,7 @@ const RepoAnalysisPage = () => {
             <div className={`analysis-results ${showAISidebar ? 'with-sidebar' : ''}`}>
 
               {/* Analysis Status & Warnings */}
-              {(analysisResult.warnings && analysisResult.warnings.length > 0) && (
+              {(analysisResult.warnings && Array.isArray(analysisResult.warnings) && analysisResult.warnings.length > 0) && (
                 <div className="card">
                   <h3>⚠️ Analysis Warnings</h3>
                   <div style={{ display: 'grid', gap: '8px' }}>
@@ -617,13 +693,65 @@ const RepoAnalysisPage = () => {
                         borderLeft: '4px solid #f59e0b',
                         fontSize: '14px'
                       }}>
-                        {warning}
+                        {typeof warning === 'string' ? warning : 
+                         typeof warning === 'object' ? JSON.stringify(warning) : 
+                         String(warning)}
                       </div>
                     ))}
                   </div>
                   <p style={{ color: '#a1a1aa', fontSize: '12px', marginTop: '12px', marginBottom: '0' }}>
                     Note: Some analysis tools may have encountered issues, but core security scanning completed successfully.
                   </p>
+                </div>
+              )}
+
+              {/* Analysis Errors */}
+              {(analysisResult.analysis_errors && Array.isArray(analysisResult.analysis_errors) && analysisResult.analysis_errors.length > 0) && (
+                <div className="card">
+                  <h3>🔧 Analysis Issues</h3>
+                  <p style={{ color: '#a1a1aa', fontSize: '14px', marginBottom: '16px' }}>
+                    The following analysis tools encountered issues but partial results are still available:
+                  </p>
+                  <div style={{ display: 'grid', gap: '12px' }}>
+                    {analysisResult.analysis_errors.map((error, index) => (
+                      <div key={index} style={{
+                        padding: '16px',
+                        background: 'rgba(239, 68, 68, 0.1)',
+                        border: '1px solid rgba(239, 68, 68, 0.2)',
+                        borderRadius: '8px',
+                        borderLeft: '4px solid #ef4444'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                          <span style={{ fontSize: '16px' }}>🛠️</span>
+                          <div>
+                            <div style={{ fontWeight: '600', fontSize: '14px', marginBottom: '4px' }}>
+                              Analysis Tool Error
+                            </div>
+                            <div style={{ fontSize: '13px', color: '#d1d5db', fontFamily: 'monospace', lineHeight: '1.4' }}>
+                              {typeof error === 'string' ? error : 
+                               typeof error === 'object' ? JSON.stringify(error) : 
+                               String(error)}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ 
+                    marginTop: '16px', 
+                    padding: '12px', 
+                    background: 'rgba(59, 130, 246, 0.1)',
+                    border: '1px solid rgba(59, 130, 246, 0.2)',
+                    borderRadius: '8px',
+                    fontSize: '13px'
+                  }}>
+                    <strong style={{ color: '#3b82f6' }}>💡 Troubleshooting Tips:</strong>
+                    <ul style={{ marginTop: '8px', paddingLeft: '20px', color: '#a1a1aa' }}>
+                      <li>Windows path compatibility issues are common - this doesn't affect core scanning</li>
+                      <li>Some advanced analysis features may be limited on Windows systems</li>
+                      <li>Core security scanning (secrets, dependencies, file analysis) completed successfully</li>
+                    </ul>
+                  </div>
                 </div>
               )}
 
@@ -774,7 +902,7 @@ const RepoAnalysisPage = () => {
                               fontFamily: 'monospace',
                               fontSize: '13px'
                             }}>
-                              📄 {file}
+                              📄 {safeRender(file)}
                             </div>
                           ))}
                         </div>
@@ -796,7 +924,7 @@ const RepoAnalysisPage = () => {
                               fontSize: '12px',
                               fontFamily: 'monospace'
                             }}>
-                              📁 {dir}
+                              📁 {safeRender(dir)}
                             </span>
                           ))}
                         </div>
@@ -818,7 +946,7 @@ const RepoAnalysisPage = () => {
                         }}>
                           {analysisResult.file_security_scan.gitignore_recommendations.map((rec, index) => (
                             <div key={index} style={{ marginBottom: '4px' }}>
-                              + {rec}
+                              + {safeRender(rec)}
                             </div>
                           ))}
                         </div>
@@ -829,9 +957,91 @@ const RepoAnalysisPage = () => {
               )}
 
               {/* Recommendations */}
-              {analysisResult.recommendations && analysisResult.recommendations.length > 0 && (
+              {analysisResult.recommendations && Array.isArray(analysisResult.recommendations) && analysisResult.recommendations.length > 0 && (
                 <div className="card">
-                  {/* ... recommendations content ... */}
+                  <h3>💡 Security Recommendations ({analysisResult.recommendations.length})</h3>
+                  <p style={{ color: '#a1a1aa', fontSize: '14px', marginBottom: '16px' }}>
+                    AI-generated security improvement suggestions:
+                  </p>
+                  <div style={{ display: 'grid', gap: '16px' }}>
+                    {analysisResult.recommendations.slice(0, 10).map((rec, index) => {
+                      // Ensure rec is properly handled
+                      if (!rec) return null;
+                      
+                      return (
+                        <div key={index} style={{
+                          padding: '20px',
+                          background: 'rgba(59, 130, 246, 0.1)',
+                          border: '1px solid rgba(59, 130, 246, 0.2)',
+                          borderRadius: '12px',
+                          borderLeft: '4px solid #3b82f6'
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
+                            <div style={{ flex: 1 }}>
+                              <div style={{ fontWeight: '600', marginBottom: '8px', fontSize: '15px' }}>
+                                {typeof rec === 'string' ? rec : 
+                                 typeof rec === 'object' ? (rec.title || rec.description || JSON.stringify(rec).substring(0, 50) + '...') : 
+                                 'Security Recommendation'}
+                              </div>
+                              {rec && typeof rec === 'object' && rec.file && (
+                                <div style={{ 
+                                  fontFamily: 'monospace', 
+                                  fontSize: '12px', 
+                                  color: '#a1a1aa',
+                                  background: 'rgba(0, 0, 0, 0.2)',
+                                  padding: '4px 8px',
+                                  borderRadius: '4px',
+                                  display: 'inline-block'
+                                }}>
+                                  📁 {String(rec.file)}
+                                </div>
+                              )}
+                            </div>
+                            {rec && typeof rec === 'object' && rec.risk && (
+                              <span style={{
+                                background: rec.risk === 'High' ? '#ef4444' :
+                                           rec.risk === 'Medium' ? '#f59e0b' : '#6b7280',
+                                color: 'white',
+                                padding: '6px 12px',
+                                borderRadius: '16px',
+                                fontSize: '12px',
+                                fontWeight: '600'
+                              }}>
+                                {String(rec.risk)} Risk
+                              </span>
+                            )}
+                          </div>
+
+                          {rec && typeof rec === 'object' && rec.pattern && (
+                            <div style={{ 
+                              fontSize: '13px', 
+                              color: '#d1d5db', 
+                              marginBottom: '8px',
+                              background: 'rgba(0, 0, 0, 0.2)',
+                              padding: '8px',
+                              borderRadius: '6px',
+                              fontFamily: 'monospace'
+                            }}>
+                              <strong>Pattern:</strong> {String(rec.pattern)}
+                            </div>
+                          )}
+
+                          {rec && typeof rec === 'object' && rec.fix && (
+                            <div style={{ 
+                              fontSize: '13px', 
+                              color: '#22c55e',
+                              background: 'rgba(34, 197, 94, 0.1)',
+                              padding: '8px',
+                              borderRadius: '6px',
+                              marginTop: '8px'
+                            }}>
+                              <strong>💡 Suggested Fix:</strong> {String(rec.fix)}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }).filter(Boolean)}
+                  </div>
                 </div>
               )}
 
@@ -888,7 +1098,9 @@ const RepoAnalysisPage = () => {
                             borderRadius: '4px',
                             fontFamily: 'monospace'
                           }}>
-                            Found: {secret.match.substring(0, 50)}...
+                            Found: {typeof secret.match === 'string' ? 
+                              secret.match.substring(0, 50) + '...' : 
+                              String(secret.match).substring(0, 50) + '...'}
                           </div>
                         )}
                       </div>
@@ -914,7 +1126,7 @@ const RepoAnalysisPage = () => {
                       }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
                           <div style={{ fontWeight: '600', fontSize: '14px' }}>
-                            {issue.rule_id || issue.description || 'Static Analysis Issue'}
+                            {safeRender(issue.rule_id || issue.description || 'Static Analysis Issue')}
                           </div>
                           <span style={{
                             background: issue.severity === 'HIGH' ? '#ef4444' : '#f59e0b',
@@ -924,7 +1136,7 @@ const RepoAnalysisPage = () => {
                             fontSize: '11px',
                             fontWeight: '600'
                           }}>
-                            {issue.severity || 'MEDIUM'}
+                            {safeRender(issue.severity || 'MEDIUM')}
                           </span>
                         </div>
                         
@@ -935,14 +1147,14 @@ const RepoAnalysisPage = () => {
                             color: '#a1a1aa',
                             marginBottom: '8px'
                           }}>
-                            📁 {issue.filename}
-                            {issue.line_number && ` → Line ${issue.line_number}`}
+                            📁 {safeRender(issue.filename)}
+                            {issue.line_number && ` → Line ${safeRender(issue.line_number)}`}
                           </div>
                         )}
                         
                         {issue.message && (
                           <div style={{ fontSize: '13px', color: '#d1d5db', lineHeight: '1.4' }}>
-                            {issue.message}
+                            {safeRender(issue.message)}
                           </div>
                         )}
                       </div>
@@ -971,7 +1183,7 @@ const RepoAnalysisPage = () => {
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
                           <div style={{ flex: 1 }}>
                             <div style={{ fontWeight: '600', marginBottom: '6px', fontSize: '15px' }}>
-                              {issue.pattern || issue.description || 'Code Quality Issue'}
+                              {safeRender(issue.pattern || issue.description || 'Code Quality Issue')}
                             </div>
                             {issue.file && (
                               <div style={{ 
@@ -983,8 +1195,8 @@ const RepoAnalysisPage = () => {
                                 borderRadius: '4px',
                                 display: 'inline-block'
                               }}>
-                                📁 {issue.file}
-                                {issue.line && ` → Line ${issue.line}`}
+                                📁 {safeRender(issue.file)}
+                                {issue.line && ` → Line ${safeRender(issue.line)}`}
                               </div>
                             )}
                           </div>
@@ -998,7 +1210,7 @@ const RepoAnalysisPage = () => {
                             fontSize: '12px',
                             fontWeight: '600'
                           }}>
-                            {issue.severity || 'Medium'}
+                            {safeRender(issue.severity || 'Medium')}
                           </span>
                         </div>
 
@@ -1023,10 +1235,10 @@ const RepoAnalysisPage = () => {
                               overflowX: 'auto',
                               whiteSpace: 'pre'
                             }}>
-                              {issue.code_snippet && issue.code_snippet.length > 150 ? 
+                              {safeRender(issue.code_snippet && issue.code_snippet.length > 150 ? 
                                 `${issue.code_snippet.substring(0, 150)}...` : 
                                 issue.code_snippet || 'No code snippet available'
-                              }
+                              )}
                             </div>
                           </div>
                         )}
