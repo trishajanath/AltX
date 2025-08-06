@@ -50,17 +50,19 @@ def load_documents_by_type(knowledge_base_path: str) -> List[Document]:
     
     return all_documents
 
-def build_database():
+def build_database(rebuild_from_scratch: bool = False):
     print("🚀 Starting RAG database build...")
     
     # Configuration
     knowledge_base_path = "knowledge_base"
     vector_db_path = "vector_db"
     
-    # Remove existing database
-    if os.path.exists(vector_db_path):
+    # Only remove existing database if rebuilding from scratch
+    if rebuild_from_scratch and os.path.exists(vector_db_path):
         shutil.rmtree(vector_db_path)
-        print("🗑️  Removed existing vector database")
+        print("🗑️  Removed existing vector database (rebuild mode)")
+    elif not rebuild_from_scratch and os.path.exists(vector_db_path):
+        print("📂 Updating existing vector database (incremental mode)")
     
     # Check if knowledge base exists
     if not os.path.exists(knowledge_base_path):
@@ -90,46 +92,57 @@ def build_database():
         splits = text_splitter.split_documents(documents)
         print(f"📝 Created {len(splits)} text chunks")
         
-        # Create embeddings - Fixed deprecation
+        # Create embeddings
         print("🧠 Creating embeddings...")
         embeddings = HuggingFaceEmbeddings(
             model_name="sentence-transformers/all-MiniLM-L6-v2",
             model_kwargs={'device': 'cpu'}
         )
         
-        # Create vector store
-        print("💾 Building vector database...")
-        vectorstore = Chroma.from_documents(
-            documents=splits,
-            embedding=embeddings,
-            persist_directory=vector_db_path
-        )
+        # Create or update vector store
+        if rebuild_from_scratch or not os.path.exists(vector_db_path):
+            print("💾 Building new vector database...")
+            vectorstore = Chroma.from_documents(
+                documents=splits,
+                embedding=embeddings,
+                persist_directory=vector_db_path
+            )
+        else:
+            print("➕ Adding to existing vector database...")
+            # Load existing database
+            vectorstore = Chroma(
+                persist_directory=vector_db_path,
+                embedding_function=embeddings
+            )
+            # Add new documents
+            vectorstore.add_documents(splits)
         
         # Persist the database
         vectorstore.persist()
-        print("✅ Vector database saved successfully!")
+        print("✅ Vector database updated successfully!")
         
-        # Test the database
-        print("🔍 Testing database...")
-        test_queries = [
-            "SQL injection prevention",
-            "password security",
-            "secure coding practices",
-            "eval() code injection",
-            "XSS prevention"
-        ]
+        # Get final count
+        try:
+            final_count = vectorstore._collection.count()
+            print(f"📊 Database now contains {final_count} documents")
+        except:
+            print("📊 Database updated successfully")
         
-        for query in test_queries:
-            results = vectorstore.similarity_search(query, k=1)
-            print(f"📊 Query: '{query}' -> {len(results)} results")
-            if results:
-                print(f"    Preview: {results[0].page_content[:100]}...")
-        
-        print("🎉 RAG database build completed successfully!")
+        print("🎉 RAG database operation completed!")
         
     except Exception as e:
-        print(f"❌ Error building database: {str(e)}")
+        print(f"❌ Error updating database: {str(e)}")
         raise
 
 if __name__ == "__main__":
-    build_database()
+    import sys
+    
+    # Check for rebuild flag
+    rebuild = "--rebuild" in sys.argv or "-r" in sys.argv
+    
+    if rebuild:
+        print("🔄 Rebuilding database from scratch...")
+        build_database(rebuild_from_scratch=True)
+    else:
+        print("➕ Incremental update mode...")
+        build_database(rebuild_from_scratch=False)
