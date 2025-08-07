@@ -1,0 +1,4 @@
+
+# Vector Database (regeneratable)
+vector_db/
+*.sqlite3
