@@ -269,7 +269,11 @@ def analyze_github_repo(repo_url: str, model_type: str = 'smart') -> str:
         return "❌ **GitHub client not available.** Please check your setup."
     
     repo_name_from_url = repo_url.rstrip('/').split('/')[-1].replace('.git', '')
-    local_repo_path = f"/tmp/{repo_name_from_url}"
+    
+    # Use proper cross-platform temporary directory
+    import tempfile
+    temp_dir = tempfile.mkdtemp(prefix=f"altx_ai_{repo_name_from_url}_")
+    local_repo_path = temp_dir
 
     try:
         repo_url = repo_url.rstrip('/').replace('.git', '')
@@ -281,8 +285,6 @@ def analyze_github_repo(repo_url: str, model_type: str = 'smart') -> str:
         repo = github_client.get_repo(f"{owner}/{repo_name}")
         
         print(f"Cloning {repo_url} to {local_repo_path}...")
-        if Path(local_repo_path).exists():
-            shutil.rmtree(local_repo_path)
         git.Repo.clone_from(repo_url, local_repo_path)
 
         security_findings = []
@@ -420,8 +422,57 @@ Simple recommendations for improving security.
         print(f"Error analyzing repository: {str(e)}")
         return f"❌ **An unexpected error occurred:** {str(e)}"
     finally:
-        if Path(local_repo_path).exists():
-            shutil.rmtree(local_repo_path)
+        # Enhanced Windows-compatible cleanup
+        if os.path.exists(local_repo_path):
+            try:
+                import stat
+                import time
+                
+                def force_remove_readonly_ai(func, path, exc_info):
+                    """Enhanced readonly handler for Git objects"""
+                    try:
+                        if os.path.exists(path):
+                            # Make file writable and remove all permissions restrictions
+                            os.chmod(path, stat.S_IWRITE | stat.S_IREAD | stat.S_IEXEC)
+                            # Try the original function again
+                            func(path)
+                    except Exception as e:
+                        print(f"⚠️ AI cleanup: Could not remove {path}: {e}")
+                
+                def cleanup_git_directory_ai(directory):
+                    """Special cleanup for Git directories in AI analysis"""
+                    try:
+                        git_dir = os.path.join(directory, '.git')
+                        if os.path.exists(git_dir):
+                            for root, dirs, files in os.walk(git_dir):
+                                for file in files:
+                                    file_path = os.path.join(root, file)
+                                    try:
+                                        os.chmod(file_path, stat.S_IWRITE | stat.S_IREAD)
+                                    except Exception:
+                                        pass
+                    except Exception:
+                        pass
+                
+                # Apply enhanced cleanup
+                cleanup_git_directory_ai(local_repo_path)
+                
+                if os.name == 'nt':  # Windows
+                    time.sleep(0.3)  # Wait for file handles
+                
+                shutil.rmtree(local_repo_path, onerror=force_remove_readonly_ai)
+                print(f"✅ AI analysis temp directory cleaned up: {local_repo_path}")
+                
+            except Exception as cleanup_error:
+                print(f"⚠️ AI cleanup warning: {cleanup_error}")
+                # Try Windows-specific cleanup if standard method fails
+                if os.name == 'nt':
+                    try:
+                        import subprocess
+                        subprocess.run(['rmdir', '/s', '/q', local_repo_path], 
+                                     shell=True, check=False)
+                    except:
+                        pass
 
 def analyze_scan_with_llm(https: bool, flags: List[str], headers: Dict[str, str], model_type: str = 'fast') -> str:
     """Analyze website scan results using LLM with model selection"""
