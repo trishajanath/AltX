@@ -1,6 +1,10 @@
 import os
 from typing import List, Dict
 
+# Configuration for RAG performance
+RAG_FAST_MODE = os.getenv('RAG_FAST_MODE', 'true').lower() == 'true'
+RAG_DISABLE = os.getenv('RAG_DISABLE', 'false').lower() == 'true'
+
 # Fix deprecation warning
 try:
     from langchain_chroma import Chroma  # New import
@@ -12,50 +16,133 @@ except ImportError:
     from langchain_community.embeddings import HuggingFaceEmbeddings
 
 class RAGQueryEngine:
-    def __init__(self, vector_db_path: str = "vector_db"):
+    def __init__(self, vector_db_path: str = "vector_db", fast_mode: bool = True):
         self.vector_db_path = vector_db_path
+        self.fast_mode = fast_mode
         self.vectorstore = None
         self.embeddings = None
-        self._initialize()
+        self._initialized = False
+        
+        # Model configuration for speed vs accuracy trade-off
+        if fast_mode:
+            self.model_name = "sentence-transformers/paraphrase-MiniLM-L3-v2"  # Faster, smaller model
+            print(f"🚀 RAG Query Engine created (FAST MODE - lazy loading enabled)")
+        else:
+            self.model_name = "sentence-transformers/all-MiniLM-L6-v2"  # More accurate but slower
+            print(f"🚀 RAG Query Engine created (QUALITY MODE - lazy loading enabled)")
     
     def _initialize(self):
-        """Initialize the RAG system"""
+        """Initialize the RAG system only when needed (lazy loading)"""
+        if self._initialized:
+            return
+            
         try:
+            # Check if vector database exists
             if not os.path.exists(self.vector_db_path):
                 print(f"🚨 Vector database not found at {self.vector_db_path}")
-                raise FileNotFoundError(f"Vector database not found at {self.vector_db_path}")
+                print("🔄 Building initial database...")
+                self._build_initial_database()
+                return
             
-            print(f"📂 Loading vector database from: {self.vector_db_path}")
+            print(f"📂 Loading vector database from: {self.vector_db_path} (first use)")
+            print(f"⚡ Using {'FAST' if self.fast_mode else 'QUALITY'} mode embeddings")
             
-            # Initialize embeddings
+            # Initialize embeddings with speed optimization
             self.embeddings = HuggingFaceEmbeddings(
-                model_name="sentence-transformers/all-MiniLM-L6-v2",
-                model_kwargs={'device': 'cpu'}
+                model_name=self.model_name,
+                model_kwargs={'device': 'cpu'},
+                encode_kwargs={'batch_size': 32}  # Removed show_progress_bar to avoid conflicts
             )
-            print("🧠 Embeddings model loaded: sentence-transformers/all-MiniLM-L6-v2")
+            print(f"🧠 Embeddings model loaded: {self.model_name} ({'FAST' if self.fast_mode else 'QUALITY'} mode)")
             
-            # Load the vector store
-            self.vectorstore = Chroma(
-                persist_directory=self.vector_db_path,
-                embedding_function=self.embeddings
-            )
-            
-            # Get database statistics
+            # Try to load the vector store with error recovery
             try:
-                collection = self.vectorstore._collection
-                count = collection.count()
-                print(f"📊 Vector database loaded successfully with {count} documents")
-            except:
-                print("✅ Vector database loaded successfully")
+                self.vectorstore = Chroma(
+                    persist_directory=self.vector_db_path,
+                    embedding_function=self.embeddings
+                )
+                
+                # Test database connection
+                try:
+                    collection = self.vectorstore._collection
+                    count = collection.count()
+                    print(f"📊 Vector database loaded successfully with {count} documents")
+                except Exception as db_test_error:
+                    print(f"⚠️ Database connection test failed: {db_test_error}")
+                    print("� Rebuilding database to fix connection issues...")
+                    self._rebuild_database()
+                    return
+                    
+            except Exception as load_error:
+                print(f"❌ Failed to load existing database: {load_error}")
+                print("🔄 Rebuilding database...")
+                self._rebuild_database()
+                return
+            
+            self._initialized = True
             
         except Exception as e:
             print(f"❌ Failed to initialize RAG system: {e}")
             self.vectorstore = None
     
+    def _build_initial_database(self):
+        """Build database if it doesn't exist"""
+        try:
+            print("🔧 Building initial RAG database...")
+            from build_rag_db import build_database
+            build_database(rebuild_from_scratch=True)
+            
+            # Try to initialize again
+            self._initialize()
+            
+        except Exception as e:
+            print(f"❌ Failed to build initial database: {e}")
+            self.vectorstore = None
+    
+    def _rebuild_database(self):
+        """Rebuild database to fix corruption/connection issues"""
+        try:
+            print("🔧 Rebuilding RAG database to fix connection issues...")
+            
+            # Remove corrupted database
+            if os.path.exists(self.vector_db_path):
+                import shutil
+                shutil.rmtree(self.vector_db_path)
+                print("🗑️ Removed corrupted database")
+            
+            # Rebuild from scratch
+            from build_rag_db import build_database
+            build_database(rebuild_from_scratch=True)
+            
+            # Try to initialize again
+            if os.path.exists(self.vector_db_path):
+                self.vectorstore = Chroma(
+                    persist_directory=self.vector_db_path,
+                    embedding_function=self.embeddings
+                )
+                
+                # Test the new database
+                collection = self.vectorstore._collection
+                count = collection.count()
+                print(f"✅ Database rebuilt successfully with {count} documents")
+                self._initialized = True
+            else:
+                print("❌ Failed to rebuild database")
+                self.vectorstore = None
+                
+        except Exception as e:
+            print(f"❌ Failed to rebuild database: {e}")
+            self.vectorstore = None
+    
     def query_secure_patterns(self, vulnerability_description: str, k: int = 3) -> str:
         """
-        Query the RAG database for secure coding patterns
+        Query the RAG database for secure coding patterns (with lazy loading)
         """
+        # Lazy load the RAG system on first use
+        if not self._initialized:
+            print("🔄 Initializing RAG system on first use...")
+            self._initialize()
+        
         print(f"\n🔍 RAG QUERY PROCESS:")
         print(f"📝 Input: '{vulnerability_description}'")
         print(f"🎯 Requested results: {k}")
@@ -363,13 +450,35 @@ GENERAL SECURE CODING PATTERN:
         except Exception as e:
             print(f"❌ Error inspecting database: {e}")
 
-# Global RAG instance
-rag_engine = RAGQueryEngine()
+# Global RAG instance with environment-based configuration
+if RAG_DISABLE:
+    print("🚫 RAG system disabled via environment variable")
+    rag_engine = None
+else:
+    rag_engine = RAGQueryEngine(fast_mode=RAG_FAST_MODE)
 
 def get_secure_coding_patterns(vulnerability_description: str) -> str:
     """
     Main function to get secure coding patterns for a vulnerability
+    Uses lazy loading - RAG system only loads when first called
     """
+    if RAG_DISABLE or rag_engine is None:
+        print("🚫 RAG disabled - using fallback patterns")
+        # Simple fallback without RAG
+        return f"""
+# Security Best Practices for: {vulnerability_description}
+
+## General Security Guidelines:
+- Input validation and sanitization
+- Use parameterized queries for database operations
+- Implement proper authentication and authorization
+- Regular security testing and code reviews
+- Keep dependencies updated
+- Follow OWASP security guidelines
+
+This is a fallback response when RAG is disabled.
+"""
+    
     return rag_engine.query_secure_patterns(vulnerability_description)
 
 def debug_rag_database():

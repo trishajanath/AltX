@@ -2,9 +2,14 @@ import os
 import shutil
 from typing import List
 from langchain_community.document_loaders import DirectoryLoader, TextLoader
-from langchain_community.vectorstores import Chroma
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
+
+# Fix deprecation warning - use updated import
+try:
+    from langchain_chroma import Chroma  # New import
+except ImportError:
+    from langchain_community.vectorstores import Chroma  # Fallback
 
 # Fix deprecation warning - use updated import
 try:
@@ -113,6 +118,11 @@ def build_database(rebuild_from_scratch: bool = False, fetch_web_data: bool = Fa
         # Create or update vector store
         if rebuild_from_scratch or not os.path.exists(vector_db_path):
             print("💾 Building new vector database...")
+            # Remove any existing corrupted database first
+            if os.path.exists(vector_db_path):
+                shutil.rmtree(vector_db_path)
+                print("🗑️ Removed existing database for clean rebuild")
+            
             vectorstore = Chroma.from_documents(
                 documents=splits,
                 embedding=embeddings,
@@ -120,16 +130,43 @@ def build_database(rebuild_from_scratch: bool = False, fetch_web_data: bool = Fa
             )
         else:
             print("➕ Adding to existing vector database...")
-            # Load existing database
-            vectorstore = Chroma(
-                persist_directory=vector_db_path,
-                embedding_function=embeddings
-            )
-            # Add new documents
-            vectorstore.add_documents(splits)
+            try:
+                # Load existing database
+                vectorstore = Chroma(
+                    persist_directory=vector_db_path,
+                    embedding_function=embeddings
+                )
+                # Test connection before adding documents
+                test_count = vectorstore._collection.count()
+                print(f"📊 Existing database has {test_count} documents")
+                
+                # Add new documents
+                vectorstore.add_documents(splits)
+            except Exception as db_error:
+                print(f"❌ Error with existing database: {db_error}")
+                print("🔄 Rebuilding database from scratch...")
+                
+                # Remove corrupted database and rebuild
+                if os.path.exists(vector_db_path):
+                    shutil.rmtree(vector_db_path)
+                    print("🗑️ Removed corrupted database")
+                
+                vectorstore = Chroma.from_documents(
+                    documents=splits,
+                    embedding=embeddings,
+                    persist_directory=vector_db_path
+                )
         
-        # Persist the database
-        vectorstore.persist()
+        # Persist the database (newer versions auto-persist)
+        try:
+            vectorstore.persist()
+            print("💾 Database persisted successfully")
+        except AttributeError:
+            # Newer versions of ChromaDB auto-persist, no need to call persist()
+            print("💾 Database auto-persisted (newer ChromaDB version)")
+        except Exception as persist_error:
+            print(f"⚠️ Persist warning: {persist_error} (continuing anyway)")
+        
         print("✅ Vector database updated successfully!")
         
         # Get final count
