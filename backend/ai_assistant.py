@@ -7,6 +7,9 @@ from github.GithubException import GithubException
 from dataclasses import dataclass
 from rag_query import get_secure_coding_patterns
 import json
+import jwt
+import time
+from github import Auth
 
 # --- PHASE 1 IMPORTS ---
 import git
@@ -54,23 +57,154 @@ AVAILABLE_MODELS = {
     'smart': 'models/gemini-2.5-pro'
 }
 
-# --- Initialize API Clients ---
+# --- Enhanced GitHub Authentication Setup ---
 models = {}
-GITHUB_TOKEN = os.getenv("GITHUB_PAT")
+GITHUB_APP_ID = os.getenv("GITHUB_APP_ID")
+GITHUB_PRIVATE_KEY_PATH = os.getenv("GITHUB_PRIVATE_KEY_PATH")
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")  # Updated from GITHUB_PAT
 
-if GITHUB_TOKEN:
+# Read the private key from file
+GITHUB_PRIVATE_KEY = None
+try:
+    if GITHUB_PRIVATE_KEY_PATH and os.path.exists(GITHUB_PRIVATE_KEY_PATH):
+        with open(GITHUB_PRIVATE_KEY_PATH, 'r') as key_file:
+            GITHUB_PRIVATE_KEY = key_file.read()
+        print(f"✅ GitHub private key loaded from: {GITHUB_PRIVATE_KEY_PATH}")
+    else:
+        print(f"⚠️ Private key file not found at: {GITHUB_PRIVATE_KEY_PATH}")
+        print("🔄 Falling back to personal access token authentication")
+except FileNotFoundError:
+    print(f"❌ ERROR: Private key file not found at path: {GITHUB_PRIVATE_KEY_PATH}")
+    print("💡 Make sure the .pem file exists and the path in .env is correct")
+    GITHUB_PRIVATE_KEY = None
+except Exception as e:
+    print(f"❌ ERROR reading private key file: {e}")
+    GITHUB_PRIVATE_KEY = None
+
+def generate_github_app_jwt():
+    """Generate JWT for GitHub App authentication"""
+    if not GITHUB_APP_ID or not GITHUB_PRIVATE_KEY:
+        print("⚠️ GitHub App ID or Private Key not available")
+        return None
+    
     try:
-        github_client = Github(GITHUB_TOKEN)
-        test_user = github_client.get_user()
-        print(f"✅ GitHub client initialized for user: {test_user.login}")
+        # Create JWT payload
+        now = int(time.time())
+        payload = {
+            'iat': now - 60,  # Issued at time (1 minute ago to account for clock skew)
+            'exp': now + (10 * 60),  # Expiration time (10 minutes from now)
+            'iss': GITHUB_APP_ID  # Issuer (GitHub App ID)
+        }
+        
+        # Generate JWT
+        token = jwt.encode(payload, GITHUB_PRIVATE_KEY, algorithm='RS256')
+        print("✅ GitHub App JWT generated successfully")
+        return token
+        
     except Exception as e:
-        print(f"❌ GitHub client initialization failed: {e}")
-        github_client = Github()
-        print("⚠️ Falling back to anonymous GitHub access")
-else:
-    github_client = Github()
-    print("⚠️ GitHub client initialized without token (public repos only)")
+        print(f"❌ Error generating GitHub App JWT: {e}")
+        return None
 
+def get_github_app_installation_token(owner, repo):
+    """Get installation access token for a specific repository"""
+    jwt_token = generate_github_app_jwt()
+    if not jwt_token:
+        return None
+    
+    try:
+        # Create GitHub instance with JWT
+        github_jwt = Github(auth=Auth.Token(jwt_token))
+        
+        # Get the app
+        app = github_jwt.get_app()
+        
+        # Find installation for the repository owner
+        installations = app.get_installations()
+        target_installation = None
+        
+        for installation in installations:
+            if installation.account.login.lower() == owner.lower():
+                target_installation = installation
+                break
+        
+        if not target_installation:
+            print(f"⚠️ GitHub App not installed for {owner}")
+            return None
+        
+        # Get installation access token
+        access_token = target_installation.get_access_token()
+        print(f"✅ GitHub App installation token obtained for {owner}/{repo}")
+        return access_token.token
+        
+    except Exception as e:
+        print(f"❌ Error getting installation token: {e}")
+        return None
+
+# Initialize GitHub client with enhanced authentication
+def initialize_github_client():
+    """Initialize GitHub client with best available authentication method"""
+    
+    # Try GitHub App authentication first (most powerful)
+    if GITHUB_APP_ID and GITHUB_PRIVATE_KEY:
+        try:
+            jwt_token = generate_github_app_jwt()
+            if jwt_token:
+                github_client = Github(auth=Auth.Token(jwt_token))
+                print("✅ GitHub client initialized with App authentication")
+                return github_client
+        except Exception as e:
+            print(f"⚠️ GitHub App auth failed: {e}")
+    
+    # Fallback to personal access token
+    if GITHUB_TOKEN:
+        try:
+            github_client = Github(GITHUB_TOKEN)
+            test_user = github_client.get_user()
+            print(f"✅ GitHub client initialized with personal access token for user: {test_user.login}")
+            return github_client
+        except Exception as e:
+            print(f"⚠️ Personal token auth failed: {e}")
+    
+    # Final fallback to anonymous access
+    print("❌ No GitHub authentication available - using anonymous access")
+    return Github()
+
+# Initialize the enhanced client
+github_client = initialize_github_client()
+
+def get_authenticated_repo(repo_url):
+    """Get authenticated repository instance for pull request creation"""
+    try:
+        # Extract owner and repo name
+        repo_url_clean = repo_url.rstrip('/').replace('.git', '')
+        parts = repo_url_clean.split('/')
+        if len(parts) < 2:
+            raise ValueError("Invalid repository URL format")
+        
+        owner, repo_name = parts[-2], parts[-1]
+        
+        # Try GitHub App authentication for this specific repo
+        if GITHUB_APP_ID and GITHUB_PRIVATE_KEY:
+            installation_token = get_github_app_installation_token(owner, repo_name)
+            if installation_token:
+                app_github = Github(auth=Auth.Token(installation_token))
+                repo = app_github.get_repo(f"{owner}/{repo_name}")
+                print(f"✅ Repository access via GitHub App: {owner}/{repo_name}")
+                return repo, app_github
+        
+        # Fallback to personal token
+        if github_client:
+            repo = github_client.get_repo(f"{owner}/{repo_name}")
+            print(f"✅ Repository access via personal token: {owner}/{repo_name}")
+            return repo, github_client
+        
+        raise Exception("No authentication method available")
+        
+    except Exception as e:
+        print(f"❌ Failed to get authenticated repository access: {e}")
+        return None, None
+
+# --- Initialize Gemini AI ---
 try:
     api_key = os.getenv("GOOGLE_API_KEY")
     if not api_key:
@@ -262,6 +396,7 @@ def get_chat_response(history: List[Dict], model_type: str = 'fast') -> str:
         
     except Exception as e:
         return f"❌ **Chat Error ({model_type} model):** {str(e)}"
+
 # --- Main Analysis Function ---
 def analyze_github_repo(repo_url: str, model_type: str = 'smart') -> str:
     """Analyze GitHub repository with model selection"""
@@ -580,8 +715,6 @@ Simple examples and code snippets.
     except Exception as e:
         return f"❌ **Website Analysis Error ({model_type} model):** {str(e)}"
     
-# Add this function after the existing functions
-
 def format_analysis_for_context(analysis_data: Dict[str, Any]) -> str:
     """Format comprehensive analysis data for AI context"""
     try:
@@ -633,3 +766,27 @@ def format_analysis_for_context(analysis_data: Dict[str, Any]) -> str:
         
     except Exception as e:
         return f"Error formatting analysis context: {str(e)}"
+
+def test_github_authentication():
+    """Test function to verify GitHub authentication setup"""
+    print("🔍 Testing GitHub authentication setup...")
+    
+    print(f"📁 Private key path: {GITHUB_PRIVATE_KEY_PATH}")
+    print(f"📁 File exists: {os.path.exists(GITHUB_PRIVATE_KEY_PATH) if GITHUB_PRIVATE_KEY_PATH else False}")
+    print(f"🔑 Private key loaded: {'✅ Yes' if GITHUB_PRIVATE_KEY else '❌ No'}")
+    print(f"🆔 App ID configured: {'✅ Yes' if GITHUB_APP_ID else '❌ No'}")
+    
+    if GITHUB_PRIVATE_KEY:
+        print(f"🔐 Key length: {len(GITHUB_PRIVATE_KEY)} characters")
+        print(f"🔐 Key preview: {GITHUB_PRIVATE_KEY[:50]}...")
+    
+    # Test JWT generation
+    jwt_token = generate_github_app_jwt()
+    if jwt_token:
+        print("✅ JWT generation successful")
+    else:
+        print("❌ JWT generation failed")
+
+# Call this when the module loads for testing
+if __name__ == "__main__":
+    test_github_authentication()

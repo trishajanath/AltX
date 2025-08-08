@@ -1,12 +1,18 @@
 import os
 import shutil
 import git
-from fastapi import FastAPI, HTTPException
+import requests
+from fastapi import Request, Header, FastAPI, HTTPException
+from fastapi.responses import RedirectResponse, HTMLResponse
+import hmac
+import hashlib
+import subprocess
+import asyncio
+from pathlib import Path
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Dict, Optional, Any
 from starlette.concurrency import run_in_threadpool
-import tempfile
 import json
 import re
 from scanner.file_security_scanner import scan_for_sensitive_files, scan_file_contents_for_secrets
@@ -18,11 +24,12 @@ import base64
 from github import Github
 from rag_query import get_secure_coding_patterns
 import tempfile
-from rag_query import get_secure_coding_patterns  # Add this
-from ai_assistant import FixRequest  # Add this import
+
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 # --- Local Imports ---
-from ai_assistant import get_chat_response, RepoAnalysis
+from ai_assistant import get_chat_response, RepoAnalysis, FixRequest
 from scanner.file_scanner import (
     scan_url, 
     _format_ssl_analysis,
@@ -1535,7 +1542,686 @@ Return ONLY a JSON object with this exact structure:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fix generation failed: {str(e)}")
-    
+@app.get("/auth/github/callback")
+async def github_callback(code: str = None, state: str = None):
+    """
+    Handle GitHub OAuth callback after user authorization
+    This is the 'front door' for users returning after GitHub login
+    """
+    try:
+        if not code:
+            print("❌ No authorization code received from GitHub")
+            return RedirectResponse(
+                url="/?error=authorization_failed", 
+                status_code=302
+            )
+        
+        print(f"✅ Received GitHub authorization code: {code[:10]}...")
+        
+        # Exchange authorization code for access token
+        
+
+        # Exchange authorization code for access token
+        token_url = "https://github.com/login/oauth/access_token"
+        token_data = {
+            "client_id": os.getenv("GITHUB_CLIENT_ID"),  # Changed from GITHUB_APP_ID
+            "client_secret": os.getenv("GITHUB_CLIENT_SECRET"),
+            "code": code,
+            "state": state
+        }
+        token_headers = {
+            "Accept": "application/json",
+            "User-Agent": "AltX-Security-Scanner"
+        }
+        
+        print("🔄 Exchanging code for access token...")
+        token_response = requests.post(token_url, data=token_data, headers=token_headers)
+        
+        if token_response.status_code != 200:
+            print(f"❌ Token exchange failed: {token_response.text}")
+            return RedirectResponse(
+                url="/?error=token_exchange_failed", 
+                status_code=302
+            )
+        
+        token_info = token_response.json()
+        access_token = token_info.get("access_token")
+        
+        if not access_token:
+            print(f"❌ No access token received: {token_info}")
+            return RedirectResponse(
+                url="/?error=no_access_token", 
+                status_code=302
+            )
+        
+        print("✅ Access token received successfully")
+        
+        # Get user information
+        user_headers = {
+            "Authorization": f"token {access_token}",
+            "Accept": "application/json",
+            "User-Agent": "AltX-Security-Scanner"
+        }
+        
+        user_response = requests.get("https://api.github.com/user", headers=user_headers)
+        
+        if user_response.status_code != 200:
+            print(f"❌ Failed to get user info: {user_response.text}")
+            return RedirectResponse(
+                url="/?error=user_info_failed", 
+                status_code=302
+            )
+        
+        user_info = user_response.json()
+        username = user_info.get("login", "unknown")
+        user_id = user_info.get("id")
+        avatar_url = user_info.get("avatar_url")
+        
+        print(f"✅ User authenticated: {username} (ID: {user_id})")
+        
+        # In a real application, you would:
+        # 1. Store the user session
+        # 2. Create a JWT token
+        # 3. Store user data in database
+        # For now, we'll just redirect with success
+        
+        # Redirect to frontend with success and user info
+        redirect_url = f"/?auth=success&user={username}&avatar={avatar_url}"
+        
+        print(f"🚀 Redirecting user to: {redirect_url}")
+        
+        return RedirectResponse(url=redirect_url, status_code=302)
+        
+    except Exception as e:
+        print(f"❌ OAuth callback error: {str(e)}")
+        return RedirectResponse(
+            url=f"/?error=callback_failed&message={str(e)}", 
+            status_code=302
+        )
+
+
+
+@app.get("/auth/github/login")
+async def github_login():
+    """
+    Initiate GitHub OAuth login
+    This redirects users to GitHub for authorization
+    """
+    try:
+        # Use GITHUB_CLIENT_ID for OAuth, not GITHUB_APP_ID
+        github_client_id = os.getenv("GITHUB_CLIENT_ID")  # Changed from GITHUB_APP_ID
+        
+        if not github_client_id:
+            raise HTTPException(status_code=500, detail="GitHub Client ID not configured")
+        
+        # Generate a random state parameter for security
+        import secrets
+        state = secrets.token_urlsafe(32)
+        
+        # GitHub OAuth authorization URL
+        github_auth_url = (
+            f"https://github.com/login/oauth/authorize"
+            f"?client_id={github_client_id}"
+            f"&redirect_uri={os.getenv('GITHUB_CALLBACK_URL', 'https://legal-actively-glider.ngrok-free.app/auth/github/callback')}"  # Updated fallback URL
+            f"&scope=repo,user:email"
+            f"&state={state}"
+            f"&allow_signup=true"
+        )
+        
+        print(f"🔗 Redirecting to GitHub OAuth: {github_auth_url}")
+        
+        return RedirectResponse(url=github_auth_url, status_code=302)
+        
+    except Exception as e:
+        print(f"❌ Login initiation error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Login failed: {str(e)}")
+
+
+
+@app.get("/auth/status")
+async def auth_status():
+    """
+    Check authentication status
+    """
+    return {
+        "github_app_configured": bool(os.getenv("GITHUB_APP_ID")),
+        "github_client_id_configured": bool(os.getenv("GITHUB_CLIENT_ID")),  # Added
+        "github_client_secret_configured": bool(os.getenv("GITHUB_CLIENT_SECRET")),
+        "callback_url": os.getenv("GITHUB_CALLBACK_URL", "https://509734077728.ngrok-free.app/auth/github/callback"),
+        "login_url": "/auth/github/login",
+        "timestamp": datetime.now().isoformat()
+    }
+@app.post("/api/webhook")
+async def github_webhook(request: Request, x_hub_signature_256: str = Header(None)):
+    """
+    Enhanced GitHub App webhook endpoint for automated deployments and security analysis
+    """
+    try:
+        # 1. Get the secret from your environment variables
+        secret = os.getenv("GITHUB_WEBHOOK_SECRET")
+        if not secret:
+            print("❌ Webhook secret is not configured.")
+            raise HTTPException(status_code=500, detail="Webhook secret not configured.")
+
+        # 2. Verify the signature to ensure the request is from GitHub
+        raw_body = await request.body()
+        expected_signature = "sha256=" + hmac.new(secret.encode('utf-8'), raw_body, hashlib.sha256).hexdigest()
+
+        if not x_hub_signature_256:
+            print("❌ No signature provided in webhook request.")
+            raise HTTPException(status_code=403, detail="No signature provided.")
+
+        if not hmac.compare_digest(expected_signature, x_hub_signature_256):
+            print("❌ Invalid webhook signature.")
+            raise HTTPException(status_code=403, detail="Invalid signature.")
+        
+        # 3. Process the event payload
+        event_type = request.headers.get("X-GitHub-Event")
+        payload = await request.json()
+
+        print(f"🎉 Received valid webhook. Event type: {event_type}")
+        
+        # 4. Handle different GitHub events
+        if event_type == "push":
+            return await handle_push_event(payload)
+        elif event_type == "pull_request":
+            return await handle_pull_request_event(payload)
+        elif event_type == "installation":
+            return await handle_installation_event(payload)
+        elif event_type == "security_advisory":
+            return await handle_security_advisory_event(payload)
+        else:
+            print(f"📝 Unhandled event type: {event_type}")
+            return {"status": "event received but not processed", "event_type": event_type}
+
+    except Exception as e:
+        print(f"❌ Webhook processing error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Webhook processing failed: {str(e)}")
+async def handle_push_event(payload):
+    """Handle push events - trigger deployment and security analysis"""
+    try:
+        ref = payload.get("ref", "")
+        repo_info = payload.get("repository", {})
+        clone_url = repo_info.get("clone_url")
+        repo_name = repo_info.get("name")
+        repo_full_name = repo_info.get("full_name")
+        default_branch = repo_info.get("default_branch", "main")
+        
+        # Check if push is to default branch (main/master)
+        if ref == f"refs/heads/{default_branch}":
+            print(f"🚀 Push to {default_branch} branch detected for {repo_full_name}")
+            
+            if clone_url and repo_name:
+                # Trigger automated security analysis
+                print(f"🔍 Triggering automated security analysis for {repo_name}...")
+                
+                # Run security analysis in background
+                analysis_task = asyncio.create_task(
+                    run_automated_security_analysis(repo_info, payload)
+                )
+                
+                # Trigger deployment process
+                print(f"📦 Triggering deployment for {repo_name}...")
+                deployment_task = asyncio.create_task(
+                    deploy_project(repo_name, clone_url, payload)
+                )
+                
+                return {
+                    "status": "deployment and security analysis triggered",
+                    "repo": repo_full_name,
+                    "branch": default_branch,
+                    "commit": payload.get("head_commit", {}).get("id", "unknown")[:8],
+                    "timestamp": datetime.now().isoformat(),
+                    "actions": ["security_analysis", "deployment"]
+                }
+            else:
+                print("⚠️ Push event received, but couldn't get repo info.")
+                return {"status": "insufficient repo information"}
+        else:
+            print(f"📝 Push to non-default branch {ref} - no deployment triggered")
+            return {"status": "push to non-default branch", "ref": ref}
+            
+    except Exception as e:
+        print(f"❌ Error handling push event: {str(e)}")
+        return {"status": "error", "error": str(e)}
+
+async def handle_pull_request_event(payload):
+    """Handle pull request events - run security checks on PR"""
+    try:
+        action = payload.get("action")
+        pr_info = payload.get("pull_request", {})
+        repo_info = payload.get("repository", {})
+        
+        print(f"🔍 Pull request {action}: #{pr_info.get('number')} in {repo_info.get('full_name')}")
+        
+        if action in ["opened", "synchronize", "reopened"]:
+            # Run security analysis on PR
+            print(f"🛡️ Running security analysis on PR #{pr_info.get('number')}")
+            
+            # Analyze the PR branch
+            head_sha = pr_info.get("head", {}).get("sha")
+            base_sha = pr_info.get("base", {}).get("sha")
+            
+            # Run security analysis in background
+            analysis_task = asyncio.create_task(
+                run_pr_security_analysis(pr_info, repo_info, payload)
+            )
+            
+            return {
+                "status": "pr security analysis triggered",
+                "pr_number": pr_info.get("number"),
+                "repo": repo_info.get("full_name"),
+                "head_sha": head_sha[:8] if head_sha else "unknown",
+                "action": action
+            }
+        
+        return {"status": "pr event processed", "action": action}
+        
+    except Exception as e:
+        print(f"❌ Error handling pull request event: {str(e)}")
+        return {"status": "error", "error": str(e)}
+
+async def handle_installation_event(payload):
+    """Handle GitHub App installation events"""
+    try:
+        action = payload.get("action")
+        installation_info = payload.get("installation", {})
+        account_info = installation_info.get("account", {})
+        
+        print(f"📱 GitHub App {action} for {account_info.get('login')}")
+        
+        if action == "created":
+            print(f"✅ New installation: {account_info.get('login')} ({account_info.get('type')})")
+            
+            # Send welcome security analysis
+            if installation_info.get("repository_selection") == "all":
+                print("🔒 Full repository access granted - can provide comprehensive security analysis")
+            else:
+                repos = payload.get("repositories", [])
+                print(f"🔒 Selected repository access: {len(repos)} repositories")
+            
+            return {
+                "status": "installation created",
+                "account": account_info.get("login"),
+                "repo_access": installation_info.get("repository_selection"),
+                "permissions": list(installation_info.get("permissions", {}).keys())
+            }
+        
+        return {"status": "installation event processed", "action": action}
+        
+    except Exception as e:
+        print(f"❌ Error handling installation event: {str(e)}")
+        return {"status": "error", "error": str(e)}
+
+async def handle_security_advisory_event(payload):
+    """Handle security advisory events"""
+    try:
+        action = payload.get("action")
+        advisory = payload.get("security_advisory", {})
+        
+        print(f"🚨 Security advisory {action}: {advisory.get('summary', 'Unknown')}")
+        
+        if action == "published":
+            severity = advisory.get("severity", "unknown")
+            cve_id = advisory.get("cve_id")
+            
+            print(f"🔒 New security advisory: {severity} severity")
+            if cve_id:
+                print(f"🆔 CVE ID: {cve_id}")
+            
+            # Could trigger repository rescans for affected dependencies
+            return {
+                "status": "security advisory processed",
+                "severity": severity,
+                "cve_id": cve_id,
+                "action": action
+            }
+        
+        return {"status": "security advisory event processed", "action": action}
+        
+    except Exception as e:
+        print(f"❌ Error handling security advisory event: {str(e)}")
+        return {"status": "error", "error": str(e)}
+
+async def run_automated_security_analysis(repo_info, payload):
+    """Run automated security analysis on repository"""
+    try:
+        repo_full_name = repo_info.get("full_name")
+        clone_url = repo_info.get("clone_url")
+        
+        print(f"🔍 Starting automated security analysis for {repo_full_name}")
+        
+        # Create analysis request
+        analysis_request = RepoAnalysisRequest(
+            repo_url=clone_url,
+            model_type='smart',  # Use smart model for webhook-triggered analysis
+            deep_scan=True
+        )
+        
+        # Run comprehensive analysis
+        analysis_result = await analyze_repo_comprehensive(analysis_request)
+        
+        if not analysis_result.get("error"):
+            security_score = analysis_result.get("overall_security_score", 0)
+            security_level = analysis_result.get("security_level", "Unknown")
+            
+            print(f"✅ Security analysis complete: {security_score}/100 ({security_level})")
+            
+            # If security issues found, could create an issue or PR
+            critical_issues = []
+            critical_issues.extend(analysis_result.get("secret_scan_results", []))
+            
+            high_severity_static = [
+                issue for issue in analysis_result.get("static_analysis_results", [])
+                if isinstance(issue, dict) and issue.get("issue_severity") == "HIGH"
+            ]
+            critical_issues.extend(high_severity_static)
+            
+            if critical_issues:
+                print(f"🚨 {len(critical_issues)} critical security issues found")
+                
+                # Could automatically create security issue in repository
+                await create_security_issue_if_needed(repo_info, analysis_result, critical_issues)
+            
+            return {
+                "analysis_complete": True,
+                "security_score": security_score,
+                "critical_issues": len(critical_issues)
+            }
+        else:
+            print(f"❌ Security analysis failed: {analysis_result.get('error')}")
+            return {"analysis_complete": False, "error": analysis_result.get("error")}
+            
+    except Exception as e:
+        print(f"❌ Automated security analysis error: {str(e)}")
+        return {"analysis_complete": False, "error": str(e)}
+
+async def run_pr_security_analysis(pr_info, repo_info, payload):
+    """Run security analysis on pull request"""
+    try:
+        pr_number = pr_info.get("number")
+        repo_full_name = repo_info.get("full_name")
+        head_repo_url = pr_info.get("head", {}).get("repo", {}).get("clone_url")
+        
+        print(f"🔍 Analyzing PR #{pr_number} in {repo_full_name}")
+        
+        if head_repo_url:
+            # Create analysis request for PR branch
+            analysis_request = RepoAnalysisRequest(
+                repo_url=head_repo_url,
+                model_type='fast',  # Use fast model for PR analysis
+                deep_scan=False  # Lighter scan for PRs
+            )
+            
+            # Run analysis
+            analysis_result = await analyze_repo_comprehensive(analysis_request)
+            
+            if not analysis_result.get("error"):
+                security_score = analysis_result.get("overall_security_score", 0)
+                
+                # Could post security analysis as PR comment
+                print(f"✅ PR security analysis complete: {security_score}/100")
+                
+                # If critical issues found, could request changes
+                secrets_found = len(analysis_result.get("secret_scan_results", []))
+                if secrets_found > 0:
+                    print(f"🚨 PR contains {secrets_found} hardcoded secrets - requires attention")
+                
+                return {
+                    "pr_analysis_complete": True,
+                    "security_score": security_score,
+                    "secrets_found": secrets_found
+                }
+            else:
+                print(f"❌ PR security analysis failed: {analysis_result.get('error')}")
+                return {"pr_analysis_complete": False, "error": analysis_result.get("error")}
+        else:
+            print("⚠️ Could not get PR head repository URL")
+            return {"pr_analysis_complete": False, "error": "No head repo URL"}
+            
+    except Exception as e:
+        print(f"❌ PR security analysis error: {str(e)}")
+        return {"pr_analysis_complete": False, "error": str(e)}
+
+async def create_security_issue_if_needed(repo_info, analysis_result, critical_issues):
+    """Create a security issue in the repository if critical issues are found"""
+    try:
+        # This would use the GitHub API to create an issue
+        # Implementation depends on whether you want to auto-create issues
+        print(f"💡 Could create security issue for {len(critical_issues)} critical findings")
+        
+        # Example issue content:
+        issue_title = f"🔒 Security Review: {len(critical_issues)} Critical Issues Detected"
+        issue_body = f"""
+# 🛡️ Automated Security Analysis Results
+
+**Security Score:** {analysis_result.get('overall_security_score', 'N/A')}/100
+
+## 🚨 Critical Issues Found ({len(critical_issues)})
+
+{chr(10).join([f"- {issue.get('description', 'Security issue')} in `{issue.get('file', 'unknown file')}`" for issue in critical_issues[:10]])}
+
+## 🔧 Recommended Actions
+
+1. Review and address the critical security issues listed above
+2. Consider using environment variables for sensitive data
+3. Run additional security testing before deployment
+
+---
+*Generated by AltX Security Scanner - Automated Analysis*
+"""
+        
+        print("📝 Security issue content prepared (not created automatically)")
+        return {"issue_prepared": True}
+        
+    except Exception as e:
+        print(f"❌ Error preparing security issue: {str(e)}")
+        return {"issue_prepared": False, "error": str(e)}
+
+async def deploy_project(repo_name: str, clone_url: str, payload: dict):
+    """Actually deploy project to ngrok domain"""
+    try:
+        print(f"🚀 Starting real deployment for {repo_name}")
+        
+        # Get deployment directory (create if doesn't exist)
+        deployment_base = "/Users/trishajanath/AltX/deployments"  # Mac-specific path
+        os.makedirs(deployment_base, exist_ok=True)
+        
+        # Create unique deployment directory
+        deploy_dir = os.path.join(deployment_base, repo_name)
+        
+        # Remove existing deployment if exists
+        if os.path.exists(deploy_dir):
+            print(f"🗑️ Removing existing deployment: {deploy_dir}")
+            shutil.rmtree(deploy_dir)
+        
+        commit_info = payload.get("head_commit", {})
+        commit_message = commit_info.get("message", "No commit message")
+        committer = commit_info.get("committer", {}).get("name", "Unknown")
+        
+        print(f"📦 Deploying commit: {commit_message}")
+        print(f"👤 Committed by: {committer}")
+        
+        # Step 1: Clone repository
+        print("⏳ Cloning repository...")
+        repo = git.Repo.clone_from(clone_url, deploy_dir)
+        await asyncio.sleep(1)
+        
+        # Step 2: Detect project type and install dependencies
+        print("⏳ Installing dependencies...")
+        project_type = detect_project_type(deploy_dir)
+        await install_dependencies(deploy_dir, project_type)
+        
+        # Step 3: Build project
+        print("⏳ Building application...")
+        build_result = await build_project(deploy_dir, project_type)
+        
+        # Step 4: Configure web server (simulation for now)
+        print("⏳ Configuring web server...")
+        nginx_config = await configure_nginx(repo_name, deploy_dir, project_type)
+        
+        # Step 5: Copy files to your FastAPI static directory
+        print("⏳ Copying files to ngrok domain...")
+        static_copy_result = await copy_to_static_domain(repo_name, deploy_dir, project_type)
+        
+        # Generate deployment URL
+        deployment_url = f"https://legal-actively-glider.ngrok-free.app/{repo_name}"
+        
+        print(f"✅ Deployment complete for {repo_name}")
+        print(f"🌐 Live at: {deployment_url}")
+        
+        return {
+            "deployment_complete": True,
+            "repo": repo_name,
+            "commit": commit_info.get("id", "unknown")[:8],
+            "deployment_url": deployment_url,
+            "project_type": project_type,
+            "build_success": build_result.get("success", False),
+            "nginx_configured": nginx_config.get("success", False),
+            "files_copied": static_copy_result.get("files_copied", 0)
+        }
+        
+    except Exception as e:
+        print(f"❌ Deployment error: {str(e)}")
+        return {"deployment_complete": False, "error": str(e)}
+
+def detect_project_type(deploy_dir: str) -> str:
+    """Detect what type of project this is"""
+    if os.path.exists(os.path.join(deploy_dir, "package.json")):
+        return "nodejs"
+    elif os.path.exists(os.path.join(deploy_dir, "requirements.txt")):
+        return "python"
+    elif os.path.exists(os.path.join(deploy_dir, "index.html")):
+        return "static"
+    elif os.path.exists(os.path.join(deploy_dir, "Dockerfile")):
+        return "docker"
+    else:
+        return "unknown"
+
+async def install_dependencies(deploy_dir: str, project_type: str):
+    """Install project dependencies based on type"""
+    try:
+        if project_type == "nodejs":
+            # Check for package manager
+            if os.path.exists(os.path.join(deploy_dir, "package-lock.json")):
+                subprocess.run(["npm", "install"], cwd=deploy_dir, check=True)
+            elif os.path.exists(os.path.join(deploy_dir, "yarn.lock")):
+                subprocess.run(["yarn", "install"], cwd=deploy_dir, check=True)
+            else:
+                subprocess.run(["npm", "install"], cwd=deploy_dir, check=True)
+        
+        elif project_type == "python":
+            # Create virtual environment and install
+            subprocess.run(["python", "-m", "venv", "venv"], cwd=deploy_dir, check=True)
+            
+            # Mac/Unix pip path
+            pip_path = os.path.join(deploy_dir, "venv", "bin", "pip")
+            subprocess.run([pip_path, "install", "-r", "requirements.txt"], cwd=deploy_dir, check=True)
+        
+        print(f"✅ Dependencies installed for {project_type} project")
+        return {"success": True}
+        
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Dependency installation failed: {e}")
+        return {"success": False, "error": str(e)}
+    except Exception as e:
+        print(f"⚠️ Dependency installation skipped: {e}")
+        return {"success": True, "skipped": True}
+
+async def build_project(deploy_dir: str, project_type: str):
+    """Build the project"""
+    try:
+        if project_type == "nodejs":
+            # Check for build script in package.json
+            package_json_path = os.path.join(deploy_dir, "package.json")
+            if os.path.exists(package_json_path):
+                with open(package_json_path, 'r') as f:
+                    package_data = json.load(f)
+                
+                scripts = package_data.get("scripts", {})
+                
+                if "build" in scripts:
+                    subprocess.run(["npm", "run", "build"], cwd=deploy_dir, check=True)
+                elif "dist" in scripts:
+                    subprocess.run(["npm", "run", "dist"], cwd=deploy_dir, check=True)
+        
+        elif project_type == "python":
+            # For Python, we might need to collect static files or build assets
+            print("🐍 Python project detected - no build step required")
+        
+        print(f"✅ Build completed for {project_type} project")
+        return {"success": True}
+        
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Build failed: {e}")
+        return {"success": False, "error": str(e)}
+    except Exception as e:
+        print(f"⚠️ Build skipped: {e}")
+        return {"success": True, "skipped": True}
+
+async def configure_nginx(repo_name: str, deploy_dir: str, project_type: str):
+    """Configure nginx for the deployment (simulation)"""
+    try:
+        # Determine document root based on project type
+        if project_type == "nodejs":
+            # Check for common build directories
+            for build_dir in ["dist", "build", "public"]:
+                potential_root = os.path.join(deploy_dir, build_dir)
+                if os.path.exists(potential_root):
+                    document_root = potential_root
+                    break
+            else:
+                document_root = deploy_dir
+        elif project_type == "static":
+            document_root = deploy_dir
+        else:
+            document_root = deploy_dir
+        
+        print(f"📝 Nginx would serve from: {document_root}")
+        print(f"🌐 Would be accessible at: /{repo_name}")
+        
+        # In a real deployment, you'd write nginx config and reload
+        return {"success": True, "document_root": document_root}
+        
+    except Exception as e:
+        print(f"❌ Nginx configuration failed: {e}")
+        return {"success": False, "error": str(e)}
+
+async def copy_to_static_domain(repo_name: str, deploy_dir: str, project_type: str):
+    """Copy deployed files to FastAPI static directory for ngrok domain"""
+    try:
+        # Create static directory in your FastAPI backend
+        static_base = "/Users/trishajanath/AltX/backend/static"
+        repo_static_dir = os.path.join(static_base, repo_name)
+        
+        os.makedirs(static_base, exist_ok=True)
+        
+        # Remove existing deployment
+        if os.path.exists(repo_static_dir):
+            shutil.rmtree(repo_static_dir)
+        
+        # Determine source directory
+        if project_type == "nodejs":
+            # Look for built files
+            for build_dir in ["dist", "build", "public"]:
+                source_path = os.path.join(deploy_dir, build_dir)
+                if os.path.exists(source_path):
+                    shutil.copytree(source_path, repo_static_dir)
+                    files_copied = len([f for f in os.listdir(repo_static_dir) if os.path.isfile(os.path.join(repo_static_dir, f))])
+                    print(f"✅ Copied {files_copied} files from {build_dir}/ to static domain")
+                    return {"success": True, "files_copied": files_copied, "source": build_dir}
+        
+        # Fallback: copy entire directory
+        shutil.copytree(deploy_dir, repo_static_dir, ignore=shutil.ignore_patterns('.git', 'node_modules', '*.pyc', '__pycache__'))
+        files_copied = sum([len(files) for r, d, files in os.walk(repo_static_dir)])
+        print(f"✅ Copied {files_copied} files to static domain")
+        
+        return {"success": True, "files_copied": files_copied, "source": "root"}
+        
+    except Exception as e:
+        print(f"❌ Static file copy failed: {e}")
+        return {"success": False, "error": str(e)}
+
 @app.get("/debug-scan")
 async def debug_scan():
     """Debug endpoint to check stored scan data"""
@@ -1560,6 +2246,81 @@ async def debug_scan():
 async def health_check():
     """Check if the API is running"""
     return {"status": "healthy"}
+
+from fastapi.staticfiles import StaticFiles
+
+# Add this after your other app configurations but before the endpoints
+# Create static directory if it doesn't exist
+static_dir = "/Users/trishajanath/AltX/backend/static"
+os.makedirs(static_dir, exist_ok=True)
+
+# Mount static files
+app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+@app.get("/{repo_name}/{file_path:path}")
+async def serve_deployed_files(repo_name: str, file_path: str):
+    """Serve deployed repository files"""
+    try:
+        static_dir = f"/Users/trishajanath/AltX/backend/static/{repo_name}"
+        file_full_path = os.path.join(static_dir, file_path)
+        
+        # Security check: ensure file is within the repo directory
+        if not os.path.realpath(file_full_path).startswith(os.path.realpath(static_dir)):
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        if os.path.exists(file_full_path) and os.path.isfile(file_full_path):
+            from fastapi.responses import FileResponse
+            return FileResponse(file_full_path)
+        
+        # Try index.html for SPA applications
+        index_path = os.path.join(static_dir, "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
+        
+        raise HTTPException(status_code=404, detail="File not found")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error serving file: {str(e)}")
+
+@app.get("/{repo_name}")
+async def serve_deployed_repo_root(repo_name: str):
+    """Serve deployed repository root (index.html)"""
+    try:
+        static_dir = f"/Users/trishajanath/AltX/backend/static/{repo_name}"
+        index_path = os.path.join(static_dir, "index.html")
+        
+        if os.path.exists(index_path):
+            from fastapi.responses import FileResponse
+            return FileResponse(index_path)
+        
+        # If no index.html, show directory listing
+        if os.path.exists(static_dir):
+            files = os.listdir(static_dir)
+            html_content = f"""
+<!DOCTYPE html>
+<html>
+<head><title>🚀 {repo_name} - Deployed Files</title></head>
+<body>
+    <h1>🚀 Repository: {repo_name}</h1>
+    <h2>📁 Deployed Files:</h2>
+    <ul>
+        {''.join([f'<li><a href="/{repo_name}/{f}">{f}</a></li>' for f in files])}
+    </ul>
+    <p><strong>Deployment URL:</strong> https://legal-actively-glider.ngrok-free.app/{repo_name}</p>
+</body>
+</html>
+            """
+            from fastapi.responses import HTMLResponse
+            return HTMLResponse(content=html_content)
+        
+        raise HTTPException(status_code=404, detail=f"Repository {repo_name} not deployed")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error serving repository: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
