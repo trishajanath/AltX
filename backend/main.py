@@ -24,9 +24,12 @@ import base64
 from github import Github
 from rag_query import get_secure_coding_patterns
 import tempfile
+from rag_query import get_secure_coding_patterns
 
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+import docker
+from nginx_config import NginxConfigManager
 
 # --- Local Imports ---
 from ai_assistant import get_chat_response, RepoAnalysis, FixRequest
@@ -2221,6 +2224,267 @@ async def copy_to_static_domain(repo_name: str, deploy_dir: str, project_type: s
     except Exception as e:
         print(f"❌ Static file copy failed: {e}")
         return {"success": False, "error": str(e)}
+# Add this NEW function to main.py (alongside your existing deploy_project)
+
+async def deploy_project_with_docker(repo_name: str, clone_url: str, payload: dict):
+    """Enhanced CI/CD deployment with Docker builds - fallback to standard deployment"""
+    try:
+        print(f"🐳 Attempting Docker CI/CD deployment for {repo_name}")
+        
+        # Check if Docker is available
+        try:
+            docker_client = docker.from_env()
+            print("✅ Docker is available")
+        except Exception as docker_error:
+            print(f"⚠️ Docker not available: {docker_error}")
+            # Fall back to your proven method immediately
+            return await deploy_project(repo_name, clone_url, payload)
+        
+        # Step 1: Prepare directories
+        deployment_base = "/Users/trishajanath/AltX/deployments"
+        deploy_dir = os.path.join(deployment_base, repo_name)
+        build_output_dir = os.path.join(deployment_base, f"{repo_name}-build")
+        
+        os.makedirs(deployment_base, exist_ok=True)
+        
+        # Clean existing deployments
+        for dir_path in [deploy_dir, build_output_dir]:
+            if os.path.exists(dir_path):
+                shutil.rmtree(dir_path)
+        
+        commit_info = payload.get("head_commit", {})
+        print(f"📦 Docker deployment for: {commit_info.get('message', 'No message')}")
+        
+        # Step 2: Clone repository
+        print("⏳ Cloning repository for Docker build...")
+        repo = git.Repo.clone_from(clone_url, deploy_dir)
+        
+        # Step 3: Detect if this project needs Docker builds
+        project_type = detect_project_type(deploy_dir)
+        
+        # Check if project actually benefits from Docker builds
+        needs_docker_build = False
+        if project_type == "nodejs" and os.path.exists(os.path.join(deploy_dir, "package.json")):
+            with open(os.path.join(deploy_dir, "package.json"), 'r') as f:
+                package_data = json.load(f)
+                if "build" in package_data.get("scripts", {}):
+                    needs_docker_build = True
+        elif project_type == "python" and os.path.exists(os.path.join(deploy_dir, "requirements.txt")):
+            needs_docker_build = True
+        
+        if not needs_docker_build:
+            print(f"📄 Project type '{project_type}' doesn't need Docker builds, using standard deployment")
+            return await deploy_project(repo_name, clone_url, payload)
+        
+        # Step 4: Check if Docker build files exist
+        docker_config_dir = "/Users/trishajanath/AltX/backend/docker-configs"
+        if not os.path.exists(docker_config_dir):
+            print("⚠️ Docker configurations not found, using standard deployment")
+            return await deploy_project(repo_name, clone_url, payload)
+        
+        # Step 5: Try Docker build
+        print("🔨 Attempting Docker build...")
+        build_result = await build_in_docker(deploy_dir, build_output_dir, project_type)
+        
+        if not build_result.get("success"):
+            print(f"⚠️ Docker build failed: {build_result.get('error')}")
+            print("🔄 Falling back to standard deployment method")
+            return await deploy_project(repo_name, clone_url, payload)
+        
+        # Step 6: Copy Docker build output to static domain
+        print("📁 Copying Docker build to static domain...")
+        static_copy_result = await copy_build_to_static(repo_name, build_output_dir, project_type)
+        
+        if not static_copy_result.get("success"):
+            print("⚠️ Docker build copy failed, using standard deployment")
+            return await deploy_project(repo_name, clone_url, payload)
+        
+        # Success! Return Docker deployment result
+        deployment_url = f"https://legal-actively-glider.ngrok-free.app/{repo_name}"
+        
+        print(f"✅ Docker CI/CD deployment complete for {repo_name}")
+        print(f"🌐 Live at: {deployment_url}")
+        
+        return {
+            "deployment_complete": True,
+            "repo": repo_name,
+            "commit": commit_info.get("id", "unknown")[:8],
+            "deployment_url": deployment_url,
+            "project_type": project_type,
+            "build_success": True,
+            "docker_build": True,
+            "nginx_configured": False,
+            "files_copied": static_copy_result.get("files_copied", 0),
+            "deployment_method": "docker_ci_cd_success"
+        }
+        
+    except Exception as e:
+        print(f"❌ Docker CI/CD deployment error: {str(e)}")
+        print("🔄 Falling back to proven standard deployment method")
+        # Always fall back to your working method
+        return await deploy_project(repo_name, clone_url, payload)
+
+async def build_in_docker(source_dir: str, output_dir: str, project_type: str):
+    """Build project using Docker containers"""
+    try:
+        # Check if Docker files exist
+        dockerfile_map = {
+            "nodejs": "Dockerfile.nodejs",
+            "python": "Dockerfile.python", 
+            "php": "Dockerfile.php",
+            "static": "Dockerfile.universal",
+            "unknown": "Dockerfile.universal"
+        }
+        
+        dockerfile_name = dockerfile_map.get(project_type, "Dockerfile.universal")
+        dockerfile_path = f"/Users/trishajanath/AltX/backend/docker-configs/{dockerfile_name}"
+        
+        # Check if Docker files exist
+        if not os.path.exists(dockerfile_path):
+            print(f"⚠️ Docker configuration not found: {dockerfile_path}")
+            return {"success": False, "error": "Docker configuration missing"}
+        
+        print(f"🐳 Using Docker configuration: {dockerfile_name}")
+        
+        # Build Docker image
+        print("🔨 Building Docker image...")
+        image_tag = f"altx-builder-{project_type}:latest"
+        
+        # Build image with build context
+        image, build_logs = docker_client.images.build(
+            path="/Users/trishajanath/AltX/backend",
+            dockerfile=f"docker-configs/{dockerfile_name}",
+            tag=image_tag,
+            rm=True,
+            forcerm=True
+        )
+        
+        print("✅ Docker image built successfully")
+        
+        # Create output directory
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Run build container
+        print("🏗️ Running build process in container...")
+        
+        container = docker_client.containers.run(
+            image_tag,
+            volumes={
+                source_dir: {'bind': '/app', 'mode': 'ro'},
+                output_dir: {'bind': '/deployment', 'mode': 'rw'}
+            },
+            working_dir='/app',
+            detach=True,
+            auto_remove=False
+        )
+        
+        # Wait for completion and get logs
+        exit_code = container.wait()
+        build_logs = container.logs().decode('utf-8')
+        
+        print("📋 Build logs:")
+        print(build_logs[-1000:])  # Last 1000 characters
+        
+        # Clean up container
+        container.remove()
+        
+        if exit_code['StatusCode'] != 0:
+            return {"success": False, "error": f"Build failed with exit code {exit_code['StatusCode']}"}
+        
+        # Determine document root from build output
+        document_root = output_dir
+        if os.path.exists(os.path.join(output_dir, "dist")):
+            document_root = os.path.join(output_dir, "dist")
+        elif os.path.exists(os.path.join(output_dir, "build")):
+            document_root = os.path.join(output_dir, "build")
+        
+        print(f"✅ Docker build completed successfully")
+        print(f"📁 Document root: {document_root}")
+        
+        return {
+            "success": True,
+            "image_tag": image_tag,
+            "document_root": document_root,
+            "build_logs": build_logs[-500:],  # Last 500 chars
+            "files_created": len(os.listdir(output_dir)) if os.path.exists(output_dir) else 0
+        }
+        
+    except docker.errors.DockerException as e:
+        print(f"❌ Docker not available: {e}")
+        return {"success": False, "error": f"Docker not available: {str(e)}"}
+    except Exception as e:
+        print(f"❌ Docker deployment error: {e}")
+        return {"success": False, "error": str(e)}
+async def copy_build_to_static(repo_name: str, build_dir: str, project_type: str):
+    """Copy Docker build output to static serving directory"""
+    try:
+        static_base = "/Users/trishajanath/AltX/backend/static"
+        repo_static_dir = os.path.join(static_base, repo_name)
+        
+        os.makedirs(static_base, exist_ok=True)
+        
+        # Remove existing
+        if os.path.exists(repo_static_dir):
+            shutil.rmtree(repo_static_dir)
+        
+        # Copy build output
+        if os.path.exists(build_dir):
+            shutil.copytree(build_dir, repo_static_dir)
+            files_copied = sum([len(files) for r, d, files in os.walk(repo_static_dir)])
+            print(f"✅ Copied {files_copied} files to static domain")
+            
+            return {"success": True, "files_copied": files_copied}
+        else:
+            raise Exception(f"Build directory not found: {build_dir}")
+            
+    except Exception as e:
+        print(f"❌ Static copy failed: {e}")
+        return {"success": False, "error": str(e)}
+
+async def handle_push_event(payload):
+    """Handle push events - try Docker first, fallback to standard deployment"""
+    try:
+        ref = payload.get("ref", "")
+        repo_info = payload.get("repository", {})
+        clone_url = repo_info.get("clone_url")
+        repo_name = repo_info.get("name")
+        repo_full_name = repo_info.get("full_name")
+        default_branch = repo_info.get("default_branch", "main")
+        
+        if ref == f"refs/heads/{default_branch}":
+            print(f"🚀 Push to {default_branch} branch detected for {repo_full_name}")
+            
+            if clone_url and repo_name:
+                # Trigger security analysis (async)
+                analysis_task = asyncio.create_task(
+                    run_automated_security_analysis(repo_info, payload)
+                )
+                
+                # Try Docker deployment first, fallback to standard deployment
+                try:
+                    deployment_result = await deploy_project_with_docker(repo_name, clone_url, payload)
+                    deployment_method = "docker_ci_cd"
+                except Exception as e:
+                    print(f"⚠️ Docker deployment failed: {e}, using standard deployment")
+                    deployment_result = await deploy_project(repo_name, clone_url, payload)
+                    deployment_method = "standard"
+                
+                return {
+                    "status": "enhanced CI/CD deployment triggered",
+                    "repo": repo_full_name,
+                    "branch": default_branch,
+                    "commit": payload.get("head_commit", {}).get("id", "unknown")[:8],
+                    "deployment_method": deployment_method,
+                    "timestamp": datetime.now().isoformat(),
+                    "actions": ["security_analysis", "enhanced_deployment"],
+                    "deployment_result": deployment_result
+                }
+        
+        return {"status": "push to non-default branch", "ref": ref}
+        
+    except Exception as e:
+        print(f"❌ Error handling push event: {str(e)}")
+        return {"status": "error", "error": str(e)}
 
 @app.get("/debug-scan")
 async def debug_scan():

@@ -1,0 +1,24 @@
+# AltX Security Scanner - Node.js Build Container
+FROM node:18-alpine
+
+# Install build dependencies
+RUN apk add --no-cache \
+    git \
+    python3 \
+    make \
+    g++ \
+    rsync \
+    gzip
+
+# Set working directory
+WORKDIR /app
+
+# Copy build script
+COPY ../build.sh /build.sh
+RUN chmod +x /build.sh
+
+# Create deployment directory
+RUN mkdir -p /deployment
+
+# Default command
+CMD ["/build.sh"]

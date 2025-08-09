@@ -1,0 +1,25 @@
+# AltX Security Scanner - Python Build Container
+FROM python:3.11-slim
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    git \
+    gcc \
+    g++ \
+    make \
+    rsync \
+    gzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Copy build script
+COPY ../build.sh /build.sh
+RUN chmod +x /build.sh
+
+# Create deployment directory
+RUN mkdir -p /deployment
+
+# Default command
+CMD ["/build.sh"]

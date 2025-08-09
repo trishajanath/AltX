@@ -1,0 +1,47 @@
+# AltX Security Scanner - Universal Build Container
+FROM ubuntu:22.04
+
+# Install all build tools
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    build-essential \
+    rsync \
+    gzip \
+    jq \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js
+RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
+    && apt-get install -y nodejs
+
+# Install Python
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    python3-venv \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install PHP
+RUN apt-get update && apt-get install -y \
+    php \
+    php-cli \
+    php-composer-cli \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Go
+RUN curl -fsSL https://golang.org/dl/go1.21.0.linux-amd64.tar.gz | tar -C /usr/local -xz
+ENV PATH="/usr/local/go/bin:${PATH}"
+
+# Set working directory
+WORKDIR /app
+
+# Copy build script
+COPY ../build.sh /build.sh
+RUN chmod +x /build.sh
+
+# Create deployment directory
+RUN mkdir -p /deployment
+
+# Default command
+CMD ["/build.sh"]
