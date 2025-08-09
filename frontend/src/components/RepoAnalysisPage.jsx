@@ -361,12 +361,37 @@ const RepoAnalysisPage = () => {
         // Add the issue to fixed issues set to remove it from display
         setFixedIssues(prev => new Set(prev).add(issueId));
         
+        let successMessage = '';
+        
+        if (data.pull_request && data.pull_request.url) {
+          // Successful pull request created
+          successMessage = `✅ **Pull Request Created!**\n\n🔧 **Fixed:** ${issueData.description}\n📁 **File:** ${issueData.file || 'Multiple files'}\n\n🔗 **Pull Request:** [#${data.pull_request.number} - ${data.pull_request.title}](${data.pull_request.url})\n📝 **Branch:** ${data.pull_request.branch}\n\n💾 **Changes Applied:**\n${data.fix_details?.changes_made?.join('\n') || 'Security fix applied'}\n\n🎯 **Next Steps:**\n- Review the pull request\n- Test the changes\n- Merge when ready`;
+        } else if (data.fix_type === 'fork_required') {
+          // Fork workflow required
+          successMessage = `🍴 **Fork Required for Contribution**\n\n🔧 **Fix Generated:** ${issueData.description}\n📁 **File:** ${issueData.file || 'Multiple files'}\n\n⚠️ **Action Required:** Repository requires forking to contribute\n\n📋 **Fork Instructions:**\n${data.fork_instructions?.join('\n') || ''}\n\n💾 **Proposed Changes:**\n${data.fix_details?.changes_made?.join('\n') || 'Security fix generated'}\n\n📝 **Manual Fix Instructions:**\n${data.manual_fix_instructions || 'Apply the fix manually'}`;
+        } else if (data.fix_type === 'local_suggestion') {
+          // Local fix suggestion only
+          successMessage = `🔧 **Fix Generated (Local)**\n\n⚠️ **Read-only Repository:** ${data.access_limitation}\n📁 **File:** ${issueData.file || 'Multiple files'}\n\n💾 **Suggested Changes:**\n${data.fix_details?.changes_made?.join('\n') || 'Security fix generated'}\n\n📋 **Manual Steps:**\n${data.suggested_actions?.join('\n') || ''}\n\n📝 **Instructions:**\n${data.manual_fix_instructions || 'Apply the fix manually'}`;
+        } else {
+          // Default success message
+          successMessage = `✅ **Issue Fixed Successfully!**\n\n🔧 **Fixed:** ${issueData.description}\n📁 **File:** ${issueData.file || 'Multiple files'}\n\n💾 **Changes Applied:**\n${data.fix_details?.changes_made?.join('\n') || 'Security fix applied'}\n\n🌐 **View changes:** The fix has been applied to your repository files.\n\n🎯 **Issue removed from display**`;
+        }
+        
         // Show success message
         setChatMessages(prev => [...prev, {
           type: 'ai',
-          message: `✅ **Issue Fixed Successfully!**\n\n🔧 **Fixed:** ${issueData.description}\n📁 **File:** ${issueData.file || 'Multiple files'}\n\n💾 **Changes Applied:**\n${data.changes_made?.join('\n') || 'Security fix applied'}\n\n🌐 **View changes:** The fix has been applied to your repository files.\n\n🎯 **Issue removed from display**`,
+          message: successMessage,
           timestamp: new Date().toLocaleTimeString()
         }]);
+
+        // Show code comparison if available
+        if (data.code_comparison && (data.code_comparison.original_content || data.code_comparison.fixed_content)) {
+          setChatMessages(prev => [...prev, {
+            type: 'ai',
+            message: `📊 **Code Comparison**\n\n**Original Content:**\n\`\`\`\n${data.code_preview?.original_preview || data.code_comparison.original_content.substring(0, 500)}\n\`\`\`\n\n**Fixed Content:**\n\`\`\`\n${data.code_preview?.fixed_preview || data.code_comparison.fixed_content.substring(0, 500)}\n\`\`\`\n\n📈 **Statistics:**\n- Length: ${data.code_comparison.content_length_before} → ${data.code_comparison.content_length_after} characters\n- Change: ${data.code_comparison.character_changes >= 0 ? '+' : ''}${data.code_comparison.character_changes} characters`,
+            timestamp: new Date().toLocaleTimeString()
+          }]);
+        }
 
         // Optionally show the AI sidebar to display the success message
         setShowAISidebar(true);

@@ -72,5 +72,3 @@ colorama
 tqdm
 rich
 langchain-huggingface
-# ...existing requirements...
-docker>=6.0.0

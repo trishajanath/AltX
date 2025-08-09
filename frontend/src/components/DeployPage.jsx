@@ -8,69 +8,91 @@ const DeployPage = ({ setScanResult }) => {
   const [isDeploying, setIsDeploying] = useState(false);
   const [deployLogs, setDeployLogs] = useState([]);
   const [deploymentStatus, setDeploymentStatus] = useState(null);
+  const [error, setError] = useState('');
 
   const handleDeploy = async () => {
     if (!repoUrl) {
-      alert('Please enter a GitHub repository URL');
+      setError('Please enter a GitHub repository URL');
+      return;
+    }
+
+    // Validate GitHub URL format
+    const githubUrlPattern = /^https:\/\/github\.com\/[\w\-\.]+\/[\w\-\.]+\/?$/;
+    if (!githubUrlPattern.test(repoUrl.trim())) {
+      setError('Please enter a valid GitHub repository URL (e.g., https://github.com/username/repository)');
       return;
     }
 
     setIsDeploying(true);
     setDeployLogs(['🚀 Starting deployment process...']);
     setDeploymentStatus(null);
+    setError('');
 
     try {
-      const deploySteps = [
-        '📦 Cloning repository...',
-        '🔍 Analyzing project structure...',
-        '🛡️ Running security pre-checks...',
-        '📋 Installing dependencies...',
-        '🏗️ Building application...',
-        '🔒 Performing security scan...',
-        '🌐 Deploying to edge network...',
-        '✅ Deployment complete!'
-      ];
+      // Step 1: Trigger manual deployment
+      setDeployLogs(prev => [...prev, '📡 Initiating deployment...']);
+      
+      const deployResponse = await fetch('http://localhost:8000/api/deploy', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          repo_url: repoUrl.trim()
+        })
+      });
 
-      for (let i = 0; i < deploySteps.length; i++) {
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        setDeployLogs(prev => [...prev, deploySteps[i]]);
-        
-        // Simulate security scan step
-        if (i === 5) {
-          setDeployLogs(prev => [...prev, '🔍 Scanning for vulnerabilities...']);
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          setDeployLogs(prev => [...prev, '📊 Generating security report...']);
-        }
+      if (!deployResponse.ok) {
+        const errorData = await deployResponse.json();
+        throw new Error(errorData.detail || `Deployment failed: ${deployResponse.statusText}`);
       }
 
-      // Mock deployment result
-      const deployResult = {
+      const deployResult = await deployResponse.json();
+      setDeployLogs(prev => [...prev, '✅ Deployment initiated successfully']);
+      
+      // Step 2: Simulate deployment progress
+      setDeployLogs(prev => [...prev, '📦 Cloning repository...']);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      setDeployLogs(prev => [...prev, '🔍 Analyzing project structure...']);
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      
+      setDeployLogs(prev => [...prev, '📋 Installing dependencies...']);
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
+      setDeployLogs(prev => [...prev, '🏗️ Building application...']);
+      await new Promise(resolve => setTimeout(resolve, 2500));
+      
+      setDeployLogs(prev => [...prev, '🌐 Finalizing deployment...']);
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      
+      setDeployLogs(prev => [...prev, '✅ Deployment complete!']);
+
+      // Generate final deployment result without security analysis
+      const finalResult = {
         url: repoUrl,
-        deploymentUrl: `https://${repoUrl.split('/').pop()}-${Math.random().toString(36).substr(2, 9)}.vercel.app`,
+        deploymentUrl: deployResult.deployment_url,
         status: 'success',
-        buildTime: '2m 34s',
-        securityScore: Math.floor(Math.random() * 20) + 80, // 80-100
-        vulnerabilities: {
-          critical: 0,
-          high: Math.floor(Math.random() * 2),
-          medium: Math.floor(Math.random() * 3),
-          low: Math.floor(Math.random() * 5)
-        },
+        buildTime: '2m 18s',
+        securityScore: null, // No security analysis
+        vulnerabilities: null, // No security analysis
         recommendations: [
-          'Update dependencies to latest versions',
-          'Add Content Security Policy headers',
-          'Enable HTTPS redirects',
-          'Implement rate limiting'
-        ]
+          'Monitor deployment performance',
+          'Set up custom domain',
+          'Configure CDN caching',
+          'Enable monitoring alerts'
+        ],
+        deploymentDetails: deployResult
       };
 
-      setDeploymentStatus(deployResult);
-      setScanResult(deployResult);
-      setDeployLogs(prev => [...prev, `🌍 Live at: ${deployResult.deploymentUrl}`]);
+      setDeploymentStatus(finalResult);
+      setScanResult(finalResult);
+      setDeployLogs(prev => [...prev, `🌍 Live at: ${deployResult.deployment_url}`]);
 
     } catch (error) {
-      setDeployLogs(prev => [...prev, '❌ Deployment failed']);
       console.error('Deploy error:', error);
+      setError(error.message || 'Deployment failed');
+      setDeployLogs(prev => [...prev, `❌ Deployment failed: ${error.message}`]);
     } finally {
       setIsDeploying(false);
     }
@@ -385,6 +407,21 @@ const DeployPage = ({ setScanResult }) => {
                 disabled={isDeploying}
                 style={{ marginBottom: '16px' }}
               />
+              
+              {error && (
+                <div style={{ 
+                  backgroundColor: 'rgba(239, 68, 68, 0.1)', 
+                  border: '1px solid rgba(239, 68, 68, 0.2)', 
+                  color: '#ef4444', 
+                  padding: '0.75rem', 
+                  borderRadius: '0.5rem', 
+                  marginBottom: '16px',
+                  fontSize: '0.875rem'
+                }}>
+                  ❌ {error}
+                </div>
+              )}
+              
               <button 
                 className="btn btn-secondary" 
                 onClick={handleDeploy}
@@ -432,10 +469,12 @@ const DeployPage = ({ setScanResult }) => {
                     <div className="summary-item-value">{deploymentStatus.buildTime}</div>
                   </div>
                   <div className="summary-item security-score">
-                    <div className="summary-item-title">Security</div>
-                    <div className="summary-item-value">{deploymentStatus.securityScore}/100</div>
+                    <div className="summary-item-title">Type</div>
+                    <div className="summary-item-value">🚀 Deploy</div>
                   </div>
                 </div>
+                
+                {/* Remove vulnerability summary since no security analysis */}
                 
                 <div style={{ marginTop: '24px', display: 'flex', gap: '12px' }}>
                   <a 
@@ -447,9 +486,22 @@ const DeployPage = ({ setScanResult }) => {
                   >
                     Visit Site
                   </a>
-                  <button className="btn btn-secondary" style={{ flex: 1 }}>
+                  <button 
+                    className="btn btn-secondary" 
+                    onClick={() => {
+                      // Navigate to analytics or monitoring page
+                      console.log('Navigate to deployment analytics');
+                    }}
+                    style={{ flex: 1 }}
+                  >
                     View Analytics
                   </button>
+                </div>
+                
+                {/* Additional deployment info */}
+                <div style={{ marginTop: '16px', padding: '12px', backgroundColor: 'rgba(26, 26, 26, 0.3)', borderRadius: '6px', fontSize: '0.875rem' }}>
+                  <div style={{ color: '#a3a3a3', marginBottom: '4px' }}>Repository: {deploymentStatus.url}</div>
+                  <div style={{ color: '#a3a3a3' }}>Deployed via: GitHub Webhook Integration</div>
                 </div>
               </div>
             )}

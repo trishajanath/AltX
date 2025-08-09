@@ -2,6 +2,10 @@ import os
 import shutil
 import git
 import requests
+import time
+import tempfile
+import stat
+import platform
 from fastapi import Request, Header, FastAPI, HTTPException
 from fastapi.responses import RedirectResponse, HTMLResponse
 import hmac
@@ -1296,18 +1300,36 @@ async def propose_fix(request: FixRequest):
         repo_url = request.repo_url
         issue = request.issue
         
+        print(f"🔍 Raw repo_url received: '{repo_url}'")
+        print(f"🔍 Issue data: {json.dumps(issue, indent=2)}")
+        
         # Check if this is a local analysis (not a GitHub repo)
         if not repo_url.startswith('https://github.com/') and not repo_url.startswith('git@github.com:'):
+            print(f"❌ Invalid repo URL format: '{repo_url}' - not a GitHub URL")
             return await provide_local_fix_suggestion(issue)
         
-        # Extract repo info
+        # Clean and extract repo info
         repo_url_clean = repo_url.rstrip('/').replace('.git', '')
-        parts = repo_url_clean.split('/')
         
-        if len(parts) < 5:
-            raise HTTPException(status_code=400, detail="Invalid repo URL format")
+        # Handle different GitHub URL formats
+        if '/tree/' in repo_url_clean:
+            # Remove everything after /tree/
+            repo_url_clean = repo_url_clean.split('/tree/')[0]
+            print(f"🔧 Cleaned tree URL: '{repo_url}' -> '{repo_url_clean}'")
         
-        owner, repo_name = parts[-2], parts[-1]
+        if '/blob/' in repo_url_clean:
+            # Remove everything after /blob/
+            repo_url_clean = repo_url_clean.split('/blob/')[0]
+            print(f"🔧 Cleaned blob URL: '{repo_url}' -> '{repo_url_clean}'")
+        
+        parts = repo_url_clean.replace('https://github.com/', '').split('/')
+        print(f"🔍 URL parts after cleaning: {parts}")
+        
+        if len(parts) < 2:
+            print(f"❌ Invalid repo URL format after cleaning: '{repo_url_clean}' -> parts: {parts}")
+            raise HTTPException(status_code=400, detail=f"Invalid repo URL format. Expected format: https://github.com/owner/repo, got: '{repo_url}'")
+        
+        owner, repo_name = parts[0], parts[1]
         print(f"🔍 Extracted repo: {owner}/{repo_name}")
         
         # Initialize GitHub client with proper authentication
@@ -1360,10 +1382,10 @@ async def propose_fix(request: FixRequest):
         temp_dir = tempfile.mkdtemp()
         
         try:
-            print(f"🔧 Starting fix process for {repo_url}")
+            print(f"🔧 Starting fix process for {repo_url_clean}")
             
-            # Clone the repository
-            repo = git.Repo.clone_from(repo_url, temp_dir)
+            # Clone the repository using the cleaned URL
+            repo = git.Repo.clone_from(repo_url_clean, temp_dir)
             
             # Get the file content
             issue_file = issue.get('file', '')
@@ -1550,10 +1572,120 @@ Return ONLY a JSON object with this exact structure:
             repo.git.commit('-m', commit_message)
             
             # Push the branch
-            origin = repo.remote('origin')
-            origin.push(branch_name)
+            try:
+                origin = repo.remote('origin')
+                origin.push(branch_name)
+                print(f"✅ Pushed fix to branch: {branch_name}")
+                
+                # If push succeeds, continue with PR creation
+                push_success = True
+                
+            except Exception as push_error:
+                push_success = False
+                error_msg = str(push_error)
+                print(f"❌ Push failed: {error_msg}")
+                
+                # Check if it's a permission issue (403, authentication, etc.)
+                if "403" in error_msg or "401" in error_msg or "authentication" in error_msg.lower() or "permission" in error_msg.lower():
+                    print("🔒 No write access to repository - attempting fork workflow...")
+                    
+                    try:
+                        # Try to fork the repository
+                        print(f"🍴 Attempting to fork {owner}/{repo_name}")
+                        
+                        # Get the authenticated user
+                        auth_user = working_github_client.get_user()
+                        user_login = auth_user.login
+                        print(f"👤 Authenticated as: {user_login}")
+                        
+                        # Check if fork already exists
+                        try:
+                            existing_fork = working_github_client.get_repo(f"{user_login}/{repo_name}")
+                            print(f"✅ Fork already exists: {existing_fork.full_name}")
+                            forked_repo = existing_fork
+                        except:
+                            # Create fork
+                            original_repo = working_github_client.get_repo(f"{owner}/{repo_name}")
+                            forked_repo = auth_user.create_fork(original_repo)
+                            print(f"✅ Fork created: {forked_repo.full_name}")
+                        
+                        # Update remote origin to point to fork
+                        fork_url = forked_repo.clone_url
+                        # Add token to URL for authentication
+                        token = os.getenv("GITHUB_TOKEN")
+                        if token:
+                            fork_url_with_auth = fork_url.replace("https://", f"https://{token}@")
+                        else:
+                            fork_url_with_auth = fork_url
+                        
+                        # Remove existing origin and add fork as origin
+                        try:
+                            repo.delete_remote('origin')
+                        except:
+                            pass
+                        
+                        fork_origin = repo.create_remote('origin', fork_url_with_auth)
+                        print(f"🔄 Updated origin to fork: {fork_url}")
+                        
+                        # Push to fork
+                        fork_origin.push(branch_name)
+                        print(f"✅ Pushed fix to fork: {forked_repo.full_name}/{branch_name}")
+                        
+                        # Create PR from fork to original repo
+                        head_ref = f"{user_login}:{branch_name}"  # Format: fork_owner:branch_name
+                        
+                        push_success = True
+                        # Update github_repo to the original for PR creation
+                        github_repo = working_github_client.get_repo(f"{owner}/{repo_name}")
+                        
+                    except Exception as fork_error:
+                        print(f"❌ Fork workflow failed: {fork_error}")
+                        
+                        # Return local fix suggestion with fork instructions
+                        return {
+                            "success": True,
+                            "message": f"🔧 Security fix generated for {issue_file} (Fork required)",
+                            "fix_type": "fork_required",
+                            "access_limitation": "Repository requires forking to contribute",
+                            "fork_instructions": [
+                                f"1. Go to https://github.com/{owner}/{repo_name}",
+                                "2. Click the 'Fork' button to create your own copy",
+                                "3. Clone your fork to your local machine",
+                                "4. Apply the fix shown below",
+                                "5. Commit and push to your fork",
+                                "6. Create a pull request from your fork to the original repository"
+                            ],
+                            "fix_details": {
+                                "file_fixed": issue_file,
+                                "vulnerability_type": issue.get('type'),
+                                "severity": issue.get('severity', 'Medium'),
+                                "changes_made": fix_data.get('changes_made', []),
+                                "security_impact": fix_data.get('security_impact'),
+                                "fix_summary": fix_data.get('fix_summary', 'Security fix generated'),
+                                "lines_changed": fix_data.get('lines_changed', [])
+                            },
+                            "code_comparison": {
+                                "file_existed_before": file_existed,
+                                "original_content": original_content,
+                                "fixed_content": fixed_content,
+                                "content_length_before": len(original_content),
+                                "content_length_after": len(fixed_content),
+                                "character_changes": len(fixed_content) - len(original_content)
+                            },
+                            "manual_fix_instructions": f"To apply this fix:\n1. Fork the repository at https://github.com/{owner}/{repo_name}\n2. Clone your fork\n3. Edit the file: {issue_file}\n4. Replace the content with the fixed version\n5. Commit, push, and create a pull request",
+                            "code_preview": {
+                                "original_preview": original_content[:500] + ("..." if len(original_content) > 500 else ""),
+                                "fixed_preview": fixed_content[:500] + ("..." if len(fixed_content) > 500 else ""),
+                                "preview_truncated": len(original_content) > 500 or len(fixed_content) > 500
+                            }
+                        }
+                else:
+                    # For other git errors, re-raise
+                    raise push_error
             
-            print(f"✅ Pushed fix to branch: {branch_name}")
+            # Only proceed with PR creation if push was successful
+            if not push_success:
+                return  # This shouldn't be reached due to the return above, but just in case
             
             # Create enhanced pull request with code comparison
             pr_title = f"🔒 Security Fix: {issue.get('description', 'Vulnerability remediation')}"
@@ -1643,12 +1775,23 @@ Return ONLY a JSON object with this exact structure:
                     print(f"⚠️ Branch verification failed: {e}")
                     github_repo = working_github_client.get_repo(f"{owner}/{repo_name}")
             
-                pull_request = github_repo.create_pull(
-                    title=pr_title,
-                    body=pr_body,
-                    head=branch_name,
-                    base=default_branch  # Adjust if your default branch is different
-                )
+                # Check if we're working with a fork (head_ref would be set in fork workflow)
+                if 'head_ref' in locals():
+                    print(f"🍴 Creating PR from fork: {head_ref} -> {default_branch}")
+                    pull_request = github_repo.create_pull(
+                        title=pr_title,
+                        body=pr_body,
+                        head=head_ref,  # fork_owner:branch_name
+                        base=default_branch
+                    )
+                else:
+                    print(f"📝 Creating PR from same repo: {branch_name} -> {default_branch}")
+                    pull_request = github_repo.create_pull(
+                        title=pr_title,
+                        body=pr_body,
+                        head=branch_name,
+                        base=default_branch
+                    )
                 print(f"✅ Pull request created: {pull_request.html_url}")
             except Exception as pr_error:
                 error_msg = str(pr_error)
@@ -1761,7 +1904,11 @@ Return ONLY a JSON object with this exact structure:
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Fix generation failed: {str(e)}")
+        import traceback
+        error_traceback = traceback.format_exc()
+        print(f"❌ DETAILED ERROR in propose-fix: {e}")
+        print(f"📍 TRACEBACK:\n{error_traceback}")
+        raise HTTPException(status_code=500, detail=f"Fix generation failed: {str(e)}\nLocation: {error_traceback.split('File')[-1].split(',')[0] if 'File' in error_traceback else 'Unknown'}")
 @app.get("/auth/github/callback")
 async def github_callback(code: str = None, state: str = None):
     """
@@ -1911,6 +2058,62 @@ async def auth_status():
         "login_url": "/auth/github/login",
         "timestamp": datetime.now().isoformat()
     }
+@app.post("/api/deploy")
+async def manual_deploy(request: dict):
+    """
+    Manual deployment endpoint for the Deploy Page
+    Does not require webhook signature verification
+    """
+    try:
+        repo_url = request.get("repo_url")
+        if not repo_url:
+            raise HTTPException(status_code=400, detail="Repository URL is required")
+        
+        print(f"🚀 Manual deployment requested for: {repo_url}")
+        
+        # Create a simplified payload for deployment
+        repo_name = repo_url.split('/')[-1]
+        owner = repo_url.split('/')[-2]
+        
+        deployment_payload = {
+            "ref": "refs/heads/main",
+            "repository": {
+                "name": repo_name,
+                "full_name": f"{owner}/{repo_name}",
+                "clone_url": repo_url,
+                "default_branch": "main"
+            },
+            "head_commit": {
+                "id": f"manual-deploy-{int(time.time())}",
+                "message": "Manual deployment from AltX Deploy Page",
+                "committer": {
+                    "name": "AltX Deploy"
+                }
+            }
+        }
+        
+        print(f"📦 Processing deployment for {owner}/{repo_name}")
+        
+        # Handle push event (same logic as webhook but without signature verification)
+        result = await handle_push_event(deployment_payload)
+        
+        return {
+            "success": True,
+            "message": f"Deployment initiated for {repo_name}",
+            "deployment_result": result,
+            "repository": {
+                "name": repo_name,
+                "owner": owner,
+                "url": repo_url
+            },
+            "deployment_url": f"https://legal-actively-glider.ngrok-free.app/{repo_name}",
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        print(f"❌ Manual deployment error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Deployment failed: {str(e)}")
+
 @app.post("/api/webhook")
 async def github_webhook(request: Request, x_hub_signature_256: str = Header(None)):
     """
@@ -2243,17 +2446,32 @@ async def deploy_project(repo_name: str, clone_url: str, payload: dict):
     try:
         print(f"🚀 Starting real deployment for {repo_name}")
         
-        # Get deployment directory (create if doesn't exist)
-        deployment_base = "/Users/trishajanath/AltX/deployments"  # Mac-specific path
+        # Get deployment directory (create if doesn't exist) - Windows compatible
+        if platform.system() == "Windows":
+            deployment_base = r"D:\AltX\deployments"  # Raw string for Windows path
+        else:
+            deployment_base = os.path.join(os.getcwd(), "deployments") 
+        
         os.makedirs(deployment_base, exist_ok=True)
         
         # Create unique deployment directory
         deploy_dir = os.path.join(deployment_base, repo_name)
         
-        # Remove existing deployment if exists
+        # Remove existing deployment if exists (Windows-safe)
         if os.path.exists(deploy_dir):
             print(f"🗑️ Removing existing deployment: {deploy_dir}")
-            shutil.rmtree(deploy_dir)
+            try:
+                def force_remove_readonly(func, path, exc_info):
+                    """Force remove read-only files on Windows"""
+                    if os.path.exists(path):
+                        os.chmod(path, stat.S_IWRITE)
+                        func(path)
+                
+                shutil.rmtree(deploy_dir, onerror=force_remove_readonly)
+                print("✅ Existing deployment removed successfully")
+            except Exception as e:
+                print(f"⚠️ Warning: Could not fully remove existing deployment: {e}")
+                # Try to continue anyway
         
         commit_info = payload.get("head_commit", {})
         commit_message = commit_info.get("message", "No commit message")
@@ -2410,15 +2628,21 @@ async def configure_nginx(repo_name: str, deploy_dir: str, project_type: str):
 async def copy_to_static_domain(repo_name: str, deploy_dir: str, project_type: str):
     """Copy deployed files to FastAPI static directory for ngrok domain"""
     try:
-        # Create static directory in your FastAPI backend
-        static_base = "/Users/trishajanath/AltX/backend/static"
+        # Create static directory in your FastAPI backend (Windows compatible)
+        static_base = os.path.join(os.getcwd(), "static")
         repo_static_dir = os.path.join(static_base, repo_name)
         
         os.makedirs(static_base, exist_ok=True)
         
-        # Remove existing deployment
+        # Remove existing deployment (Windows safe)
         if os.path.exists(repo_static_dir):
-            shutil.rmtree(repo_static_dir)
+            def force_remove_readonly(func, path, exc_info):
+                """Force remove read-only files on Windows"""
+                if os.path.exists(path):
+                    os.chmod(path, stat.S_IWRITE)
+                    func(path)
+            
+            shutil.rmtree(repo_static_dir, onerror=force_remove_readonly)
         
         # Determine source directory
         if project_type == "nodejs":
@@ -2426,13 +2650,17 @@ async def copy_to_static_domain(repo_name: str, deploy_dir: str, project_type: s
             for build_dir in ["dist", "build", "public"]:
                 source_path = os.path.join(deploy_dir, build_dir)
                 if os.path.exists(source_path):
-                    shutil.copytree(source_path, repo_static_dir)
+                    shutil.copytree(source_path, repo_static_dir, ignore=shutil.ignore_patterns(
+                        '.git', 'node_modules', '__pycache__', '*.pyc', '.env*', 'venv', 'env'
+                    ))
                     files_copied = len([f for f in os.listdir(repo_static_dir) if os.path.isfile(os.path.join(repo_static_dir, f))])
                     print(f"✅ Copied {files_copied} files from {build_dir}/ to static domain")
                     return {"success": True, "files_copied": files_copied, "source": build_dir}
         
         # Fallback: copy entire directory
-        shutil.copytree(deploy_dir, repo_static_dir, ignore=shutil.ignore_patterns('.git', 'node_modules', '*.pyc', '__pycache__'))
+        shutil.copytree(deploy_dir, repo_static_dir, ignore=shutil.ignore_patterns(
+            '.git', 'node_modules', '*.pyc', '__pycache__', '.env*', 'venv', 'env'
+        ))
         files_copied = sum([len(files) for r, d, files in os.walk(repo_static_dir)])
         print(f"✅ Copied {files_copied} files to static domain")
         
@@ -2737,8 +2965,12 @@ async def health_check():
 from fastapi.staticfiles import StaticFiles
 
 # Add this after your other app configurations but before the endpoints
-# Create static directory if it doesn't exist
-static_dir = "/Users/trishajanath/AltX/backend/static"
+# Create static directory if it doesn't exist (Windows compatible)
+if platform.system() == "Windows":
+    static_dir = os.path.join(os.getcwd(), "static")
+else:
+    static_dir = "/Users/trishajanath/AltX/backend/static"
+
 os.makedirs(static_dir, exist_ok=True)
 
 # Mount static files
@@ -2748,11 +2980,16 @@ app.mount("/static", StaticFiles(directory=static_dir), name="static")
 async def serve_deployed_files(repo_name: str, file_path: str):
     """Serve deployed repository files"""
     try:
-        static_dir = f"/Users/trishajanath/AltX/backend/static/{repo_name}"
-        file_full_path = os.path.join(static_dir, file_path)
+        # Windows compatible path
+        if platform.system() == "Windows":
+            repo_static_dir = os.path.join(os.getcwd(), "static", repo_name)
+        else:
+            repo_static_dir = f"/Users/trishajanath/AltX/backend/static/{repo_name}"
+        
+        file_full_path = os.path.join(repo_static_dir, file_path)
         
         # Security check: ensure file is within the repo directory
-        if not os.path.realpath(file_full_path).startswith(os.path.realpath(static_dir)):
+        if not os.path.realpath(file_full_path).startswith(os.path.realpath(repo_static_dir)):
             raise HTTPException(status_code=403, detail="Access denied")
         
         if os.path.exists(file_full_path) and os.path.isfile(file_full_path):
