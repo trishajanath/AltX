@@ -2544,6 +2544,9 @@ async def deploy_project_with_docker(repo_name: str, clone_url: str, payload: di
 async def build_in_docker(source_dir: str, output_dir: str, project_type: str):
     """Build project using Docker containers"""
     try:
+        # ADD THIS LINE AT THE TOP OF THE FUNCTION
+        docker_client = docker.from_env()
+        
         # Check if Docker files exist
         dockerfile_map = {
             "nodejs": "Dockerfile.nodejs",
@@ -2632,32 +2635,35 @@ async def build_in_docker(source_dir: str, output_dir: str, project_type: str):
     except Exception as e:
         print(f"❌ Docker deployment error: {e}")
         return {"success": False, "error": str(e)}
+    
 async def copy_build_to_static(repo_name: str, build_dir: str, project_type: str):
-    """Copy Docker build output to static serving directory"""
+    """Copy Docker build output to static domain"""
     try:
+        # Create static directory in your FastAPI backend
         static_base = "/Users/trishajanath/AltX/backend/static"
         repo_static_dir = os.path.join(static_base, repo_name)
         
         os.makedirs(static_base, exist_ok=True)
         
-        # Remove existing
+        # Remove existing deployment
         if os.path.exists(repo_static_dir):
             shutil.rmtree(repo_static_dir)
         
-        # Copy build output
+        # Copy build output to static domain
         if os.path.exists(build_dir):
             shutil.copytree(build_dir, repo_static_dir)
             files_copied = sum([len(files) for r, d, files in os.walk(repo_static_dir)])
-            print(f"✅ Copied {files_copied} files to static domain")
+            print(f"✅ Copied {files_copied} files from Docker build to static domain")
             
             return {"success": True, "files_copied": files_copied}
         else:
-            raise Exception(f"Build directory not found: {build_dir}")
+            print(f"❌ Docker build directory not found: {build_dir}")
+            return {"success": False, "error": "Build directory not found"}
             
     except Exception as e:
-        print(f"❌ Static copy failed: {e}")
+        print(f"❌ Failed to copy Docker build to static: {e}")
         return {"success": False, "error": str(e)}
-
+    
 async def handle_push_event(payload):
     """Handle push events - try Docker first, fallback to standard deployment"""
     try:
