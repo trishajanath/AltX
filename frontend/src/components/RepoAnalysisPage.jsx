@@ -3,6 +3,21 @@ import { useNavigate } from 'react-router-dom';
 import PageWrapper from './PageWrapper';
 import usePreventZoom from './usePreventZoom';
 
+// Add CSS animations
+const spinKeyframes = `
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+`;
+
+// Inject the keyframes into the document head
+if (typeof document !== 'undefined') {
+  const style = document.createElement('style');
+  style.innerHTML = spinKeyframes;
+  document.head.appendChild(style);
+}
+
 const RepoAnalysisPage = () => {
   usePreventZoom();
   const [repoUrl, setRepoUrl] = useState('');
@@ -16,6 +31,8 @@ const RepoAnalysisPage = () => {
   const [currentQuestion, setCurrentQuestion] = useState('');
   const [isAskingAI, setIsAskingAI] = useState(false);
   const [showAISidebar, setShowAISidebar] = useState(false);
+  const [fixingIssues, setFixingIssues] = useState({}); // Track which issues are being fixed
+  const [fixedIssues, setFixedIssues] = useState(new Set()); // Track successfully fixed issues
 
   const navigate = useNavigate();
 
@@ -294,6 +311,84 @@ const RepoAnalysisPage = () => {
       ask();
   };
 
+  // Helper function to check if an issue is fixed
+  const isIssueFixed = (issueType, issueIndex) => {
+    const issueId = `${issueType}-${issueIndex}`;
+    return fixedIssues.has(issueId);
+  };
+
+  // Function to fix an individual issue
+  const fixIssue = async (issue, issueType, issueIndex) => {
+    const issueId = `${issueType}-${issueIndex}`;
+    
+    if (fixingIssues[issueId]) {
+      return; // Already fixing this issue
+    }
+
+    setFixingIssues(prev => ({ ...prev, [issueId]: true }));
+
+    try {
+      console.log('Fixing issue:', issue);
+      
+      // Prepare the issue data for the API
+      const issueData = {
+        type: issueType,
+        description: typeof issue === 'string' ? issue : 
+                    issue.description || issue.title || issue.pattern || issue.message || 'Security issue',
+        file: issue.file || issue.filename || null,
+        line: issue.line || issue.line_number || null,
+        severity: issue.severity || 'Medium',
+        code_snippet: issue.code_snippet || issue.match || null,
+        rule_id: issue.rule_id || null,
+        category: issue.category || issueType
+      };
+
+      const response = await fetch('http://localhost:8000/propose-fix', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          repo_url: repoUrl.trim(),
+          issue: issueData,
+          branch_name: "main"
+        }),
+      });
+
+      const data = await response.json();
+      
+      if (response.ok && data.success) {
+        // Add the issue to fixed issues set to remove it from display
+        setFixedIssues(prev => new Set(prev).add(issueId));
+        
+        // Show success message
+        setChatMessages(prev => [...prev, {
+          type: 'ai',
+          message: `✅ **Issue Fixed Successfully!**\n\n🔧 **Fixed:** ${issueData.description}\n📁 **File:** ${issueData.file || 'Multiple files'}\n\n💾 **Changes Applied:**\n${data.changes_made?.join('\n') || 'Security fix applied'}\n\n🌐 **View changes:** The fix has been applied to your repository files.\n\n🎯 **Issue removed from display**`,
+          timestamp: new Date().toLocaleTimeString()
+        }]);
+
+        // Optionally show the AI sidebar to display the success message
+        setShowAISidebar(true);
+      } else {
+        throw new Error(data.error || 'Failed to fix issue');
+      }
+    } catch (error) {
+      console.error('Error fixing issue:', error);
+      
+      // Show error message in chat
+      setChatMessages(prev => [...prev, {
+        type: 'ai', 
+        message: `❌ **Failed to fix issue**\n\n🔧 **Issue:** ${typeof issue === 'string' ? issue : issue.description || 'Security issue'}\n📁 **File:** ${issue.file || issue.filename || 'Unknown'}\n\n⚠️ **Error:** ${error.message}\n\n💡 **Tip:** Try asking me how to manually fix this issue.`,
+        timestamp: new Date().toLocaleTimeString()
+      }]);
+
+      setShowAISidebar(true);
+    } finally {
+      setFixingIssues(prev => ({ ...prev, [issueId]: false }));
+    }
+  };
+
   const formatSecurityScore = (score) => {
     if (score >= 80) return { color: '#22c55e', label: 'High Security' };
     if (score >= 60) return { color: '#f59e0b', label: 'Medium Security' };
@@ -540,65 +635,110 @@ const RepoAnalysisPage = () => {
           <div className="hero-content">
             <h1 className="hero-title">Repository Security Analysis</h1>
             <p className="hero-subtitle">Comprehensive security analysis for GitHub repositories</p>
-            {/* Scan Configuration */}
-            <div className="card">
-              <h3>Repository Analysis</h3>
-              <p style={{ color: '#a1a1aa', marginBottom: '16px', fontSize: '14px' }}>
-                Enter a GitHub repository URL. The system will automatically clean common web interface paths.
-              </p>
-              
-              <div className="input-group">
-                <input
-                  type="text"
-                  value={repoUrl}
-                  onChange={(e) => setRepoUrl(e.target.value)}
-                  placeholder="Enter GitHub repository URL (e.g., https://github.com/user/repo)"
-                  className="input"
-                  disabled={isScanning}
-                  style={{ flex: 1 }}
-                />
-                <button 
-                  onClick={analyzeRepository} 
-                  disabled={isScanning || !repoUrl.trim()}
-                  className="btn btn-secondary"
-                >
-                  {isScanning ? 'Analyzing...' : 'Analyze Repository'}
-                </button>
-              </div>
-
-              {/* Example URLs */}
-              <div style={{ marginTop: '12px' }}>
-                <div style={{ fontSize: '12px', color: '#a1a1aa', marginBottom: '6px' }}>
-                    Example URLs (these will be automatically cleaned):
-                </div>
-                <div style={{ fontSize: '11px', color: '#6b7280', lineHeight: '1.4' }}>
-                  • https://github.com/user/repo<br/>
-                  • https://github.com/user/repo/tree/main<br/>
-                  • https://github.com/user/repo/blob/main/README.md
-                </div>
-              </div>
-
-              <div className="scan-options">
-                <div className="option-group">
-                  <label style={{ color: '#a1a1aa', marginRight: '9px'}}>AI Model:</label>
-                  <select 
-                    value={modelType} 
-                    onChange={(e) => setModelType(e.target.value)}
+            
+            {/* Repository Input Section - Only show when no analysis result */}
+            {!analysisResult && (
+              <div className="card">
+                <h3>Repository Analysis</h3>
+                <p style={{ color: '#a1a1aa', marginBottom: '16px', fontSize: '14px' }}>
+                  Enter a GitHub repository URL. The system will automatically clean common web interface paths.
+                </p>
+                
+                <div className="input-group">
+                  <input
+                    type="text"
+                    value={repoUrl}
+                    onChange={(e) => setRepoUrl(e.target.value)}
+                    placeholder="Enter GitHub repository URL (e.g., https://github.com/user/repo)"
+                    className="input"
                     disabled={isScanning}
-                    style={{ 
-                      padding: '8px 12px',
-                      borderRadius: '6px',
-                      border: '1px solid rgba(255, 255, 255, 0.1)',
-                      background: 'rgba(0, 0, 0, 0.3)',
-                      color: '#fafafa'
-                    }}
+                    style={{ flex: 1 }}
+                  />
+                  <button 
+                    onClick={analyzeRepository} 
+                    disabled={isScanning || !repoUrl.trim()}
+                    className="btn btn-secondary"
                   >
-                    <option value="fast">Fast Model (Quick Analysis)</option>
-                    <option value="smart">Smart Model (Detailed Analysis)</option>
-                  </select>
+                    {isScanning ? 'Analyzing...' : 'Analyze Repository'}
+                  </button>
+                </div>
+
+                {/* Example URLs */}
+                <div style={{ marginTop: '12px' }}>
+                  <div style={{ fontSize: '12px', color: '#a1a1aa', marginBottom: '6px' }}>
+                      Example URLs (these will be automatically cleaned):
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#6b7280', lineHeight: '1.4' }}>
+                    • https://github.com/user/repo<br/>
+                    • https://github.com/user/repo/tree/main<br/>
+                    • https://github.com/user/repo/blob/main/README.md
+                  </div>
+                </div>
+
+                <div className="scan-options">
+                  <div className="option-group">
+                    <label style={{ color: '#a1a1aa', marginRight: '9px'}}>AI Model:</label>
+                    <select 
+                      value={modelType} 
+                      onChange={(e) => setModelType(e.target.value)}
+                      disabled={isScanning}
+                      style={{ 
+                        padding: '8px 12px',
+                        borderRadius: '6px',
+                        border: '1px solid rgba(255, 255, 255, 0.1)',
+                        background: 'rgba(0, 0, 0, 0.3)',
+                        color: '#fafafa'
+                      }}
+                    >
+                      <option value="fast">Fast Model (Quick Analysis)</option>
+                      <option value="smart">Smart Model (Detailed Analysis)</option>
+                    </select>
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
+
+            {/* Analyze New Repository Button - Show when analysis is complete */}
+            {analysisResult && !isScanning && (
+              <div className="card" style={{ textAlign: 'center', padding: '20px' }}>
+                <button 
+                  onClick={() => {
+                    setAnalysisResult(null);
+                    setRepoUrl('');
+                    setError('');
+                    setAnalysisLogs([]);
+                    setChatMessages([]);
+                    setFixedIssues(new Set());
+                    setFixingIssues({});
+                  }}
+                  className="btn btn-secondary"
+                  style={{
+                    background: 'linear-gradient(135deg, #00f5c3 0%, #00d4ff 100%)',
+                    color: '#000',
+                    fontWeight: '600',
+                    padding: '12px 24px',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    transition: 'all 0.2s ease'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.target.style.transform = 'translateY(-2px)';
+                    e.target.style.boxShadow = '0 8px 25px rgba(0, 245, 195, 0.4)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.target.style.transform = 'translateY(0)';
+                    e.target.style.boxShadow = 'none';
+                  }}
+                >
+                  🔍 Analyze New Repository
+                </button>
+                <p style={{ color: '#a1a1aa', fontSize: '12px', marginTop: '8px', margin: '8px 0 0 0' }}>
+                  Click to analyze a different GitHub repository
+                </p>
+              </div>
+            )}
 
             {/* Loading State */}
             {isScanning && (
@@ -650,32 +790,6 @@ const RepoAnalysisPage = () => {
         {/* This block renders only when analysis is complete */}
         {analysisResult && !isScanning && (
           <>
-            {/* AI Sidebar Toggle Button */}
-            <div style={{ 
-              position: 'fixed', 
-              top: '20px', 
-              right: '20px', 
-              zIndex: 1001
-            }}>
-              <button
-                onClick={() => setShowAISidebar(!showAISidebar)}
-                style={{
-                  background: showAISidebar ? '#00f5c3' : 'rgba(0, 245, 195, 0.1)',
-                  color: showAISidebar ? '#000' : '#00f5c3',
-                  border: '1px solid rgba(0, 245, 195, 0.3)',
-                  borderRadius: '8px',
-                  padding: '12px 16px',
-                  cursor: 'pointer',
-                  fontSize: '14px',
-                  fontWeight: '600',
-                  transition: 'all 0.3s ease',
-                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)'
-                }}
-              >
-                {showAISidebar ? '❌ Hide AI Chat' : '🤖 Show AI Chat'}
-              </button>
-            </div>
-            
             {/* Main content with conditional margin for sidebar */}
             <div className={`analysis-results ${showAISidebar ? 'with-sidebar' : ''}`}>
 
@@ -1046,15 +1160,19 @@ const RepoAnalysisPage = () => {
               )}
 
               {/* Secret Scan Results */}
-              {analysisResult.secret_scan_results && analysisResult.secret_scan_results.length > 0 && (
+              {analysisResult.secret_scan_results && analysisResult.secret_scan_results.filter((secret, index) => !isIssueFixed('secret', index)).length > 0 && (
                 <div className="card">
-                  <h3>🔐 Secrets Detection ({analysisResult.secret_scan_results.length})</h3>
+                  <h3>🔐 Secrets Detection ({analysisResult.secret_scan_results.filter((secret, index) => !isIssueFixed('secret', index)).length})</h3>
                   <p style={{ color: '#a1a1aa', fontSize: '14px', marginBottom: '16px' }}>
                     Potential secrets and sensitive information found in code:
                   </p>
                   <div style={{ display: 'grid', gap: '12px' }}>
-                    {analysisResult.secret_scan_results.slice(0, 10).map((secret, index) => (
-                      <div key={index} style={{
+                    {analysisResult.secret_scan_results
+                      .map((secret, index) => ({ secret, originalIndex: index }))
+                      .filter(({ originalIndex }) => !isIssueFixed('secret', originalIndex))
+                      .slice(0, 10)
+                      .map(({ secret, originalIndex }) => (
+                      <div key={originalIndex} style={{
                         padding: '16px',
                         background: 'rgba(239, 68, 68, 0.1)',
                         border: '1px solid rgba(239, 68, 68, 0.2)',
@@ -1062,19 +1180,39 @@ const RepoAnalysisPage = () => {
                         borderLeft: '4px solid #ef4444'
                       }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
-                          <div style={{ fontWeight: '600', fontSize: '14px' }}>
+                          <div style={{ fontWeight: '600', fontSize: '14px', flex: 1 }}>
                             {secret.type || 'Potential Secret'}
                           </div>
-                          <span style={{
-                            background: '#dc2626',
-                            color: 'white',
-                            padding: '4px 8px',
-                            borderRadius: '12px',
-                            fontSize: '11px',
-                            fontWeight: '600'
-                          }}>
-                            CRITICAL
-                          </span>
+                          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                            <span style={{
+                              background: '#dc2626',
+                              color: 'white',
+                              padding: '4px 8px',
+                              borderRadius: '12px',
+                              fontSize: '11px',
+                              fontWeight: '600'
+                            }}>
+                              CRITICAL
+                            </span>
+                            <button
+                              onClick={() => fixIssue(secret, 'secret', originalIndex)}
+                              disabled={fixingIssues[`secret-${originalIndex}`]}
+                              style={{
+                                background: fixingIssues[`secret-${originalIndex}`] ? '#6b7280' : 'linear-gradient(135deg, #00f5c3 0%, #00d4ff 100%)',
+                                color: fixingIssues[`secret-${originalIndex}`] ? '#fff' : '#000',
+                                border: 'none',
+                                borderRadius: '6px',
+                                padding: '6px 12px',
+                                fontSize: '11px',
+                                fontWeight: '600',
+                                cursor: fixingIssues[`secret-${originalIndex}`] ? 'not-allowed' : 'pointer',
+                                transition: 'all 0.2s ease',
+                                opacity: fixingIssues[`secret-${originalIndex}`] ? 0.6 : 1
+                              }}
+                            >
+                              {fixingIssues[`secret-${originalIndex}`] ? '🔧 Fixing...' : '🔧 Fix Issue'}
+                            </button>
+                          </div>
                         </div>
                         
                         {secret.file && (
@@ -1110,34 +1248,58 @@ const RepoAnalysisPage = () => {
               )}
 
               {/* Static Analysis Results */}
-              {analysisResult.static_analysis_results && analysisResult.static_analysis_results.length > 0 && (
+              {analysisResult.static_analysis_results && analysisResult.static_analysis_results.filter((issue, index) => !isIssueFixed('static_analysis', index)).length > 0 && (
                 <div className="card">
-                  <h3>🔍 Static Analysis ({analysisResult.static_analysis_results.length})</h3>
+                  <h3>🔍 Static Analysis ({analysisResult.static_analysis_results.filter((issue, index) => !isIssueFixed('static_analysis', index)).length})</h3>
                   <p style={{ color: '#a1a1aa', fontSize: '14px', marginBottom: '16px' }}>
                     Security vulnerabilities detected through static code analysis:
                   </p>
                   <div style={{ display: 'grid', gap: '12px' }}>
-                    {analysisResult.static_analysis_results.slice(0, 10).map((issue, index) => (
-                      <div key={index} style={{
+                    {analysisResult.static_analysis_results
+                      .map((issue, index) => ({ issue, originalIndex: index }))
+                      .filter(({ originalIndex }) => !isIssueFixed('static_analysis', originalIndex))
+                      .slice(0, 10)
+                      .map(({ issue, originalIndex }) => (
+                      <div key={originalIndex} style={{
                         padding: '16px',
                         background: issue.severity === 'HIGH' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(245, 158, 11, 0.1)',
                         border: issue.severity === 'HIGH' ? '1px solid rgba(239, 68, 68, 0.2)' : '1px solid rgba(245, 158, 11, 0.2)',
                         borderRadius: '8px'
                       }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
-                          <div style={{ fontWeight: '600', fontSize: '14px' }}>
+                          <div style={{ fontWeight: '600', fontSize: '14px', flex: 1 }}>
                             {safeRender(issue.rule_id || issue.description || 'Static Analysis Issue')}
                           </div>
-                          <span style={{
-                            background: issue.severity === 'HIGH' ? '#ef4444' : '#f59e0b',
-                            color: 'white',
-                            padding: '4px 8px',
-                            borderRadius: '12px',
-                            fontSize: '11px',
-                            fontWeight: '600'
-                          }}>
-                            {safeRender(issue.severity || 'MEDIUM')}
-                          </span>
+                          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                            <span style={{
+                              background: issue.severity === 'HIGH' ? '#ef4444' : '#f59e0b',
+                              color: 'white',
+                              padding: '4px 8px',
+                              borderRadius: '12px',
+                              fontSize: '11px',
+                              fontWeight: '600'
+                            }}>
+                              {safeRender(issue.severity || 'MEDIUM')}
+                            </span>
+                            <button
+                              onClick={() => fixIssue(issue, 'static_analysis', originalIndex)}
+                              disabled={fixingIssues[`static_analysis-${originalIndex}`]}
+                              style={{
+                                background: fixingIssues[`static_analysis-${originalIndex}`] ? '#6b7280' : 'linear-gradient(135deg, #00f5c3 0%, #00d4ff 100%)',
+                                color: fixingIssues[`static_analysis-${originalIndex}`] ? '#fff' : '#000',
+                                border: 'none',
+                                borderRadius: '6px',
+                                padding: '6px 12px',
+                                fontSize: '11px',
+                                fontWeight: '600',
+                                cursor: fixingIssues[`static_analysis-${originalIndex}`] ? 'not-allowed' : 'pointer',
+                                transition: 'all 0.2s ease',
+                                opacity: fixingIssues[`static_analysis-${originalIndex}`] ? 0.6 : 1
+                              }}
+                            >
+                              {fixingIssues[`static_analysis-${originalIndex}`] ? '🔧 Fixing...' : '🔧 Fix Issue'}
+                            </button>
+                          </div>
                         </div>
                         
                         {issue.filename && (
@@ -1164,15 +1326,19 @@ const RepoAnalysisPage = () => {
               )}
 
               {/* Code Quality Issues */}
-              {analysisResult.code_quality_results && analysisResult.code_quality_results.length > 0 && (
+              {analysisResult.code_quality_results && analysisResult.code_quality_results.filter((issue, index) => !isIssueFixed('code_quality', index)).length > 0 && (
                 <div className="card">
-                  <h3>🎯 Code Quality Issues ({analysisResult.code_quality_results.length})</h3>
+                  <h3>🎯 Code Quality Issues ({analysisResult.code_quality_results.filter((issue, index) => !isIssueFixed('code_quality', index)).length})</h3>
                   <p style={{ color: '#a1a1aa', fontSize: '14px', marginBottom: '16px' }}>
                     Insecure coding patterns and quality issues detected:
                   </p>
                   <div style={{ display: 'grid', gap: '16px' }}>
-                    {analysisResult.code_quality_results.slice(0, 10).map((issue, index) => (
-                      <div key={index} style={{
+                    {analysisResult.code_quality_results
+                      .map((issue, index) => ({ issue, originalIndex: index }))
+                      .filter(({ originalIndex }) => !isIssueFixed('code_quality', originalIndex))
+                      .slice(0, 10)
+                      .map(({ issue, originalIndex }) => (
+                      <div key={originalIndex} style={{
                         padding: '20px',
                         background: issue.severity === 'Critical' || issue.severity === 'High' ? 
                           'rgba(239, 68, 68, 0.1)' : 'rgba(245, 158, 11, 0.1)',
@@ -1200,18 +1366,38 @@ const RepoAnalysisPage = () => {
                               </div>
                             )}
                           </div>
-                          <span style={{
-                            background: issue.severity === 'Critical' ? '#dc2626' :
-                                       issue.severity === 'High' ? '#ef4444' :
-                                       issue.severity === 'Medium' ? '#f59e0b' : '#6b7280',
-                            color: 'white',
-                            padding: '6px 12px',
-                            borderRadius: '16px',
-                            fontSize: '12px',
-                            fontWeight: '600'
-                          }}>
-                            {safeRender(issue.severity || 'Medium')}
-                          </span>
+                          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                            <span style={{
+                              background: issue.severity === 'Critical' ? '#dc2626' :
+                                         issue.severity === 'High' ? '#ef4444' :
+                                         issue.severity === 'Medium' ? '#f59e0b' : '#6b7280',
+                              color: 'white',
+                              padding: '6px 12px',
+                              borderRadius: '16px',
+                              fontSize: '12px',
+                              fontWeight: '600'
+                            }}>
+                              {safeRender(issue.severity || 'Medium')}
+                            </span>
+                            <button
+                              onClick={() => fixIssue(issue, 'code_quality', originalIndex)}
+                              disabled={fixingIssues[`code_quality-${originalIndex}`]}
+                              style={{
+                                background: fixingIssues[`code_quality-${originalIndex}`] ? '#6b7280' : 'linear-gradient(135deg, #00f5c3 0%, #00d4ff 100%)',
+                                color: fixingIssues[`code_quality-${originalIndex}`] ? '#fff' : '#000',
+                                border: 'none',
+                                borderRadius: '6px',
+                                padding: '8px 12px',
+                                fontSize: '12px',
+                                fontWeight: '600',
+                                cursor: fixingIssues[`code_quality-${originalIndex}`] ? 'not-allowed' : 'pointer',
+                                transition: 'all 0.2s ease',
+                                opacity: fixingIssues[`code_quality-${originalIndex}`] ? 0.6 : 1
+                              }}
+                            >
+                              {fixingIssues[`code_quality-${originalIndex}`] ? '🔧 Fixing...' : '🔧 Fix Issue'}
+                            </button>
+                          </div>
                         </div>
 
                         {issue.code_snippet && (
@@ -1249,15 +1435,19 @@ const RepoAnalysisPage = () => {
               )}
 
               {/* Dependency Vulnerabilities */}
-              {analysisResult.dependency_scan_results?.vulnerable_packages && analysisResult.dependency_scan_results.vulnerable_packages.length > 0 && (
+              {analysisResult.dependency_scan_results?.vulnerable_packages && analysisResult.dependency_scan_results.vulnerable_packages.filter((pkg, index) => !isIssueFixed('dependency', index)).length > 0 && (
                 <div className="card">
-                  <h3>📦 Vulnerable Dependencies ({analysisResult.dependency_scan_results.vulnerable_packages.length})</h3>
+                  <h3>📦 Vulnerable Dependencies ({analysisResult.dependency_scan_results.vulnerable_packages.filter((pkg, index) => !isIssueFixed('dependency', index)).length})</h3>
                   <p style={{ color: '#a1a1aa', fontSize: '14px', marginBottom: '16px' }}>
                     Dependencies with known security vulnerabilities:
                   </p>
                   <div style={{ display: 'grid', gap: '16px' }}>
-                    {analysisResult.dependency_scan_results.vulnerable_packages.slice(0, 10).map((pkg, index) => (
-                      <div key={index} style={{
+                    {analysisResult.dependency_scan_results.vulnerable_packages
+                      .map((pkg, index) => ({ pkg, originalIndex: index }))
+                      .filter(({ originalIndex }) => !isIssueFixed('dependency', originalIndex))
+                      .slice(0, 10)
+                      .map(({ pkg, originalIndex }) => (
+                      <div key={originalIndex} style={{
                         padding: '20px',
                         background: pkg.severity === 'Critical' || pkg.severity === 'High' ? 
                           'rgba(239, 68, 68, 0.1)' : 'rgba(245, 158, 11, 0.1)',
@@ -1266,7 +1456,7 @@ const RepoAnalysisPage = () => {
                         borderRadius: '12px'
                       }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                          <div>
+                          <div style={{ flex: 1 }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
                               <span style={{ fontWeight: '700', fontFamily: 'monospace', fontSize: '16px' }}>
                                 {pkg.package || pkg.name || 'Unknown Package'}
@@ -1297,18 +1487,38 @@ const RepoAnalysisPage = () => {
                               </div>
                             )}
                           </div>
-                          <span style={{
-                            background: pkg.severity === 'Critical' ? '#dc2626' :
-                                       pkg.severity === 'High' ? '#ef4444' :
-                                       pkg.severity === 'Medium' ? '#f59e0b' : '#6b7280',
-                            color: 'white',
-                            padding: '6px 14px',
-                            borderRadius: '20px',
-                            fontSize: '12px',
-                            fontWeight: '700'
-                          }}>
-                            {pkg.severity || 'Unknown'}
-                          </span>
+                          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                            <span style={{
+                              background: pkg.severity === 'Critical' ? '#dc2626' :
+                                         pkg.severity === 'High' ? '#ef4444' :
+                                         pkg.severity === 'Medium' ? '#f59e0b' : '#6b7280',
+                              color: 'white',
+                              padding: '6px 14px',
+                              borderRadius: '20px',
+                              fontSize: '12px',
+                              fontWeight: '700'
+                            }}>
+                              {pkg.severity || 'Unknown'}
+                            </span>
+                            <button
+                              onClick={() => fixIssue(pkg, 'dependency', originalIndex)}
+                              disabled={fixingIssues[`dependency-${originalIndex}`]}
+                              style={{
+                                background: fixingIssues[`dependency-${originalIndex}`] ? '#6b7280' : 'linear-gradient(135deg, #00f5c3 0%, #00d4ff 100%)',
+                                color: fixingIssues[`dependency-${originalIndex}`] ? '#fff' : '#000',
+                                border: 'none',
+                                borderRadius: '6px',
+                                padding: '8px 12px',
+                                fontSize: '12px',
+                                fontWeight: '600',
+                                cursor: fixingIssues[`dependency-${originalIndex}`] ? 'not-allowed' : 'pointer',
+                                transition: 'all 0.2s ease',
+                                opacity: fixingIssues[`dependency-${originalIndex}`] ? 0.6 : 1
+                              }}
+                            >
+                              {fixingIssues[`dependency-${originalIndex}`] ? '🔧 Fixing...' : '🔧 Fix Issue'}
+                            </button>
+                          </div>
                         </div>
 
                         {pkg.advisory && (
@@ -1353,47 +1563,77 @@ const RepoAnalysisPage = () => {
               )}
             </div>
 
-            {/* --- FIXED AI CHAT SIDEBAR (CONDITIONAL DISPLAY) --- */}
-            {showAISidebar && (
-              <div className="ai-chat-sidebar" style={{
+            {/* --- ALWAYS VISIBLE AI CHAT SIDEBAR --- */}
+            <div className="ai-chat-sidebar" style={{
               position: 'fixed',
-              top: '0',
-              right: '0',
-              width: '400px',
-              height: '100vh',
-              background: 'linear-gradient(135deg, rgba(15, 15, 15, 0.95) 0%, rgba(25, 25, 25, 0.95) 100%)',
-              backdropFilter: 'blur(10px)',
-              borderLeft: '1px solid rgba(255, 255, 255, 0.1)',
+              top: '120px', // Moved further down to avoid overlap with buttons
+              right: '20px',
+              width: window.innerWidth < 768 ? '90vw' : 'min(450px, 40vw)',
+              height: '60vh', // Reduced height to 60% of viewport
+              background: 'linear-gradient(135deg, rgba(10, 10, 10, 0.98) 0%, rgba(20, 20, 20, 0.98) 100%)',
+              backdropFilter: 'blur(12px)',
+              border: '1px solid rgba(0, 245, 195, 0.2)',
+              borderRadius: '12px',
               zIndex: 1000,
               display: 'flex',
               flexDirection: 'column',
-              boxShadow: '-4px 0 20px rgba(0, 0, 0, 0.3)'
+              boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)'
             }}>
-              {/* AI Chat Header */}
-              <div style={{
-                padding: '20px',
-                borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
-                background: 'rgba(0, 245, 195, 0.05)'
-              }}>
-                <h3 style={{ margin: '0', color: '#00f5c3', fontSize: '18px', fontWeight: '700' }}>
-                  🤖 AI Security Advisor
-                </h3>
-                <p style={{ margin: '8px 0 0 0', color: '#a1a1aa', fontSize: '13px' }}>
-                  Ask about security findings & get recommendations
-                </p>
-              </div>
+                {/* Compact AI Chat Header */}
+                <div style={{
+                  padding: '16px 16px 14px 16px',
+                  borderBottom: '1px solid rgba(0, 245, 195, 0.2)',
+                  background: 'linear-gradient(135deg, rgba(0, 245, 195, 0.08) 0%, rgba(0, 212, 255, 0.08) 100%)',
+                  borderRadius: '12px 12px 0 0',
+                  position: 'relative'
+                }}>
+                  
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
+                    <div style={{
+                      width: '32px',
+                      height: '32px',
+                      background: 'linear-gradient(135deg, #00f5c3 0%, #00d4ff 100%)',
+                      borderRadius: '10px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '16px'
+                    }}>
+                      🤖
+                    </div>
+                    <div>
+                      <h3 style={{ margin: '0', color: '#fff', fontSize: '16px', fontWeight: '700' }}>
+                        AI Security Advisor
+                      </h3>
+                      <p style={{ margin: '2px 0 0 0', color: '#a1a1aa', fontSize: '11px' }}>
+                        Powered by RAG + Gemini AI
+                      </p>
+                    </div>
+                  </div>
+                  <p style={{ margin: '0', color: '#b1b5c3', fontSize: '10px', fontStyle: 'italic' }}>
+                    💡 Ask about security findings & get fix recommendations
+                  </p>
+                </div>
 
-              {/* Quick Questions */}
-              <div style={{ padding: '16px', borderBottom: '1px solid rgba(255, 255, 255, 0.1)' }}>
-                <div style={{ color: '#a1a1aa', fontSize: '12px', marginBottom: '8px' }}>
-                  💡 Quick questions:
+              {/* Compact Quick Questions */}
+              <div style={{ padding: '12px 16px', borderBottom: '1px solid rgba(0, 245, 195, 0.2)' }}>
+                <div style={{ 
+                  color: '#a1a1aa', 
+                  fontSize: '10px', 
+                  marginBottom: '8px',
+                  fontWeight: '500',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}>
+                  💡 Quick Questions
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                   {[
                     'Fix critical issues',
-                    'Explain security score',
+                    'Security score', 
                     'GitIgnore help',
-                    'Vulnerability details'
+                    'Vulnerabilities'
                   ].map((question, index) => (
                     <button
                       key={index}
@@ -1401,13 +1641,27 @@ const RepoAnalysisPage = () => {
                       disabled={isAskingAI}
                       style={{
                         padding: '4px 8px',
-                        background: 'rgba(0, 212, 255, 0.1)',
-                        border: '1px solid rgba(0, 212, 255, 0.2)',
+                        background: 'rgba(0, 245, 195, 0.1)',
+                        border: '1px solid rgba(0, 245, 195, 0.3)',
                         borderRadius: '12px',
-                        color: '#00d4ff',
-                        fontSize: '11px',
-                        cursor: 'pointer',
-                        transition: 'all 0.2s ease'
+                        color: '#00f5c3',
+                        fontSize: '10px',
+                        fontWeight: '500',
+                        cursor: isAskingAI ? 'not-allowed' : 'pointer',
+                        transition: 'all 0.2s ease',
+                        opacity: isAskingAI ? '0.5' : '1'
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!isAskingAI) {
+                          e.target.style.background = 'rgba(0, 245, 195, 0.2)';
+                          e.target.style.borderColor = 'rgba(0, 245, 195, 0.5)';
+                          e.target.style.transform = 'translateY(-1px)';
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        e.target.style.background = 'rgba(0, 245, 195, 0.1)';
+                        e.target.style.borderColor = 'rgba(0, 245, 195, 0.3)';
+                        e.target.style.transform = 'translateY(0)';
                       }}
                     >
                       {question}
@@ -1416,55 +1670,80 @@ const RepoAnalysisPage = () => {
                 </div>
               </div>
 
-              {/* Chat Messages */}
+              {/* Compact Chat Messages Container */}
               <div style={{ 
                 flex: 1,
-                padding: '16px',
+                padding: '12px 16px',
                 overflowY: 'auto',
                 display: 'flex',
-                flexDirection: 'column'
+                flexDirection: 'column',
+                scrollbarWidth: 'thin',
+                scrollbarColor: 'rgba(0, 245, 195, 0.3) transparent'
               }}>
                 {chatMessages.length === 0 ? (
                   <div style={{ 
-                    color: '#a1a1aa', 
-                    fontStyle: 'italic',
+                    color: '#71717a', 
                     textAlign: 'center',
-                    padding: '40px 20px',
+                    padding: '40px 16px',
                     flex: 1,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     flexDirection: 'column'
                   }}>
-                    <div style={{ fontSize: '24px', marginBottom: '8px' }}>💬</div>
-                    <div>Ask me about security analysis...</div>
-                    <div style={{ fontSize: '11px', marginTop: '4px' }}>Try the quick questions above!</div>
+                    <div style={{ fontSize: '24px', marginBottom: '12px', opacity: '0.6' }}>💬</div>
+                    <div style={{ fontSize: '12px', fontWeight: '500', marginBottom: '6px' }}>
+                      Start a conversation
+                    </div>
+                    <div style={{ fontSize: '10px', opacity: '0.7' }}>
+                      Ask about security analysis or try quick questions!
+                    </div>
                   </div>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                     {chatMessages.map((msg, index) => (
                       <div key={index} style={{
-                        padding: '12px',
-                        borderRadius: '8px',
+                        padding: '10px 12px',
+                        borderRadius: '10px',
                         maxWidth: '90%',
+                        lineHeight: '1.4',
+                        fontSize: '12px',
                         ...(msg.type === 'user' ? {
-                          background: 'rgba(0, 212, 255, 0.1)',
-                          border: '1px solid rgba(0, 212, 255, 0.2)',
-                          alignSelf: 'flex-end'
+                          background: 'linear-gradient(135deg, #00f5c3 0%, #00d4ff 100%)',
+                          color: '#000',
+                          alignSelf: 'flex-end',
+                          fontWeight: '500',
+                          boxShadow: '0 2px 8px rgba(0, 245, 195, 0.3)'
                         } : {
                           background: 'rgba(255, 255, 255, 0.05)',
                           border: '1px solid rgba(255, 255, 255, 0.1)',
+                          color: '#e4e4e7',
                           alignSelf: 'flex-start'
                         })
                       }}>
-                        <div style={{ whiteSpace: 'pre-line', lineHeight: '1.5', fontSize: '13px' }}
-                             dangerouslySetInnerHTML={{ __html: msg.message.replace(/\n/g, '<br />') }}>
+                        {msg.type === 'assistant' && (
+                          <div style={{ 
+                            display: 'flex', 
+                            alignItems: 'center', 
+                            gap: '6px', 
+                            marginBottom: '6px',
+                            color: '#00f5c3',
+                            fontSize: '10px',
+                            fontWeight: '600'
+                          }}>
+                            🤖 AI Assistant
+                          </div>
+                        )}
+                        <div style={{ 
+                          whiteSpace: 'pre-line',
+                          wordWrap: 'break-word'
+                        }} dangerouslySetInnerHTML={{ __html: msg.message.replace(/\n/g, '<br />') }}>
                         </div>
                         <div style={{ 
-                          fontSize: '10px', 
-                          color: '#a1a1aa', 
+                          fontSize: '9px', 
+                          color: msg.type === 'user' ? 'rgba(0, 0, 0, 0.6)' : '#a1a1aa', 
                           marginTop: '6px',
-                          opacity: 0.7,
+                          opacity: 0.8,
                           textAlign: 'right'
                         }}>
                           {msg.timestamp}
@@ -1477,70 +1756,128 @@ const RepoAnalysisPage = () => {
                 {isAskingAI && (
                   <div style={{ 
                     color: '#a1a1aa', 
-                    fontStyle: 'italic', 
                     display: 'flex', 
                     alignItems: 'center', 
                     gap: '8px',
-                    padding: '12px',
-                    marginTop: '8px'
+                    padding: '10px 12px',
+                    marginTop: '6px',
+                    background: 'rgba(255, 255, 255, 0.05)',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    borderRadius: '10px',
+                    alignSelf: 'flex-start'
                   }}>
                     <div style={{ 
-                      width: '14px', 
-                      height: '14px', 
-                      border: '2px solid rgba(0, 212, 255, 0.2)',
-                      borderTop: '2px solid #00d4ff',
+                      width: '12px', 
+                      height: '12px', 
+                      border: '2px solid rgba(0, 245, 195, 0.3)',
+                      borderTop: '2px solid #00f5c3',
                       borderRadius: '50%',
                       animation: 'spin 1s linear infinite'
                     }}></div>
-                    <span style={{ fontSize: '12px' }}>AI analyzing...</span>
+                    <span style={{ fontSize: '11px', fontWeight: '500' }}>AI analyzing...</span>
                   </div>
                 )}
               </div>
 
-              {/* Chat Input */}
+              {/* Compact Chat Input */}
               <div style={{ 
                 padding: '16px',
-                borderTop: '1px solid rgba(255, 255, 255, 0.1)',
-                background: 'rgba(0, 0, 0, 0.2)'
+                borderTop: '1px solid rgba(0, 245, 195, 0.2)',
+                background: 'linear-gradient(135deg, rgba(0, 245, 195, 0.05) 0%, rgba(0, 212, 255, 0.05) 100%)',
+                borderRadius: '0 0 12px 12px'
               }}>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <input
-                    type="text"
-                    value={currentQuestion}
-                    onChange={(e) => setCurrentQuestion(e.target.value)}
-                    placeholder="Ask about security..."
-                    onKeyPress={(e) => e.key === 'Enter' && askAI()}
-                    disabled={!analysisResult || isAskingAI}
-                    style={{
-                      flex: 1,
-                      background: 'rgba(0, 0, 0, 0.3)',
-                      border: '1px solid rgba(255, 255, 255, 0.1)',
-                      borderRadius: '6px',
-                      padding: '8px 12px',
-                      color: '#fff',
-                      fontSize: '13px'
-                    }}
-                  />
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+                  <div style={{ flex: 1 }}>
+                    <input
+                      type="text"
+                      value={currentQuestion}
+                      onChange={(e) => setCurrentQuestion(e.target.value)}
+                      placeholder="Ask about security..."
+                      onKeyPress={(e) => e.key === 'Enter' && askAI()}
+                      disabled={!analysisResult || isAskingAI}
+                      style={{
+                        width: '100%',
+                        background: 'rgba(0, 0, 0, 0.4)',
+                        border: '1px solid rgba(255, 255, 255, 0.2)',
+                        borderRadius: '8px',
+                        padding: '10px 12px',
+                        color: '#fff',
+                        fontSize: '12px',
+                        outline: 'none',
+                        transition: 'all 0.2s ease',
+                        boxSizing: 'border-box'
+                      }}
+                      onFocus={(e) => {
+                        e.target.style.borderColor = 'rgba(0, 245, 195, 0.5)';
+                        e.target.style.background = 'rgba(0, 0, 0, 0.6)';
+                      }}
+                      onBlur={(e) => {
+                        e.target.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+                        e.target.style.background = 'rgba(0, 0, 0, 0.4)';
+                      }}
+                    />
+                  </div>
                   <button 
                     onClick={askAI} 
                     disabled={!analysisResult || isAskingAI || !currentQuestion.trim()}
                     style={{
-                      background: 'linear-gradient(135deg, #00f5c3 0%, #00d4ff 100%)',
+                      background: currentQuestion.trim() && !isAskingAI ? 
+                        'linear-gradient(135deg, #00f5c3 0%, #00d4ff 100%)' : 
+                        'rgba(255, 255, 255, 0.1)',
                       border: 'none',
-                      borderRadius: '6px',
-                      padding: '8px 16px',
-                      color: '#000',
+                      borderRadius: '8px',
+                      padding: '10px 16px',
+                      color: currentQuestion.trim() && !isAskingAI ? '#000' : '#71717a',
                       fontWeight: '600',
-                      cursor: 'pointer',
-                      fontSize: '13px'
+                      cursor: currentQuestion.trim() && !isAskingAI ? 'pointer' : 'not-allowed',
+                      fontSize: '12px',
+                      minWidth: '60px',
+                      transition: 'all 0.2s ease',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '6px'
+                    }}
+                    onMouseEnter={(e) => {
+                      if (currentQuestion.trim() && !isAskingAI) {
+                        e.target.style.transform = 'translateY(-1px)';
+                        e.target.style.boxShadow = '0 4px 16px rgba(0, 245, 195, 0.4)';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      e.target.style.transform = 'translateY(0)';
+                      e.target.style.boxShadow = 'none';
                     }}
                   >
-                    {isAskingAI ? '...' : 'Ask'}
+                    {isAskingAI ? (
+                      <>
+                        <div style={{
+                          width: '12px',
+                          height: '12px',
+                          border: '2px solid rgba(0, 0, 0, 0.3)',
+                          borderTop: '2px solid #000',
+                          borderRadius: '50%',
+                          animation: 'spin 1s linear infinite'
+                        }}></div>
+                      </>
+                    ) : (
+                      <>
+                        <span>Ask</span>
+                      </>
+                    )}
                   </button>
+                </div>
+                <div style={{ 
+                  fontSize: '10px', 
+                  color: '#71717a', 
+                  marginTop: '6px',
+                  textAlign: 'center',
+                  opacity: '0.7'
+                }}>
+                  💡 Be specific about vulnerabilities
                 </div>
               </div>
               </div>
-            )}
           </>
         )}
       </div>

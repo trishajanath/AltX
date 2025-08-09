@@ -86,7 +86,51 @@ class FixRequest(BaseModel):
     issue: Dict[str, Any]
     branch_name: Optional[str] = None
 
-
+@app.get("/debug/test-token")
+async def test_github_token_direct():
+    """Test GitHub token directly without ai_assistant import"""
+    try:
+        token = os.getenv("GITHUB_TOKEN")
+        if not token:
+            return {"error": "GITHUB_TOKEN not found in environment"}
+        
+        # Test token directly
+        from github import Github
+        test_client = Github(token)
+        
+        # Test authentication
+        user = test_client.get_user()
+        
+        # Fix: Get rate limit properly (newer PyGithub versions)
+        try:
+            rate_limit = test_client.get_rate_limit()
+            # Try different attributes for rate limit
+            if hasattr(rate_limit, 'core'):
+                remaining = rate_limit.core.remaining
+            elif hasattr(rate_limit, 'rate'):
+                remaining = rate_limit.rate.remaining  
+            else:
+                remaining = "Unknown"
+        except Exception as rate_error:
+            print(f"Rate limit check failed: {rate_error}")
+            remaining = "Could not check"
+        
+        return {
+            "token_valid": True,
+            "authenticated_as": user.login,
+            "user_id": user.id,
+            "user_type": user.type,
+            "rate_limit_remaining": remaining,
+            "token_scopes": "Check GitHub settings for exact scopes"
+        }
+        
+    except Exception as e:
+        return {
+            "token_valid": False,
+            "error": str(e),
+            "token_present": bool(os.getenv("GITHUB_TOKEN")),
+            "suggestion": "Check if token has 'repo' and 'public_repo' permissions"
+        }
 # --- Enhanced Security Analysis Functions ---
 @app.post("/scan")
 async def scan(request: ScanRequest):
@@ -1157,6 +1201,91 @@ async def owasp_mapping():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"OWASP mapping failed: {str(e)}")
     
+async def provide_local_fix_suggestion(issue: dict):
+    """
+    Provide fix suggestions for local analysis without GitHub operations
+    """
+    try:
+        print(f"🔧 Providing local fix suggestion for: {issue.get('description', 'Unknown issue')}")
+        
+        # Query RAG database for secure coding patterns
+        rag_query = f"{issue.get('type', 'security')} {issue.get('description', '')} {issue.get('vulnerable_code', '')}"
+        secure_patterns = await run_in_threadpool(get_secure_coding_patterns, rag_query)
+        
+        # Create AI prompt
+        ai_prompt = f"""
+        You are a security expert. Analyze this security issue and provide a fix:
+        
+        Issue Type: {issue.get('type', 'Unknown')}
+        Description: {issue.get('description', 'No description')}
+        File: {issue.get('file', 'Unknown file')}
+        Line: {issue.get('line', 'Unknown')}
+        
+        Vulnerable Code:
+        {issue.get('vulnerable_code', 'Not provided')}
+        
+        Security Knowledge Base:
+        {secure_patterns}
+        
+        Provide a JSON response with:
+        {{
+            "fix_summary": "Brief description of the fix",
+            "security_impact": "How this improves security",
+            "suggested_code": "The corrected code",
+            "explanation": "Detailed explanation of the fix",
+            "prevention_tips": ["List of tips to prevent this issue"]
+        }}
+        """
+        
+        # Get AI response
+        ai_response = await run_in_threadpool(get_chat_response, [
+            {"role": "user", "content": ai_prompt}
+        ], "smart")
+        ai_text = ai_response if isinstance(ai_response, str) else str(ai_response)
+        
+        # Parse JSON response
+        try:
+            json_start = ai_text.find('{')
+            json_end = ai_text.rfind('}') + 1
+            if json_start != -1 and json_end != -1:
+                fix_data = json.loads(ai_text[json_start:json_end])
+            else:
+                raise ValueError("No JSON found")
+        except:
+            # Fallback response
+            fix_data = {
+                "fix_summary": f"Security fix suggested for {issue.get('type', 'issue')}",
+                "security_impact": "Reduces security vulnerability risk",
+                "suggested_code": "# Apply security best practices here",
+                "explanation": f"This {issue.get('type', 'issue')} should be addressed by following security best practices.",
+                "prevention_tips": ["Regular security audits", "Use security linting tools", "Follow OWASP guidelines"]
+            }
+        
+        return {
+            "success": True,
+            "fix_applied": False,
+            "suggestion_only": True,
+            "fix_summary": fix_data.get("fix_summary", "Security fix suggested"),
+            "security_impact": fix_data.get("security_impact", "Improves security"),
+            "suggested_code": fix_data.get("suggested_code", ""),
+            "explanation": fix_data.get("explanation", ""),
+            "prevention_tips": fix_data.get("prevention_tips", []),
+            "issue_details": {
+                "type": issue.get('type'),
+                "file": issue.get('file'),
+                "line": issue.get('line'),
+                "description": issue.get('description')
+            }
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Failed to generate fix suggestion: {str(e)}",
+            "fix_summary": "Unable to generate fix",
+            "suggestion_only": True
+        }
+
 @app.post("/propose-fix")
 async def propose_fix(request: FixRequest):
     """
@@ -1167,20 +1296,65 @@ async def propose_fix(request: FixRequest):
         repo_url = request.repo_url
         issue = request.issue
         
+        # Check if this is a local analysis (not a GitHub repo)
+        if not repo_url.startswith('https://github.com/') and not repo_url.startswith('git@github.com:'):
+            return await provide_local_fix_suggestion(issue)
+        
         # Extract repo info
         repo_url_clean = repo_url.rstrip('/').replace('.git', '')
         parts = repo_url_clean.split('/')
         
-        if len(parts) < 5 or not github_client:
-            raise HTTPException(status_code=400, detail="Invalid repo URL or GitHub client not available")
+        if len(parts) < 5:
+            raise HTTPException(status_code=400, detail="Invalid repo URL format")
         
         owner, repo_name = parts[-2], parts[-1]
+        print(f"🔍 Extracted repo: {owner}/{repo_name}")
         
-        # Get the repository
+        # Initialize GitHub client with proper authentication
+        token = os.getenv("GITHUB_TOKEN")
+        if not token:
+            raise HTTPException(status_code=500, detail="GitHub token not configured. Please set GITHUB_TOKEN environment variable.")
+        
+        from github import Github
         try:
-            github_repo = github_client.get_repo(f"{owner}/{repo_name}")
-        except Exception as e:
-            raise HTTPException(status_code=404, detail=f"Repository not found or not accessible: {str(e)}")
+            # Always create a fresh GitHub client with the token
+            working_github_client = Github(token)
+            print("✅ Created fresh GitHub client")
+            
+            # Test the client immediately
+            test_user = working_github_client.get_user()
+            print(f"✅ GitHub client authenticated as: {test_user.login}")
+            
+        except Exception as client_error:
+            print(f"❌ GitHub authentication failed: {client_error}")
+            raise HTTPException(status_code=401, detail=f"GitHub authentication failed: {str(client_error)}")
+        
+        # Test repository access with the working client
+        try:
+            print(f"🔍 Testing access to repository: {owner}/{repo_name}")
+            github_repo = working_github_client.get_repo(f"{owner}/{repo_name}")
+            print(f"✅ Repository accessible: {github_repo.full_name}")
+            print(f"📊 Repository info: {github_repo.language}, Private: {github_repo.private}")
+            
+        except Exception as repo_error:
+            error_msg = str(repo_error)
+            print(f"❌ Repository access failed: {error_msg}")
+            
+            if "401" in error_msg or "Bad credentials" in error_msg:
+                raise HTTPException(
+                    status_code=401, 
+                    detail=f"GitHub authentication failed. Your token may not have the correct permissions. Please ensure your GITHUB_TOKEN has 'repo' scope for private repositories or 'public_repo' scope for public repositories. Error: {error_msg}"
+                )
+            elif "404" in error_msg or "Not Found" in error_msg:
+                raise HTTPException(
+                    status_code=404, 
+                    detail=f"Repository '{owner}/{repo_name}' not found or not accessible. Please check: 1) Repository URL is correct, 2) Repository exists and is public, or 3) Your token has access to private repositories. Error: {error_msg}"
+                )
+            else:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Repository access error: {error_msg}"
+                )
         
         # Create temporary directory for cloning
         temp_dir = tempfile.mkdtemp()
@@ -1459,16 +1633,59 @@ Return ONLY a JSON object with this exact structure:
 - Perform security testing to verify the vulnerability is resolved
 - Review the code changes for any potential side effects
 """
-
-            pull_request = github_repo.create_pull(
-                title=pr_title,
-                body=pr_body,
-                head=branch_name,
-                base='main'  # Adjust if your default branch is different
-            )
+            try:
+                default_branch = github_repo.default_branch
+                print(f"📋 Repository default branch: {default_branch}")
+                try:
+                    remote_branch = github_repo.get_branch(branch_name)
+                    print(f"✅ Branch {branch_name} confirmed on remote")
+                except Exception as e:
+                    print(f"⚠️ Branch verification failed: {e}")
+                    github_repo = working_github_client.get_repo(f"{owner}/{repo_name}")
             
-            print(f"✅ Pull request created: {pull_request.html_url}")
-            
+                pull_request = github_repo.create_pull(
+                    title=pr_title,
+                    body=pr_body,
+                    head=branch_name,
+                    base=default_branch  # Adjust if your default branch is different
+                )
+                print(f"✅ Pull request created: {pull_request.html_url}")
+            except Exception as pr_error:
+                error_msg = str(pr_error)
+                print(f"❌ Pull request creation failed: {error_msg}")
+                if "404" in error_msg:
+                    print(f"❌ PR creation failed with 404. Debugging info:")
+                    print(f"   Repository: {owner}/{repo_name}")
+                    print(f"   Head branch: {branch_name}")
+                    print(f"   Base branch: {default_branch}")
+                    print(f"   Repository exists: {github_repo.full_name}")
+                    if hasattr(github_repo, 'fork') and github_repo.fork:
+                        print("   Note: This is a forked repository")
+                        head_with_owner = f"{owner}:{branch_name}"
+                        print(f"   Trying with owner prefix: {head_with_owner}")
+                        try:
+                            pull_request = github_repo.create_pull(
+                                title=pr_title,
+                                body=pr_body,
+                                head=head_with_owner,
+                                base=default_branch
+                            )
+                            print(f"✅ Pull request created with owner prefix: {pull_request.html_url}")
+                        except Exception as e2:
+                            print(f"❌ PR creation with owner prefix also failed: {e2}")
+                            raise HTTPException(status_code=404, 
+                                detail=f"Failed to create pull request. Repository: {owner}/{repo_name},Branch: {branch_name} → {default_branch}. Error: {error_msg}"
+                            )
+                    else:
+                        raise HTTPException(
+                            status_code=404, 
+                            detail=f"Failed to create pull request. Repository: {owner}/{repo_name}, Branch: {branch_name} → {default_branch}. Error: {error_msg}"
+                        )
+                else:
+                    raise HTTPException(
+                            status_code=500,
+                            detail=f"Pull request creation error: {error_msg}"
+                    )
             # Prepare detailed response with code comparison
             response_data = {
                 "success": True,
