@@ -6,6 +6,7 @@ import DeployPage from './components/DeployPage';
 import SecurityScanPage from './components/SecurityScanPage';
 import ReportPage from './components/ReportPage';
 import RepoAnalysisPage from './components/RepoAnalysisPage';
+import ProjectBuilder from './components/ProjectBuilder';
 
 function Navigation() {
   const location = useLocation();
@@ -23,6 +24,14 @@ function Navigation() {
             className={`nav-link ${activeTab === 'home' ? 'active' : ''}`}
           >
             Home
+          </Link>
+        </li>
+        <li>
+          <Link 
+            to="/build"
+            className={`nav-link ${activeTab === 'build' ? 'active' : ''}`}
+          >
+            Build Apps
           </Link>
         </li>
         <li>
@@ -72,6 +81,7 @@ function App() {
         <div className="page-container">
           <Routes>
             <Route path="/" element={<div className="page"><HomePage /></div>} />
+            <Route path="/build" element={<div className="page"><ProjectBuilder /></div>} />
             <Route path="/deploy" element={<div className="page"><DeployPage setScanResult={setScanResult} /></div>} />
             <Route path="/security" element={<div className="page"><SecurityScanPage setScanResult={setScanResult} /></div>} />
             <Route path="/repo-analysis" element={<div className="page"><RepoAnalysisPage /></div>} />

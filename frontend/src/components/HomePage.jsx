@@ -44,20 +44,22 @@ const HomePage = () => {
 
                     /* --- Hero Section --- */
                     .hero-section {
-                        min-height: 100vh;
+                        min-height: 80vh;
                         display: flex;
                         flex-direction: column;
                         justify-content: center;
                         align-items: center;
                         text-align: center;
-                        padding: 5rem 0;
+                        padding: 3rem 0;
                     }
                     .hero-title {
-                        font-size: 3rem;
+                        font-size: 5rem;
                         font-weight: 900;
                         letter-spacing: -0.05em;
                         color: var(--text-light);
                         text-shadow: 0 0 15px rgba(0, 245, 195, 0.4), 0 0 30px rgba(0, 245, 195, 0.2);
+                        margin-bottom: 1.5rem;
+                        line-height: 1.1;
                     }
                     .hero-title-highlight {
                         color: var(--primary-green);
@@ -246,7 +248,7 @@ const HomePage = () => {
                     {/* Hero Section */}
                     <section className="hero-section">
                         <h1 className="hero-title">
-                            Deploy with <span className="hero-title-highlight">AI Confidence</span>
+                            Deploy with AI Confidence
                         </h1>
                         <p className="hero-subtitle">
                             One-click GitHub deployments with real-time AI security analysis. Monitor vulnerabilities, get intelligent recommendations, and chat with our AI security advisor.

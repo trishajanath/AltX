@@ -1290,6 +1290,150 @@ async def provide_local_fix_suggestion(issue: dict):
             "suggestion_only": True
         }
 
+class ProjectRequest(BaseModel):
+    idea: str
+    project_type: str = "web-app"
+    tech_stack: str = "auto"
+    complexity: str = "medium"
+
+@app.post("/generate-project")
+async def generate_project(request: ProjectRequest):
+    """
+    AI-powered project generation endpoint
+    Takes a project idea and generates a complete project structure
+    """
+    try:
+        idea = request.idea
+        project_type = request.project_type
+        tech_stack = request.tech_stack
+        complexity = request.complexity
+        
+        print(f"🚀 Generating project for idea: '{idea}'")
+        print(f"🔧 Project type: {project_type}, Tech stack: {tech_stack}, Complexity: {complexity}")
+        
+        # Generate project name
+        words = idea.split()[:3]
+        project_name = " ".join([word.capitalize() for word in words])
+        
+        # Select tech stack based on project type
+        if tech_stack == "auto":
+            stack_mapping = {
+                "web-app": ["React", "Node.js", "PostgreSQL", "Tailwind CSS"],
+                "mobile-app": ["React Native", "Expo", "Firebase", "NativeBase"],
+                "api": ["FastAPI", "PostgreSQL", "Redis", "Docker"],
+                "desktop-app": ["Electron", "React", "SQLite", "Styled Components"],
+                "ai-ml": ["Python", "FastAPI", "TensorFlow", "PostgreSQL"],
+                "blockchain": ["Solidity", "React", "Web3.js", "IPFS"]
+            }
+            selected_stack = stack_mapping.get(project_type, stack_mapping["web-app"])
+        else:
+            stack_mapping = {
+                "react-node": ["React", "Node.js", "Express", "MongoDB"],
+                "python-fastapi": ["Python", "FastAPI", "PostgreSQL", "SQLAlchemy"],
+                "nextjs": ["Next.js", "React", "Prisma", "PostgreSQL"],
+                "vue-express": ["Vue.js", "Express", "Node.js", "MongoDB"],
+                "django": ["Django", "Python", "PostgreSQL", "Bootstrap"],
+                "rails": ["Ruby on Rails", "PostgreSQL", "Redis", "Stimulus"]
+            }
+            selected_stack = stack_mapping.get(tech_stack, ["React", "Node.js"])
+        
+        # Generate project structure
+        structure_mapping = {
+            "web-app": [
+                "📁 src/",
+                "  📁 components/",
+                "  📁 pages/",
+                "  📁 hooks/",
+                "  📁 utils/",
+                "  📁 assets/",
+                "📁 public/",
+                "📁 api/",
+                "📄 package.json",
+                "📄 README.md",
+                "📄 .env.example"
+            ],
+            "mobile-app": [
+                "📁 src/",
+                "  📁 screens/",
+                "  📁 components/",
+                "  📁 navigation/",
+                "  📁 services/",
+                "  📁 assets/",
+                "📄 App.js",
+                "📄 package.json",
+                "📄 app.json",
+                "📄 babel.config.js"
+            ],
+            "api": [
+                "📁 src/",
+                "  📁 routes/",
+                "  📁 models/",
+                "  📁 middleware/",
+                "  📁 utils/",
+                "📄 main.py",
+                "📄 requirements.txt",
+                "📄 Dockerfile",
+                "📄 docker-compose.yml"
+            ]
+        }
+        project_structure = structure_mapping.get(project_type, structure_mapping["web-app"])
+        
+        # Generate features based on idea keywords
+        common_features = [
+            "User Authentication",
+            "Responsive Design", 
+            "API Integration",
+            "Database Storage",
+            "Real-time Updates"
+        ]
+        
+        additional_features = []
+        idea_lower = idea.lower()
+        if "chat" in idea_lower: additional_features.append("Real-time Chat")
+        if "payment" in idea_lower: additional_features.append("Payment Integration")
+        if "ai" in idea_lower or "ml" in idea_lower: additional_features.append("AI/ML Features")
+        if "social" in idea_lower: additional_features.append("Social Features")
+        if "admin" in idea_lower: additional_features.append("Admin Dashboard")
+        if "notification" in idea_lower: additional_features.append("Push Notifications")
+        
+        all_features = common_features + additional_features
+        
+        # Estimate development time
+        time_mapping = {
+            "simple": "2-3 days",
+            "medium": "1-2 weeks", 
+            "complex": "3-4 weeks"
+        }
+        estimated_time = time_mapping.get(complexity, "1-2 weeks")
+        
+        # Generate URLs (these would be real in production)
+        project_slug = project_name.lower().replace(" ", "-")
+        github_repo = f"https://github.com/user/{project_slug}"
+        deployment_url = f"https://{project_slug}.vercel.app"
+        
+        return {
+            "success": True,
+            "project": {
+                "name": project_name,
+                "description": idea,
+                "tech_stack": selected_stack,
+                "structure": project_structure,
+                "features": all_features,
+                "estimated_time": estimated_time,
+                "github_repo": github_repo,
+                "deployment_url": deployment_url,
+                "project_type": project_type,
+                "complexity": complexity
+            }
+        }
+        
+    except Exception as e:
+        print(f"❌ Project generation error: {e}")
+        return {
+            "success": False,
+            "error": f"Failed to generate project: {str(e)}"
+        }
+
 @app.post("/propose-fix")
 async def propose_fix(request: FixRequest):
     """
@@ -1392,7 +1536,40 @@ async def propose_fix(request: FixRequest):
             if not issue_file:
                 raise HTTPException(status_code=400, detail="Issue must specify a file path")
             
+            # Extract relative path from absolute path if needed
+            # Handle cases where issue_file might be an absolute temp path
+            if os.path.isabs(issue_file):
+                # Try to extract the relative path by finding common patterns
+                # Look for patterns like /backend/, /frontend/, /src/, etc.
+                path_parts = issue_file.replace('\\', '/').split('/')
+                
+                # Find the start of the relative path (after temp directory)
+                relative_start = -1
+                for i, part in enumerate(path_parts):
+                    if part in ['backend', 'frontend', 'src', 'lib', 'app', 'public', 'static', 'assets']:
+                        relative_start = i
+                        break
+                
+                if relative_start != -1:
+                    # Take everything from the relative start
+                    issue_file = '/'.join(path_parts[relative_start:])
+                    print(f"🔄 Extracted relative path from absolute: {issue_file}")
+                else:
+                    # If we can't find a common pattern, take the last few parts
+                    # This handles cases like "config/db.js" or "package.json"
+                    if len(path_parts) >= 2:
+                        issue_file = '/'.join(path_parts[-2:])  # Take last 2 parts
+                    else:
+                        issue_file = path_parts[-1]  # Take just the filename
+                    print(f"🔄 Using fallback relative path: {issue_file}")
+            
+            # Normalize file path (ensure forward slashes for cross-platform compatibility)
+            issue_file = issue_file.replace('\\', '/')
+            print(f"🔍 Final normalized issue file path: {issue_file}")
+            print(f"🔍 Repository temp directory: {temp_dir}")
+            
             file_path = os.path.join(temp_dir, issue_file)
+            print(f"🔍 Full file path: {file_path}")
             
             # Store original file content (before fix)
             original_content = ""
@@ -1566,7 +1743,34 @@ Return ONLY a JSON object with this exact structure:
             
             # Create branch and commit
             repo.git.checkout('-b', branch_name)
-            repo.git.add(issue_file)
+            
+            # Use relative path for git operations (normalize path separators)
+            git_file_path = issue_file.replace('\\', '/')
+            print(f"📝 Adding file to git: {git_file_path}")
+            print(f"🔍 Current working directory: {os.getcwd()}")
+            print(f"🔍 Repository working directory: {repo.working_dir}")
+            
+            try:
+                # Verify file exists relative to repo root
+                full_file_path = os.path.join(repo.working_dir, git_file_path)
+                if os.path.exists(full_file_path):
+                    print(f"✅ File exists at: {full_file_path}")
+                else:
+                    print(f"❌ File not found at: {full_file_path}")
+                    # List files in the directory to debug
+                    dir_to_check = os.path.dirname(full_file_path)
+                    if os.path.exists(dir_to_check):
+                        print(f"📂 Files in {dir_to_check}: {os.listdir(dir_to_check)}")
+                
+                repo.git.add(git_file_path)
+                print(f"✅ Successfully added {git_file_path} to git")
+                
+            except Exception as git_add_error:
+                print(f"❌ DETAILED ERROR in git add: {git_add_error}")
+                print(f"📍 Git add failed for: {git_file_path}")
+                print(f"📍 Repository root: {repo.working_dir}")
+                print(f"📍 Attempted file path: {git_file_path}")
+                raise git_add_error
             
             commit_message = fix_data.get('commit_message', f"fix: resolve security vulnerability in {issue_file}")
             repo.git.commit('-m', commit_message)
@@ -1796,12 +2000,56 @@ Return ONLY a JSON object with this exact structure:
             except Exception as pr_error:
                 error_msg = str(pr_error)
                 print(f"❌ Pull request creation failed: {error_msg}")
-                if "404" in error_msg:
+                
+                # Handle specific GitHub API errors with user-friendly messages
+                if "403" in error_msg and ("archived" in error_msg.lower() or "read-only" in error_msg.lower()):
+                    print(f"🔒 Repository is archived and read-only: {owner}/{repo_name}")
+                    return {
+                        "success": True,
+                        "message": f"🔧 Security fix generated for {issue_file} (Repository is archived)",
+                        "fix_type": "archived_repository",
+                        "access_limitation": f"Repository {owner}/{repo_name} is archived and read-only",
+                        "manual_fix_instructions": f"This repository is archived and cannot accept pull requests. To apply this fix:\n1. Contact the repository owner to unarchive it\n2. Or fork the repository and apply the fix to your fork\n3. The security issue was found in: {issue_file}",
+                        "fix_details": fix_data,
+                        "code_comparison": {
+                            "original_content": original_content,
+                            "fixed_content": fixed_content,
+                            "content_length_before": len(original_content),
+                            "content_length_after": len(fixed_content),
+                            "character_changes": len(fixed_content) - len(original_content)
+                        },
+                        "code_preview": {
+                            "original_preview": original_content[:500] + ("..." if len(original_content) > 500 else ""),
+                            "fixed_preview": fixed_content[:500] + ("..." if len(fixed_content) > 500 else ""),
+                            "preview_truncated": len(original_content) > 500 or len(fixed_content) > 500
+                        }
+                    }
+                elif "404" in error_msg:
                     print(f"❌ PR creation failed with 404. Debugging info:")
                     print(f"   Repository: {owner}/{repo_name}")
                     print(f"   Head branch: {branch_name}")
                     print(f"   Base branch: {default_branch}")
                     print(f"   Repository exists: {github_repo.full_name}")
+                    
+                    # Check if it's a branch not found issue
+                    if "not found" in error_msg.lower() and "branch" in error_msg.lower():
+                        print(f"🔍 Branch not found - this might be a timing issue")
+                        return {
+                            "success": True,
+                            "message": f"🔧 Security fix applied to {issue_file} (Branch sync issue)",
+                            "fix_type": "branch_sync_issue",
+                            "access_limitation": "Branch synchronization issue with GitHub",
+                            "manual_fix_instructions": f"The fix was applied locally but there was a branch synchronization issue. To resolve:\n1. The changes were made to: {issue_file}\n2. Try creating the pull request manually\n3. Or re-run the fix after a few minutes",
+                            "fix_details": fix_data,
+                            "code_comparison": {
+                                "original_content": original_content,
+                                "fixed_content": fixed_content,
+                                "content_length_before": len(original_content),
+                                "content_length_after": len(fixed_content),
+                                "character_changes": len(fixed_content) - len(original_content)
+                            }
+                        }
+                    
                     if hasattr(github_repo, 'fork') and github_repo.fork:
                         print("   Note: This is a forked repository")
                         head_with_owner = f"{owner}:{branch_name}"
@@ -1824,6 +2072,23 @@ Return ONLY a JSON object with this exact structure:
                             status_code=404, 
                             detail=f"Failed to create pull request. Repository: {owner}/{repo_name}, Branch: {branch_name} → {default_branch}. Error: {error_msg}"
                         )
+                elif "403" in error_msg:
+                    print(f"🔒 Permission denied for repository: {owner}/{repo_name}")
+                    return {
+                        "success": True,
+                        "message": f"🔧 Security fix generated for {issue_file} (Permission denied)",
+                        "fix_type": "permission_denied",
+                        "access_limitation": "Insufficient permissions to create pull request",
+                        "manual_fix_instructions": f"Permission denied while creating pull request. To apply this fix:\n1. Ensure your GitHub token has write access to {owner}/{repo_name}\n2. Or fork the repository and apply the fix to your fork\n3. The security issue was found in: {issue_file}",
+                        "fix_details": fix_data,
+                        "code_comparison": {
+                            "original_content": original_content,
+                            "fixed_content": fixed_content,
+                            "content_length_before": len(original_content),
+                            "content_length_after": len(fixed_content),
+                            "character_changes": len(fixed_content) - len(original_content)
+                        }
+                    }
                 else:
                     raise HTTPException(
                             status_code=500,

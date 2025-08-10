@@ -389,7 +389,7 @@ const DeployPage = ({ setScanResult }) => {
       <div className="page-container">
         <div className="hero-section">
           <h1 className="hero-title">
-            Deploy with <span className="hero-title-highlight">Confidence</span>
+            Deploy with Confidence
           </h1>
           <p className="hero-subtitle">
             Deploy your GitHub repository with automatic security analysis and continuous monitoring. One click is all it takes.

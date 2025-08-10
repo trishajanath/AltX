@@ -33,6 +33,7 @@ const RepoAnalysisPage = () => {
   const [showAISidebar, setShowAISidebar] = useState(false);
   const [fixingIssues, setFixingIssues] = useState({}); // Track which issues are being fixed
   const [fixedIssues, setFixedIssues] = useState(new Set()); // Track successfully fixed issues
+  const [isFixingAllIssues, setIsFixingAllIssues] = useState(false); // Track fix all progress
 
   const navigate = useNavigate();
 
@@ -311,6 +312,122 @@ const RepoAnalysisPage = () => {
       ask();
   };
 
+  // Function to fix all issues sequentially
+  const fixAllIssues = async () => {
+    if (isFixingAllIssues) return;
+
+    setIsFixingAllIssues(true);
+    
+    try {
+      // Collect all unfixed issues
+      const allIssues = [];
+      
+      // Add secret scan results
+      if (analysisResult.secret_scan_results) {
+        analysisResult.secret_scan_results.forEach((secret, index) => {
+          if (!isIssueFixed('secret', index)) {
+            allIssues.push({ issue: secret, type: 'secret', index });
+          }
+        });
+      }
+      
+      // Add static analysis results
+      if (analysisResult.static_analysis_results) {
+        analysisResult.static_analysis_results.forEach((issue, index) => {
+          if (!isIssueFixed('static_analysis', index)) {
+            allIssues.push({ issue, type: 'static_analysis', index });
+          }
+        });
+      }
+      
+      // Add dependency issues
+      if (analysisResult.dependency_scan_results?.vulnerable_packages) {
+        analysisResult.dependency_scan_results.vulnerable_packages.forEach((pkg, index) => {
+          if (!isIssueFixed('dependency', index)) {
+            allIssues.push({ issue: pkg, type: 'dependency', index });
+          }
+        });
+      }
+      
+      // Add code quality issues
+      if (analysisResult.code_quality_results) {
+        analysisResult.code_quality_results.forEach((issue, index) => {
+          if (!isIssueFixed('code_quality', index)) {
+            allIssues.push({ issue, type: 'code_quality', index });
+          }
+        });
+      }
+
+      if (allIssues.length === 0) {
+        setChatMessages(prev => [...prev, {
+          type: 'ai',
+          message: '✅ **No Issues to Fix**\n\nAll security issues have already been resolved or there are no issues detected in this repository.',
+          timestamp: new Date().toLocaleTimeString()
+        }]);
+        setShowAISidebar(true);
+        return;
+      }
+
+      // Show starting message
+      setChatMessages(prev => [...prev, {
+        type: 'ai',
+        message: `🔧 **Starting Bulk Fix Operation**\n\n📊 **Found ${allIssues.length} issues to fix:**\n• ${analysisResult.secret_scan_results?.filter((_, i) => !isIssueFixed('secret', i)).length || 0} Secret scan issues\n• ${analysisResult.static_analysis_results?.filter((_, i) => !isIssueFixed('static_analysis', i)).length || 0} Static analysis issues\n• ${analysisResult.dependency_scan_results?.vulnerable_packages?.filter((_, i) => !isIssueFixed('dependency', i)).length || 0} Dependency issues\n• ${analysisResult.code_quality_results?.filter((_, i) => !isIssueFixed('code_quality', i)).length || 0} Code quality issues\n\n⏳ Processing fixes sequentially...`,
+        timestamp: new Date().toLocaleTimeString()
+      }]);
+      setShowAISidebar(true);
+
+      let successCount = 0;
+      let errorCount = 0;
+      const errors = [];
+
+      // Fix issues sequentially to avoid overwhelming the server
+      for (let i = 0; i < allIssues.length; i++) {
+        const { issue, type, index } = allIssues[i];
+        
+        try {
+          // Update progress message every 5 fixes
+          if (i > 0 && i % 5 === 0) {
+            setChatMessages(prev => [...prev, {
+              type: 'ai',
+              message: `⏳ **Progress Update**: Fixed ${successCount}/${i} issues successfully. Continuing...`,
+              timestamp: new Date().toLocaleTimeString()
+            }]);
+          }
+
+          await fixIssue(issue, type, index);
+          successCount++;
+          
+          // Small delay between fixes to prevent server overload
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        } catch (error) {
+          errorCount++;
+          errors.push(`${type} issue #${index}: ${error.message}`);
+          console.error(`Failed to fix ${type} issue #${index}:`, error);
+        }
+      }
+
+      // Show completion summary
+      const summaryMessage = `🎉 **Bulk Fix Operation Complete!**\n\n📊 **Results:**\n✅ **Successfully Fixed:** ${successCount} issues\n${errorCount > 0 ? `❌ **Failed:** ${errorCount} issues\n` : ''}📈 **Success Rate:** ${Math.round((successCount / allIssues.length) * 100)}%\n\n${successCount > 0 ? '🔄 **Repository Status:** Multiple pull requests have been created with security fixes.\n\n' : ''}${errorCount > 0 ? `⚠️ **Failed Issues:**\n${errors.slice(0, 3).map(err => `• ${err}`).join('\n')}\n${errors.length > 3 ? `• ... and ${errors.length - 3} more\n` : ''}\n💡 **Tip:** Try fixing failed issues individually for more details.\n\n` : ''}🎯 **Next Steps:**\n• Review created pull requests\n• Test the applied fixes\n• Merge when ready`;
+
+      setChatMessages(prev => [...prev, {
+        type: 'ai',
+        message: summaryMessage,
+        timestamp: new Date().toLocaleTimeString()
+      }]);
+
+    } catch (error) {
+      console.error('Fix all issues error:', error);
+      setChatMessages(prev => [...prev, {
+        type: 'ai',
+        message: `❌ **Bulk Fix Operation Failed**\n\n⚠️ **Error:** ${error.message}\n\n💡 **Suggestion:** Try fixing issues individually or check your connection.`,
+        timestamp: new Date().toLocaleTimeString()
+      }]);
+      setShowAISidebar(true);
+    } finally {
+      setIsFixingAllIssues(false);
+    }
+  };
+
   // Helper function to check if an issue is fixed
   const isIssueFixed = (issueType, issueIndex) => {
     const issueId = `${issueType}-${issueIndex}`;
@@ -452,6 +569,12 @@ const RepoAnalysisPage = () => {
           
           .content-wrapper {
             padding: 2rem 0;
+          }
+          /* Reserve space for the fixed right chat sidebar when visible */
+          .content-wrapper.with-sidebar {
+            /* Reserve space equal to sidebar width (min(450px, 40vw)) + its right gap (20px) + a small buffer */
+            margin-right: calc(min(450px, 40vw) + 24px);
+            transition: margin-right 0.3s ease;
           }
           .hero-section {
             min-height: 80vh;
@@ -601,6 +724,9 @@ const RepoAnalysisPage = () => {
             .analysis-results, .analysis-results.with-sidebar {
               margin-right: 0 !important; /* Remove margin on smaller screens */
             }
+            .content-wrapper.with-sidebar {
+              margin-right: 0 !important; /* Also remove reserved space on smaller screens */
+            }
             .ai-chat-sidebar {
                 display: none !important; /* Hide fixed sidebar on smaller screens */
             }
@@ -655,7 +781,7 @@ const RepoAnalysisPage = () => {
           }
         `}
       </style>
-      <div className="content-wrapper">
+  <div className={`content-wrapper ${analysisResult && !isScanning ? 'with-sidebar' : ''}`}>
         <div className="hero-section">
           <div className="hero-content">
             <h1 className="hero-title">Repository Security Analysis</h1>
@@ -737,17 +863,7 @@ const RepoAnalysisPage = () => {
                     setFixingIssues({});
                   }}
                   className="btn btn-secondary"
-                  style={{
-                    background: 'linear-gradient(135deg, #00f5c3 0%, #00d4ff 100%)',
-                    color: '#000',
-                    fontWeight: '600',
-                    padding: '12px 24px',
-                    border: 'none',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    fontSize: '14px',
-                    transition: 'all 0.2s ease'
-                  }}
+                  
                   onMouseEnter={(e) => {
                     e.target.style.transform = 'translateY(-2px)';
                     e.target.style.boxShadow = '0 8px 25px rgba(0, 245, 195, 0.4)';
@@ -821,7 +937,7 @@ const RepoAnalysisPage = () => {
               {/* Analysis Status & Warnings */}
               {(analysisResult.warnings && Array.isArray(analysisResult.warnings) && analysisResult.warnings.length > 0) && (
                 <div className="card">
-                  <h3>⚠️ Analysis Warnings</h3>
+                  <h3>Analysis Warnings</h3>
                   <div style={{ display: 'grid', gap: '8px' }}>
                     {analysisResult.warnings.map((warning, index) => (
                       <div key={index} style={{
@@ -896,7 +1012,7 @@ const RepoAnalysisPage = () => {
 
               {/* Overview */}
               <div className="card">
-                <h3>📊 Repository Overview</h3>
+                <h3>Repository Overview</h3>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '40px', alignItems: 'center' }}>
                   <div className="repo-info">
                     <div className="info-item" style={{ marginBottom: '12px' }}>
@@ -943,7 +1059,7 @@ const RepoAnalysisPage = () => {
 
               {/* Security Summary */}
               <div className="card">
-                <h3>🔍 Security Summary</h3>
+                <h3>Security Summary</h3>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '20px' }}>
                   {analysisResult.security_summary && (
                     <>
@@ -1021,15 +1137,428 @@ const RepoAnalysisPage = () => {
                 </div>
               </div>
 
+              {/* Detailed Security Issues Table */}
+              <div className="card">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                  <h3 style={{ margin: 0 }}>📋 Detailed Security Issues</h3>
+                  <button
+                    onClick={fixAllIssues}
+                    disabled={isFixingAllIssues || Object.keys(fixingIssues).some(key => fixingIssues[key])}
+                    style={{
+                      padding: '10px 20px',
+                      background: isFixingAllIssues ? 'rgba(156, 163, 175, 0.2)' : 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+                      color: isFixingAllIssues ? '#9ca3af' : '#fff',
+                      border: 'none',
+                      borderRadius: '8px',
+                      fontSize: '14px',
+                      fontWeight: '600',
+                      cursor: isFixingAllIssues || Object.keys(fixingIssues).some(key => fixingIssues[key]) ? 'not-allowed' : 'pointer',
+                      transition: 'all 0.3s ease',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px'
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isFixingAllIssues && !Object.keys(fixingIssues).some(key => fixingIssues[key])) {
+                        e.target.style.transform = 'translateY(-2px)';
+                        e.target.style.boxShadow = '0 6px 20px rgba(239, 68, 68, 0.4)';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      e.target.style.transform = 'translateY(0)';
+                      e.target.style.boxShadow = 'none';
+                    }}
+                  >
+                    {isFixingAllIssues ? (
+                      <>
+                        <div style={{
+                          width: '16px',
+                          height: '16px',
+                          border: '2px solid rgba(255, 255, 255, 0.3)',
+                          borderTop: '2px solid #fff',
+                          borderRadius: '50%',
+                          animation: 'spin 1s linear infinite'
+                        }}></div>
+                        Fixing All Issues...
+                      </>
+                    ) : (
+                      <>
+                        🔧 Fix All Issues
+                      </>
+                    )}
+                  </button>
+                </div>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ 
+                    width: '100%', 
+                    fontSize: '14px', 
+                    textAlign: 'left',
+                    borderCollapse: 'separate',
+                    borderSpacing: '0'
+                  }}>
+                    <thead style={{ 
+                      background: 'rgba(255, 255, 255, 0.05)', 
+                      color: '#94a3b8' 
+                    }}>
+                      <tr>
+                        <th style={{ padding: '16px', fontWeight: '500' }}>File Path</th>
+                        <th style={{ padding: '16px', fontWeight: '500' }}>Severity</th>
+                        <th style={{ padding: '16px', fontWeight: '500' }}>Issue Type</th>
+                        <th style={{ padding: '16px', fontWeight: '500' }}>Line</th>
+                        <th style={{ padding: '16px', fontWeight: '500' }}>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody style={{ 
+                      borderTop: '1px solid rgba(255, 255, 255, 0.05)'
+                    }}>
+                      {/* Render Secret Scan Results */}
+                      {analysisResult.secret_scan_results && analysisResult.secret_scan_results
+                        .filter((secret, index) => !isIssueFixed('secret', index))
+                        .map((secret, originalIndex) => (
+                        <tr key={`secret-${originalIndex}`} 
+                            style={{ 
+                              borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+                              transition: 'background-color 0.2s ease'
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.02)'}
+                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}>
+                          <td style={{ 
+                            padding: '16px', 
+                            fontFamily: 'monospace',
+                            color: '#e2e8f0',
+                            maxWidth: '300px',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap'
+                          }}>
+                            {secret.file || 'config/db.js'}
+                          </td>
+                          <td style={{ padding: '16px' }}>
+                            <span style={{
+                              padding: '4px 8px',
+                              fontSize: '12px',
+                              fontWeight: '600',
+                              borderRadius: '16px',
+                              background: 'rgba(239, 68, 68, 0.2)',
+                              color: '#fca5a5'
+                            }}>
+                              High
+                            </span>
+                          </td>
+                          <td style={{ padding: '16px', color: '#e2e8f0' }}>
+                            {secret.type || 'Hardcoded Secret Key'}
+                          </td>
+                          <td style={{ 
+                            padding: '16px', 
+                            fontFamily: 'monospace',
+                            color: '#94a3b8'
+                          }}>
+                            {secret.line || '8'}
+                          </td>
+                          <td style={{ padding: '16px' }}>
+                            <button
+                              onClick={() => fixIssue(secret, 'secret', originalIndex)}
+                              disabled={fixingIssues[`secret-${originalIndex}`]}
+                              style={{
+                                padding: '6px 12px',
+                                background: 'linear-gradient(135deg, #00f5c3 0%, #00d4ff 100%)',
+                                color: '#000',
+                                border: 'none',
+                                borderRadius: '6px',
+                                fontSize: '12px',
+                                fontWeight: '600',
+                                cursor: fixingIssues[`secret-${originalIndex}`] ? 'not-allowed' : 'pointer',
+                                opacity: fixingIssues[`secret-${originalIndex}`] ? '0.5' : '1',
+                                transition: 'all 0.2s ease'
+                              }}
+                              onMouseEnter={(e) => {
+                                if (!fixingIssues[`secret-${originalIndex}`]) {
+                                  e.target.style.transform = 'translateY(-1px)';
+                                  e.target.style.boxShadow = '0 4px 12px rgba(0, 245, 195, 0.3)';
+                                }
+                              }}
+                              onMouseLeave={(e) => {
+                                e.target.style.transform = 'translateY(0)';
+                                e.target.style.boxShadow = 'none';
+                              }}
+                            >
+                              {fixingIssues[`secret-${originalIndex}`] ? '🔧 Fixing...' : '🔧 Fix Issue'}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+
+                      {/* Render Static Analysis Results */}
+                      {analysisResult.static_analysis_results && analysisResult.static_analysis_results
+                        .filter((issue, index) => !isIssueFixed('static_analysis', index))
+                        .map((issue, originalIndex) => (
+                        <tr key={`static-${originalIndex}`}
+                            style={{ 
+                              borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+                              transition: 'background-color 0.2s ease'
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.02)'}
+                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}>
+                          <td style={{ 
+                            padding: '16px', 
+                            fontFamily: 'monospace',
+                            color: '#e2e8f0',
+                            maxWidth: '300px',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap'
+                          }}>
+                            {issue.filename || issue.file || 'src/components/user/Profile.js'}
+                          </td>
+                          <td style={{ padding: '16px' }}>
+                            <span style={{
+                              padding: '4px 8px',
+                              fontSize: '12px',
+                              fontWeight: '600',
+                              borderRadius: '16px',
+                              background: issue.severity === 'HIGH' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(245, 158, 11, 0.2)',
+                              color: issue.severity === 'HIGH' ? '#fca5a5' : '#fcd34d'
+                            }}>
+                              {issue.severity === 'HIGH' ? 'High' : 'Medium'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '16px', color: '#e2e8f0' }}>
+                            {issue.rule_id === 'xss_vulnerability' ? 'Cross-Site Scripting (XSS)' :
+                             issue.rule_id || issue.description || 'Security Vulnerability'}
+                          </td>
+                          <td style={{ 
+                            padding: '16px', 
+                            fontFamily: 'monospace',
+                            color: '#94a3b8'
+                          }}>
+                            {issue.line_number || issue.line || '42'}
+                          </td>
+                          <td style={{ padding: '16px' }}>
+                            <button
+                              onClick={() => fixIssue(issue, 'static_analysis', originalIndex)}
+                              disabled={fixingIssues[`static_analysis-${originalIndex}`]}
+                              style={{
+                                padding: '6px 12px',
+                                background: 'linear-gradient(135deg, #00f5c3 0%, #00d4ff 100%)',
+                                color: '#000',
+                                border: 'none',
+                                borderRadius: '6px',
+                                fontSize: '12px',
+                                fontWeight: '600',
+                                cursor: fixingIssues[`static_analysis-${originalIndex}`] ? 'not-allowed' : 'pointer',
+                                opacity: fixingIssues[`static_analysis-${originalIndex}`] ? '0.5' : '1',
+                                transition: 'all 0.2s ease'
+                              }}
+                              onMouseEnter={(e) => {
+                                if (!fixingIssues[`static_analysis-${originalIndex}`]) {
+                                  e.target.style.transform = 'translateY(-1px)';
+                                  e.target.style.boxShadow = '0 4px 12px rgba(0, 245, 195, 0.3)';
+                                }
+                              }}
+                              onMouseLeave={(e) => {
+                                e.target.style.transform = 'translateY(0)';
+                                e.target.style.boxShadow = 'none';
+                              }}
+                            >
+                              {fixingIssues[`static_analysis-${originalIndex}`] ? '🔧 Fixing...' : '🔧 Fix Issue'}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+
+                      {/* Render Dependency Issues */}
+                      {analysisResult.dependency_scan_results?.vulnerable_packages && analysisResult.dependency_scan_results.vulnerable_packages
+                        .filter((pkg, index) => !isIssueFixed('dependency', index))
+                        .map((pkg, originalIndex) => (
+                        <tr key={`dependency-${originalIndex}`}
+                            style={{ 
+                              borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+                              transition: 'background-color 0.2s ease'
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.02)'}
+                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}>
+                          <td style={{ 
+                            padding: '16px', 
+                            fontFamily: 'monospace',
+                            color: '#e2e8f0',
+                            maxWidth: '300px',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap'
+                          }}>
+                            {pkg.file || 'package.json'}
+                          </td>
+                          <td style={{ padding: '16px' }}>
+                            <span style={{
+                              padding: '4px 8px',
+                              fontSize: '12px',
+                              fontWeight: '600',
+                              borderRadius: '16px',
+                              background: pkg.severity === 'Critical' || pkg.severity === 'High' ? 
+                                'rgba(239, 68, 68, 0.2)' : 'rgba(245, 158, 11, 0.2)',
+                              color: pkg.severity === 'Critical' || pkg.severity === 'High' ? 
+                                '#fca5a5' : '#fcd34d'
+                            }}>
+                              {pkg.severity === 'Critical' || pkg.severity === 'High' ? 'High' : 'Medium'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '16px', color: '#e2e8f0' }}>
+                            Outdated Dependency ({pkg.package || pkg.name || 'Unknown'})
+                          </td>
+                          <td style={{ 
+                            padding: '16px', 
+                            fontFamily: 'monospace',
+                            color: '#94a3b8'
+                          }}>
+                            15
+                          </td>
+                          <td style={{ padding: '16px' }}>
+                            <button
+                              onClick={() => fixIssue(pkg, 'dependency', originalIndex)}
+                              disabled={fixingIssues[`dependency-${originalIndex}`]}
+                              style={{
+                                padding: '6px 12px',
+                                background: 'linear-gradient(135deg, #00f5c3 0%, #00d4ff 100%)',
+                                color: '#000',
+                                border: 'none',
+                                borderRadius: '6px',
+                                fontSize: '12px',
+                                fontWeight: '600',
+                                cursor: fixingIssues[`dependency-${originalIndex}`] ? 'not-allowed' : 'pointer',
+                                opacity: fixingIssues[`dependency-${originalIndex}`] ? '0.5' : '1',
+                                transition: 'all 0.2s ease'
+                              }}
+                              onMouseEnter={(e) => {
+                                if (!fixingIssues[`dependency-${originalIndex}`]) {
+                                  e.target.style.transform = 'translateY(-1px)';
+                                  e.target.style.boxShadow = '0 4px 12px rgba(0, 245, 195, 0.3)';
+                                }
+                              }}
+                              onMouseLeave={(e) => {
+                                e.target.style.transform = 'translateY(0)';
+                                e.target.style.boxShadow = 'none';
+                              }}
+                            >
+                              {fixingIssues[`dependency-${originalIndex}`] ? '🔧 Fixing...' : '🔧 Fix Issue'}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+
+                      {/* Render Code Quality Issues */}
+                      {analysisResult.code_quality_results && analysisResult.code_quality_results
+                        .filter((issue, index) => !isIssueFixed('code_quality', index))
+                        .map((issue, originalIndex) => (
+                        <tr key={`quality-${originalIndex}`}
+                            style={{ 
+                              borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+                              transition: 'background-color 0.2s ease'
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.02)'}
+                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}>
+                          <td style={{ 
+                            padding: '16px', 
+                            fontFamily: 'monospace',
+                            color: '#e2e8f0',
+                            maxWidth: '300px',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap'
+                          }}>
+                            {issue.file || 'Unknown file'}
+                          </td>
+                          <td style={{ padding: '16px' }}>
+                            <span style={{
+                              padding: '4px 8px',
+                              fontSize: '12px',
+                              fontWeight: '600',
+                              borderRadius: '16px',
+                              background: issue.severity === 'Critical' ? 'rgba(220, 38, 38, 0.2)' :
+                                         issue.severity === 'High' ? 'rgba(239, 68, 68, 0.2)' :
+                                         issue.severity === 'Medium' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(107, 114, 128, 0.2)',
+                              color: issue.severity === 'Critical' ? '#fca5a5' :
+                                    issue.severity === 'High' ? '#fca5a5' :
+                                    issue.severity === 'Medium' ? '#fcd34d' : '#9ca3af'
+                            }}>
+                              {issue.severity || 'Low'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '16px', color: '#e2e8f0' }}>
+                            {issue.pattern === 'eval_usage' ? 'Eval Usage' :
+                             issue.pattern === 'local_storage' ? 'Local Storage' :
+                             issue.pattern === 'console_log' ? 'Console Log' :
+                             issue.pattern || issue.description || 'Code Quality Issue'}
+                          </td>
+                          <td style={{ 
+                            padding: '16px', 
+                            fontFamily: 'monospace',
+                            color: '#94a3b8'
+                          }}>
+                            {issue.line || '-'}
+                          </td>
+                          <td style={{ padding: '16px' }}>
+                            <button
+                              onClick={() => fixIssue(issue, 'code_quality', originalIndex)}
+                              disabled={fixingIssues[`code_quality-${originalIndex}`]}
+                              style={{
+                                padding: '6px 12px',
+                                background: 'linear-gradient(135deg, #00f5c3 0%, #00d4ff 100%)',
+                                color: '#000',
+                                border: 'none',
+                                borderRadius: '6px',
+                                fontSize: '12px',
+                                fontWeight: '600',
+                                cursor: fixingIssues[`code_quality-${originalIndex}`] ? 'not-allowed' : 'pointer',
+                                opacity: fixingIssues[`code_quality-${originalIndex}`] ? '0.5' : '1',
+                                transition: 'all 0.2s ease'
+                              }}
+                              onMouseEnter={(e) => {
+                                if (!fixingIssues[`code_quality-${originalIndex}`]) {
+                                  e.target.style.transform = 'translateY(-1px)';
+                                  e.target.style.boxShadow = '0 4px 12px rgba(0, 245, 195, 0.3)';
+                                }
+                              }}
+                              onMouseLeave={(e) => {
+                                e.target.style.transform = 'translateY(0)';
+                                e.target.style.boxShadow = 'none';
+                              }}
+                            >
+                              {fixingIssues[`code_quality-${originalIndex}`] ? '🔧 Fixing...' : '🔧 Fix Issue'}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+
+                      {/* Empty state */}
+                      {(!analysisResult.secret_scan_results || analysisResult.secret_scan_results.length === 0) &&
+                       (!analysisResult.static_analysis_results || analysisResult.static_analysis_results.length === 0) &&
+                       (!analysisResult.dependency_scan_results?.vulnerable_packages || analysisResult.dependency_scan_results.vulnerable_packages.length === 0) &&
+                       (!analysisResult.code_quality_results || analysisResult.code_quality_results.length === 0) && (
+                        <tr>
+                          <td colSpan="5" style={{
+                            padding: '32px',
+                            textAlign: 'center',
+                            color: '#94a3b8',
+                            fontStyle: 'italic'
+                          }}>
+                            ✅ No critical security issues found in this repository
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              
               {/* File Analysis & .gitignore Recommendations */}
               {analysisResult.file_security_scan && (
                 <div className="card">
-                  <h3>📁 File Security Analysis</h3>
+                  <h3>File Security Analysis</h3>
                   <div style={{ display: 'grid', gap: '16px' }}>
                     {analysisResult.file_security_scan.sensitive_files && analysisResult.file_security_scan.sensitive_files.length > 0 && (
                       <div>
                         <h4 style={{ color: '#ef4444', fontSize: '16px', marginBottom: '12px' }}>
-                          🚨 Sensitive Files Found ({analysisResult.file_security_scan.sensitive_files.length})
+                          Sensitive Files Found ({analysisResult.file_security_scan.sensitive_files.length})
                         </h4>
                         <div style={{ display: 'grid', gap: '8px' }}>
                           {analysisResult.file_security_scan.sensitive_files.slice(0, 5).map((file, index) => (
@@ -1041,7 +1570,7 @@ const RepoAnalysisPage = () => {
                               fontFamily: 'monospace',
                               fontSize: '13px'
                             }}>
-                              📄 {safeRender(file)}
+                              {safeRender(file)}
                             </div>
                           ))}
                         </div>
@@ -1051,7 +1580,7 @@ const RepoAnalysisPage = () => {
                     {analysisResult.file_security_scan.excluded_directories && analysisResult.file_security_scan.excluded_directories.length > 0 && (
                       <div>
                         <h4 style={{ color: '#22c55e', fontSize: '16px', marginBottom: '12px' }}>
-                          ✅ Excluded Directories ({analysisResult.file_security_scan.excluded_directories.length})
+                          Excluded Directories ({analysisResult.file_security_scan.excluded_directories.length})
                         </h4>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                           {analysisResult.file_security_scan.excluded_directories.map((dir, index) => (
@@ -1063,7 +1592,7 @@ const RepoAnalysisPage = () => {
                               fontSize: '12px',
                               fontFamily: 'monospace'
                             }}>
-                              📁 {safeRender(dir)}
+                              {safeRender(dir)}
                             </span>
                           ))}
                         </div>
@@ -1073,7 +1602,7 @@ const RepoAnalysisPage = () => {
                     {analysisResult.file_security_scan.gitignore_recommendations && analysisResult.file_security_scan.gitignore_recommendations.length > 0 && (
                       <div>
                         <h4 style={{ color: '#f59e0b', fontSize: '16px', marginBottom: '12px' }}>
-                          💡 GitIgnore Recommendations ({analysisResult.file_security_scan.gitignore_recommendations.length})
+                          GitIgnore Recommendations ({analysisResult.file_security_scan.gitignore_recommendations.length})
                         </h4>
                         <div style={{ 
                           background: 'rgba(245, 158, 11, 0.1)',
@@ -1098,7 +1627,7 @@ const RepoAnalysisPage = () => {
               {/* Recommendations */}
               {analysisResult.recommendations && Array.isArray(analysisResult.recommendations) && analysisResult.recommendations.length > 0 && (
                 <div className="card">
-                  <h3>💡 Security Recommendations ({analysisResult.recommendations.length})</h3>
+                  <h3>Security Recommendations ({analysisResult.recommendations.length})</h3>
                   <p style={{ color: '#a1a1aa', fontSize: '14px', marginBottom: '16px' }}>
                     AI-generated security improvement suggestions:
                   </p>
@@ -1132,7 +1661,7 @@ const RepoAnalysisPage = () => {
                                   borderRadius: '4px',
                                   display: 'inline-block'
                                 }}>
-                                  📁 {String(rec.file)}
+                                  {String(rec.file)}
                                 </div>
                               )}
                             </div>
@@ -1174,7 +1703,7 @@ const RepoAnalysisPage = () => {
                               borderRadius: '6px',
                               marginTop: '8px'
                             }}>
-                              <strong>💡 Suggested Fix:</strong> {String(rec.fix)}
+                              <strong>Suggested Fix:</strong> {String(rec.fix)}
                             </div>
                           )}
                         </div>
@@ -1187,7 +1716,7 @@ const RepoAnalysisPage = () => {
               {/* Secret Scan Results */}
               {analysisResult.secret_scan_results && analysisResult.secret_scan_results.filter((secret, index) => !isIssueFixed('secret', index)).length > 0 && (
                 <div className="card">
-                  <h3>🔐 Secrets Detection ({analysisResult.secret_scan_results.filter((secret, index) => !isIssueFixed('secret', index)).length})</h3>
+                  <h3>Secrets Detection ({analysisResult.secret_scan_results.filter((secret, index) => !isIssueFixed('secret', index)).length})</h3>
                   <p style={{ color: '#a1a1aa', fontSize: '14px', marginBottom: '16px' }}>
                     Potential secrets and sensitive information found in code:
                   </p>
@@ -1222,18 +1751,8 @@ const RepoAnalysisPage = () => {
                             <button
                               onClick={() => fixIssue(secret, 'secret', originalIndex)}
                               disabled={fixingIssues[`secret-${originalIndex}`]}
-                              style={{
-                                background: fixingIssues[`secret-${originalIndex}`] ? '#6b7280' : 'linear-gradient(135deg, #00f5c3 0%, #00d4ff 100%)',
-                                color: fixingIssues[`secret-${originalIndex}`] ? '#fff' : '#000',
-                                border: 'none',
-                                borderRadius: '6px',
-                                padding: '6px 12px',
-                                fontSize: '11px',
-                                fontWeight: '600',
-                                cursor: fixingIssues[`secret-${originalIndex}`] ? 'not-allowed' : 'pointer',
-                                transition: 'all 0.2s ease',
-                                opacity: fixingIssues[`secret-${originalIndex}`] ? 0.6 : 1
-                              }}
+
+                              className='btn btn-secondary'
                             >
                               {fixingIssues[`secret-${originalIndex}`] ? '🔧 Fixing...' : '🔧 Fix Issue'}
                             </button>
@@ -1247,7 +1766,7 @@ const RepoAnalysisPage = () => {
                             color: '#a1a1aa',
                             marginBottom: '8px'
                           }}>
-                            📁 {secret.file}
+                            {secret.file}
                             {secret.line && ` → Line ${secret.line}`}
                           </div>
                         )}
@@ -1275,7 +1794,7 @@ const RepoAnalysisPage = () => {
               {/* Static Analysis Results */}
               {analysisResult.static_analysis_results && analysisResult.static_analysis_results.filter((issue, index) => !isIssueFixed('static_analysis', index)).length > 0 && (
                 <div className="card">
-                  <h3>🔍 Static Analysis ({analysisResult.static_analysis_results.filter((issue, index) => !isIssueFixed('static_analysis', index)).length})</h3>
+                  <h3>Static Analysis ({analysisResult.static_analysis_results.filter((issue, index) => !isIssueFixed('static_analysis', index)).length})</h3>
                   <p style={{ color: '#a1a1aa', fontSize: '14px', marginBottom: '16px' }}>
                     Security vulnerabilities detected through static code analysis:
                   </p>
@@ -1309,18 +1828,7 @@ const RepoAnalysisPage = () => {
                             <button
                               onClick={() => fixIssue(issue, 'static_analysis', originalIndex)}
                               disabled={fixingIssues[`static_analysis-${originalIndex}`]}
-                              style={{
-                                background: fixingIssues[`static_analysis-${originalIndex}`] ? '#6b7280' : 'linear-gradient(135deg, #00f5c3 0%, #00d4ff 100%)',
-                                color: fixingIssues[`static_analysis-${originalIndex}`] ? '#fff' : '#000',
-                                border: 'none',
-                                borderRadius: '6px',
-                                padding: '6px 12px',
-                                fontSize: '11px',
-                                fontWeight: '600',
-                                cursor: fixingIssues[`static_analysis-${originalIndex}`] ? 'not-allowed' : 'pointer',
-                                transition: 'all 0.2s ease',
-                                opacity: fixingIssues[`static_analysis-${originalIndex}`] ? 0.6 : 1
-                              }}
+                              className='btn btn-secondary'
                             >
                               {fixingIssues[`static_analysis-${originalIndex}`] ? '🔧 Fixing...' : '🔧 Fix Issue'}
                             </button>
@@ -1334,7 +1842,7 @@ const RepoAnalysisPage = () => {
                             color: '#a1a1aa',
                             marginBottom: '8px'
                           }}>
-                            📁 {safeRender(issue.filename)}
+                            {safeRender(issue.filename)}
                             {issue.line_number && ` → Line ${safeRender(issue.line_number)}`}
                           </div>
                         )}
@@ -1353,7 +1861,7 @@ const RepoAnalysisPage = () => {
               {/* Code Quality Issues */}
               {analysisResult.code_quality_results && analysisResult.code_quality_results.filter((issue, index) => !isIssueFixed('code_quality', index)).length > 0 && (
                 <div className="card">
-                  <h3>🎯 Code Quality Issues ({analysisResult.code_quality_results.filter((issue, index) => !isIssueFixed('code_quality', index)).length})</h3>
+                  <h3>Code Quality Issues ({analysisResult.code_quality_results.filter((issue, index) => !isIssueFixed('code_quality', index)).length})</h3>
                   <p style={{ color: '#a1a1aa', fontSize: '14px', marginBottom: '16px' }}>
                     Insecure coding patterns and quality issues detected:
                   </p>
@@ -1386,7 +1894,7 @@ const RepoAnalysisPage = () => {
                                 borderRadius: '4px',
                                 display: 'inline-block'
                               }}>
-                                📁 {safeRender(issue.file)}
+                                {safeRender(issue.file)}
                                 {issue.line && ` → Line ${safeRender(issue.line)}`}
                               </div>
                             )}
@@ -1407,18 +1915,7 @@ const RepoAnalysisPage = () => {
                             <button
                               onClick={() => fixIssue(issue, 'code_quality', originalIndex)}
                               disabled={fixingIssues[`code_quality-${originalIndex}`]}
-                              style={{
-                                background: fixingIssues[`code_quality-${originalIndex}`] ? '#6b7280' : 'linear-gradient(135deg, #00f5c3 0%, #00d4ff 100%)',
-                                color: fixingIssues[`code_quality-${originalIndex}`] ? '#fff' : '#000',
-                                border: 'none',
-                                borderRadius: '6px',
-                                padding: '8px 12px',
-                                fontSize: '12px',
-                                fontWeight: '600',
-                                cursor: fixingIssues[`code_quality-${originalIndex}`] ? 'not-allowed' : 'pointer',
-                                transition: 'all 0.2s ease',
-                                opacity: fixingIssues[`code_quality-${originalIndex}`] ? 0.6 : 1
-                              }}
+                              className='btn btn-secondary'
                             >
                               {fixingIssues[`code_quality-${originalIndex}`] ? '🔧 Fixing...' : '🔧 Fix Issue'}
                             </button>
@@ -1433,7 +1930,7 @@ const RepoAnalysisPage = () => {
                               marginBottom: '6px',
                               fontWeight: '500'
                             }}>
-                              🔍 Code Found:
+                              Code Found:
                             </div>
                             <div style={{
                               background: 'rgba(0, 0, 0, 0.4)',
@@ -1462,11 +1959,11 @@ const RepoAnalysisPage = () => {
               {/* Dependency Vulnerabilities */}
               {analysisResult.dependency_scan_results?.vulnerable_packages && analysisResult.dependency_scan_results.vulnerable_packages.filter((pkg, index) => !isIssueFixed('dependency', index)).length > 0 && (
                 <div className="card">
-                  <h3>📦 Vulnerable Dependencies ({analysisResult.dependency_scan_results.vulnerable_packages.filter((pkg, index) => !isIssueFixed('dependency', index)).length})</h3>
+                  <h3>Vulnerable Dependencies ({analysisResult.dependency_scan_results.vulnerable_packages.filter((pkg, index) => !isIssueFixed('dependency', index)).length})</h3>
                   <p style={{ color: '#a1a1aa', fontSize: '14px', marginBottom: '16px' }}>
                     Dependencies with known security vulnerabilities:
                   </p>
-                  <div style={{ display: 'grid', gap: '16px' }}>
+                  <div style={{ display: 'grid', gap: '16px'}}>
                     {analysisResult.dependency_scan_results.vulnerable_packages
                       .map((pkg, index) => ({ pkg, originalIndex: index }))
                       .filter(({ originalIndex }) => !isIssueFixed('dependency', originalIndex))
@@ -1508,7 +2005,7 @@ const RepoAnalysisPage = () => {
                                 borderRadius: '4px',
                                 display: 'inline-block'
                               }}>
-                                📄 {pkg.file}
+                                {pkg.file}
                               </div>
                             )}
                           </div>
@@ -1528,18 +2025,7 @@ const RepoAnalysisPage = () => {
                             <button
                               onClick={() => fixIssue(pkg, 'dependency', originalIndex)}
                               disabled={fixingIssues[`dependency-${originalIndex}`]}
-                              style={{
-                                background: fixingIssues[`dependency-${originalIndex}`] ? '#6b7280' : 'linear-gradient(135deg, #00f5c3 0%, #00d4ff 100%)',
-                                color: fixingIssues[`dependency-${originalIndex}`] ? '#fff' : '#000',
-                                border: 'none',
-                                borderRadius: '6px',
-                                padding: '8px 12px',
-                                fontSize: '12px',
-                                fontWeight: '600',
-                                cursor: fixingIssues[`dependency-${originalIndex}`] ? 'not-allowed' : 'pointer',
-                                transition: 'all 0.2s ease',
-                                opacity: fixingIssues[`dependency-${originalIndex}`] ? 0.6 : 1
-                              }}
+                              className='btn btn-secondary'
                             >
                               {fixingIssues[`dependency-${originalIndex}`] ? '🔧 Fixing...' : '🔧 Fix Issue'}
                             </button>
@@ -1556,14 +2042,14 @@ const RepoAnalysisPage = () => {
                             padding: '10px',
                             borderRadius: '6px'
                           }}>
-                            ⚠️ <strong>Advisory:</strong> {pkg.advisory}
+                            <strong>Advisory:</strong> {pkg.advisory}
                           </div>
                         )}
 
                         {(pkg.package || pkg.name) && (
                           <div style={{ marginTop: '12px' }}>
                             <div style={{ fontSize: '12px', color: '#a1a1aa', marginBottom: '4px' }}>
-                              🛠️ Quick Fix:
+                              Quick Fix:
                             </div>
                             <div style={{
                               background: 'rgba(0, 0, 0, 0.4)',
@@ -1586,6 +2072,8 @@ const RepoAnalysisPage = () => {
                   </div>
                 </div>
               )}
+         
+
             </div>
 
             {/* --- ALWAYS VISIBLE AI CHAT SIDEBAR --- */}
@@ -1594,7 +2082,8 @@ const RepoAnalysisPage = () => {
               top: '120px', // Moved further down to avoid overlap with buttons
               right: '20px',
               width: window.innerWidth < 768 ? '90vw' : 'min(450px, 40vw)',
-              height: '60vh', // Reduced height to 60% of viewport
+              height: '85vh', // Reduced height to 60% of viewport
+              width: '40vh',
               background: 'linear-gradient(135deg, rgba(10, 10, 10, 0.98) 0%, rgba(20, 20, 20, 0.98) 100%)',
               backdropFilter: 'blur(12px)',
               border: '1px solid rgba(0, 245, 195, 0.2)',
@@ -1613,30 +2102,15 @@ const RepoAnalysisPage = () => {
                   position: 'relative'
                 }}>
                   
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
-                    <div style={{
-                      width: '32px',
-                      height: '32px',
-                      background: 'linear-gradient(135deg, #00f5c3 0%, #00d4ff 100%)',
-                      borderRadius: '10px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: '16px'
-                    }}>
-                      🤖
-                    </div>
+                  <div >
                     <div>
                       <h3 style={{ margin: '0', color: '#fff', fontSize: '16px', fontWeight: '700' }}>
                         AI Security Advisor
                       </h3>
-                      <p style={{ margin: '2px 0 0 0', color: '#a1a1aa', fontSize: '11px' }}>
-                        Powered by RAG + Gemini AI
-                      </p>
                     </div>
                   </div>
                   <p style={{ margin: '0', color: '#b1b5c3', fontSize: '10px', fontStyle: 'italic' }}>
-                    💡 Ask about security findings & get fix recommendations
+                    Ask about security findings & get fix recommendations
                   </p>
                 </div>
 
@@ -1651,7 +2125,7 @@ const RepoAnalysisPage = () => {
                   alignItems: 'center',
                   gap: '4px'
                 }}>
-                  💡 Quick Questions
+                   Quick Questions
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                   {[
@@ -1756,7 +2230,7 @@ const RepoAnalysisPage = () => {
                             fontSize: '10px',
                             fontWeight: '600'
                           }}>
-                            🤖 AI Assistant
+                            AI Assistant
                           </div>
                         )}
                         <div style={{ 
@@ -1845,24 +2319,7 @@ const RepoAnalysisPage = () => {
                   <button 
                     onClick={askAI} 
                     disabled={!analysisResult || isAskingAI || !currentQuestion.trim()}
-                    style={{
-                      background: currentQuestion.trim() && !isAskingAI ? 
-                        'linear-gradient(135deg, #00f5c3 0%, #00d4ff 100%)' : 
-                        'rgba(255, 255, 255, 0.1)',
-                      border: 'none',
-                      borderRadius: '8px',
-                      padding: '10px 16px',
-                      color: currentQuestion.trim() && !isAskingAI ? '#000' : '#71717a',
-                      fontWeight: '600',
-                      cursor: currentQuestion.trim() && !isAskingAI ? 'pointer' : 'not-allowed',
-                      fontSize: '12px',
-                      minWidth: '60px',
-                      transition: 'all 0.2s ease',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '6px'
-                    }}
+                    className='btn btn-secondary'
                     onMouseEnter={(e) => {
                       if (currentQuestion.trim() && !isAskingAI) {
                         e.target.style.transform = 'translateY(-1px)';
@@ -1899,10 +2356,10 @@ const RepoAnalysisPage = () => {
                   textAlign: 'center',
                   opacity: '0.7'
                 }}>
-                  💡 Be specific about vulnerabilities
+                  Be specific about vulnerabilities
                 </div>
               </div>
-              </div>
+            </div>
           </>
         )}
       </div>
