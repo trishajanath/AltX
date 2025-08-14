@@ -1,34 +1,34 @@
 # Core FastAPI and Web Framework
-fastapi==0.111.0
-uvicorn==0.30.1
-requests==2.32.3
-beautifulsoup4==4.12.3
-pydantic==2.7.3
-httpx==0.27.0
+fastapi
+uvicorn
+requests
+beautifulsoup4
+pydantic
+httpx
 # AI and Language Models
-google-generativeai==0.5.4
+google-generativeai
 
 # Environment and Configuration
-python-dotenv==1.0.1
+python-dotenv
 # GitHub Integration
-PyGithub==2.3.0
+PyGithub
 
 # Security Scanning Tools
-bandit==1.7.8
-safety==3.2.0
+bandit
+safety
 
 # Network and DNS
-dnspython==2.6.1
+dnspython
 # Git Operations
-GitPython==3.1.43
+GitPython
 
 # RAG Database and Vector Store
-langchain==0.2.3
-langchain-community==0.2.3
-langchain-chroma==0.2.3
-langchain-huggingface==0.3.1
-sentence-transformers==2.7.0
-chromadb==0.5.0
+langchain
+langchain-community
+langchain-chroma
+langchain-huggingface
+sentence-transformers
+chromadb
 tensorflow==2.15.0
 transformers==4.36.0
 tf-keras==2.15.0
