@@ -7,20 +7,28 @@ import SecurityScanPage from './components/SecurityScanPage';
 import ReportPage from './components/ReportPage';
 import RepoAnalysisPage from './components/RepoAnalysisPage';
 import ProjectBuilder from './components/ProjectBuilder';
+import LandingPage from './components/LandingPage';
+import SignupPage from './components/SignupPage';
+import LoginPage from './components/LoginPage';
 
 function Navigation() {
   const location = useLocation();
-  const activeTab = location.pathname === '/' ? 'home' : location.pathname.slice(1);
+  const activeTab = location.pathname === '/' ? 'landing' : location.pathname.slice(1);
+  
+  // Don't show navigation on landing, login, or signup pages
+  if (location.pathname === '/' || location.pathname === '/login' || location.pathname === '/signup') {
+    return null;
+  }
 
   return (
     <nav className="nav">
-      <Link to="/" className="logo">
-        AltX
+      <Link to="/home" className="logo">
+        Xverta
       </Link>
       <ul className="nav-links">
         <li>
           <Link 
-            to="/"
+            to="/home"
             className={`nav-link ${activeTab === 'home' ? 'active' : ''}`}
           >
             Home
@@ -80,7 +88,10 @@ function App() {
         <Navigation />
         <div className="page-container">
           <Routes>
-            <Route path="/" element={<div className="page"><HomePage /></div>} />
+            <Route path="/" element={<div className="page"><LandingPage /></div>} />
+            <Route path="/login" element={<div className="page"><LoginPage /></div>} />
+            <Route path="/signup" element={<div className="page"><SignupPage /></div>} />
+            <Route path="/home" element={<div className="page"><HomePage /></div>} />
             <Route path="/build" element={<div className="page"><ProjectBuilder /></div>} />
             <Route path="/deploy" element={<div className="page"><DeployPage setScanResult={setScanResult} /></div>} />
             <Route path="/security" element={<div className="page"><SecurityScanPage setScanResult={setScanResult} /></div>} />

@@ -28,8 +28,8 @@ const HomePage = () => {
         { icon: <Shield size={24} />, title: 'Security Analysis', content: 'Comprehensive security scanning for any website. Get detailed vulnerability reports with actionable insights.', page: '/security' },
         { icon: <GitBranch size={24} />, title: 'Repository Analysis', content: 'Deep security analysis of GitHub repositories including secret detection and dependency scanning.', page: '/repo-analysis' },
         { icon: <BrainCircuit size={24} />, title: 'AI Security Advisor', content: 'Chat with our intelligent AI for personalized recommendations, threat analysis, and real-time guidance.', page: '/security' },
-        { icon: <BarChart3 size={24} />, title: 'Real-time Monitoring', content: 'Continuous monitoring with instant alerts, performance metrics, and security status updates for all projects.', page: '/' },
-        { icon: <Zap size={24} />, title: 'Edge Deployment', content: 'Global edge network deployment for maximum performance, automatic scaling, and zero-downtime updates.', page: '/' },
+        { icon: <BarChart3 size={24} />, title: 'Real-time Monitoring', content: 'Continuous monitoring with instant alerts, performance metrics, and security status updates for all projects.', page: '/home' },
+        { icon: <Zap size={24} />, title: 'Edge Deployment', content: 'Global edge network deployment for maximum performance, automatic scaling, and zero-downtime updates.', page: '/home' },
     ];
 
     return (

@@ -75,7 +75,7 @@ const ProjectBuilder = () => {
       }
 
       // Call the actual backend API
-      const response = await fetch('http://44.214.74.196:5000/generate-project', {
+      const response = await fetch('http://localhost:8000/generate-project', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
