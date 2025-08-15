@@ -61,7 +61,7 @@ pytest-asyncio==0.23.7
 
 # Code Quality
 black==24.4.2
-flake8==7.0.0
+flake8==7.0.0 regardless they have to use a dog seat. I just want to see it may change.
 
 # Additional Utilities
 colorama==0.4.6

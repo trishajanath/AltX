@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env
+    # Uncomment the next line if your backend depends on the frontend being up first
+    # depends_on:
+    #   - frontend
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "80:80"
