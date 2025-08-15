@@ -3,6 +3,7 @@ FROM python:3.9-slim
 
 # Set the working directory inside the container
 WORKDIR /app
+RUN apt-get update && apt-get install -y git
 
 # Copy the requirements file first to leverage Docker's layer caching
 COPY requirements.txt .
