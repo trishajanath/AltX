@@ -16,7 +16,7 @@ const OwaspMappingSection = ({ scanResult }) => {
       try {
         setIsLoading(true);
         
-        const response = await fetch('http://localhost:8000/owasp-mapping', {
+        const response = await fetch('http://44.214.74.196:5000/owasp-mapping', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -155,8 +155,8 @@ const OwaspMappingCardSection = ({ scanResult }) => {
     const fetchOwaspMapping = async () => {
       try {
         setIsLoading(true);
-        
-        const response = await fetch('http://localhost:8000/owasp-mapping', {
+
+        const response = await fetch('http://44.214.74.196:5000/owasp-mapping', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -462,7 +462,7 @@ const ReportPage = ({ scanResult }) => {
         return;
       }
 
-      const response = await fetch('http://localhost:8000/ai-chat', {
+      const response = await fetch('http://44.214.74.196:5000/ai-chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

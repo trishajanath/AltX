@@ -50,7 +50,7 @@ Ready to start? Enter a URL above and select your preferred analysis model!`,
     setIsChatLoading(true);
 
     try {
-      const response = await fetch('http://localhost:8000/ai-chat', {
+      const response = await fetch('http://44.214.74.196:5000/ai-chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -136,7 +136,7 @@ Ready to start? Enter a URL above and select your preferred analysis model!`,
       // Connect to backend for real security scanning
       let result;
       try {
-        const response = await fetch('http://localhost:8000/scan', {
+        const response = await fetch('http://44.214.74.196:5000/scan', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -171,7 +171,7 @@ Ready to start? Enter a URL above and select your preferred analysis model!`,
         
       } catch (error) {
         setScanLogs(prev => [...prev, `❌ Backend connection failed: ${error.message}`]);
-        setScanLogs(prev => [...prev, 'Please ensure the backend server is running on http://localhost:8000']);
+        setScanLogs(prev => [...prev, 'Please ensure the backend server is running on http://44.214.74.196:5000']);
         console.error('Scan error:', error);
         return;
       }

@@ -32,7 +32,7 @@ const DeployPage = ({ setScanResult }) => {
       // Step 1: Trigger manual deployment
       setDeployLogs(prev => [...prev, '📡 Initiating deployment...']);
       
-      const deployResponse = await fetch('http://localhost:8000/api/deploy', {
+      const deployResponse = await fetch('http://44.214.74.196:5000/api/deploy', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

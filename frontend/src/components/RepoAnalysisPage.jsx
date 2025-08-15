@@ -96,7 +96,7 @@ const RepoAnalysisPage = () => {
     setChatMessages([]); // Reset chat on new analysis
 
     try {
-      const response = await fetch('http://localhost:8000/analyze-repo', {
+      const response = await fetch('http://44.214.74.196:5000/analyze-repo', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -170,7 +170,7 @@ const RepoAnalysisPage = () => {
       let errorMsg = 'Failed to analyze repository. ';
       
       if (err.name === 'TypeError' && err.message.includes('fetch')) {
-        errorMsg += 'Unable to connect to analysis server. Please ensure the backend is running on http://localhost:8000';
+        errorMsg += 'Unable to connect to analysis server. Please ensure the backend is running on http://44.214.74.196:5000';
       } else if (err.message.includes('JSON')) {
         errorMsg += 'Server returned invalid response. The analysis may have partially completed.';
       } else if (err.message.includes('network') || err.message.includes('ECONNREFUSED')) {
@@ -240,7 +240,7 @@ const RepoAnalysisPage = () => {
     setCurrentQuestion('');
 
     try {
-      const response = await fetch('http://localhost:8000/ai-chat', {
+      const response = await fetch('http://44.214.74.196:5000/ai-chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -288,7 +288,7 @@ const RepoAnalysisPage = () => {
       // We pass the question directly to askAI logic
       const ask = async () => {
           try {
-              const response = await fetch('http://localhost:8000/ai-chat', {
+              const response = await fetch('http://44.214.74.196:5000/ai-chat', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
@@ -460,7 +460,7 @@ const RepoAnalysisPage = () => {
         category: issue.category || issueType
       };
 
-      const response = await fetch('http://localhost:8000/propose-fix', {
+      const response = await fetch('http://44.214.74.196:5000/propose-fix', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
