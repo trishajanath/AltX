@@ -14,6 +14,8 @@ FROM nginx:stable-alpine
 # Copy the final, built files from the 'builder' stage
 COPY --from=builder /app/dist /usr/share/nginx/html
 
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
 # Tell Docker that the container listens on port 80
 EXPOSE 80
 

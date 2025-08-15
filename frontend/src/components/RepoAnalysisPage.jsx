@@ -2083,7 +2083,6 @@ const RepoAnalysisPage = () => {
               right: '20px',
               width: window.innerWidth < 768 ? '90vw' : 'min(450px, 40vw)',
               height: '85vh', // Reduced height to 60% of viewport
-              width: '40vh',
               background: 'linear-gradient(135deg, rgba(10, 10, 10, 0.98) 0%, rgba(20, 20, 20, 0.98) 100%)',
               backdropFilter: 'blur(12px)',
               border: '1px solid rgba(0, 245, 195, 0.2)',
