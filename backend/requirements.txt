@@ -5,11 +5,13 @@ requests
 beautifulsoup4
 pydantic
 httpx
+
 # AI and Language Models
 google-generativeai
 
 # Environment and Configuration
 python-dotenv
+
 # GitHub Integration
 PyGithub
 
@@ -19,6 +21,7 @@ safety
 
 # Network and DNS
 dnspython
+
 # Git Operations
 GitPython
 
@@ -28,10 +31,6 @@ langchain-community
 langchain-chroma
 langchain-huggingface
 sentence-transformers
-chromadb
-tensorflow==2.15.0
-transformers==4.36.0
-tf-keras==2.15.0
 
 # Document Processing
 pypdf==4.2.0
@@ -43,6 +42,7 @@ tiktoken==0.7.0
 # Data Processing and Analysis
 pandas==2.2.2
 numpy==1.26.4
+
 # Async Operations
 aiofiles==23.2.1
 aiohttp==3.9.5
@@ -60,7 +60,6 @@ pytest==8.2.2
 pytest-asyncio==0.23.7
 
 # Code Quality
-black
 black==24.4.2
 flake8==7.0.0
 
