@@ -74,16 +74,19 @@ class WebsiteScan:
 class ScanRequest(BaseModel):
     url: str
     model_type: str = 'fast'
+    model_config = {'protected_namespaces': ()}
 
 class RepoAnalysisRequest(BaseModel):
     repo_url: str
     model_type: str = 'smart'
     deep_scan: bool = True
+    model_config = {'protected_namespaces': ()}
 
 class OWASPMappingRequest(BaseModel):
     url: str
     repo_url: Optional[str] = None
     model_type: str = "fast"
+    model_config = {'protected_namespaces': ()}
 
 class FixRequest(BaseModel):
     repo_url: str

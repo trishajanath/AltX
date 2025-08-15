@@ -25,45 +25,19 @@ dnspython
 # Git Operations
 GitPython
 
-# RAG Database and Vector Store
+# Langchain and related
 langchain
 langchain-community
 langchain-chroma
 langchain-huggingface
+langchain-google-genai
+
+# NLP and ML
 sentence-transformers
-
-# Document Processing
-pypdf==4.2.0
-python-docx==1.1.2
-
-# Token Management
-tiktoken==0.7.0
-
-# Data Processing and Analysis
-pandas==2.2.2
-numpy==1.26.4
-
-# Async Operations
-aiofiles==23.2.1
-aiohttp==3.9.5
-
-# Text Processing
-nltk==3.8.1
 regex==2024.5.15
 
-# Database (if needed for future features)
-sqlalchemy==2.0.30
-alembic==1.13.1
-
-# Testing (optional but recommended)
+# Testing and Linting
 pytest==8.2.2
 pytest-asyncio==0.23.7
-
-# Code Quality
 black==24.4.2
-flake8==7.0.0 regardless they have to use a dog seat. I just want to see it may change.
-
-# Additional Utilities
-colorama==0.4.6
-tqdm==4.66.4
-rich==13.7.1
+flake8==7.0.0
