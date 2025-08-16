@@ -1,4 +1,5 @@
 import os
+import secrets
 import shutil
 import git
 import requests
@@ -2297,7 +2298,7 @@ async def github_login():
         github_auth_url = (
             f"https://github.com/login/oauth/authorize"
             f"?client_id={github_client_id}"
-            f"&redirect_uri={os.getenv('GITHUB_CALLBACK_URL', 'https://legal-actively-glider.ngrok-free.app/auth/github/callback')}"  # Updated fallback URL
+            f"&redirect_uri={os.getenv('GITHUB_CALLBACK_URL', 'http://localhost:8000/auth/github/callback')}"
             f"&scope=repo,user:email"
             f"&state={state}"
             f"&allow_signup=true"
@@ -2311,8 +2312,113 @@ async def github_login():
         print(f"❌ Login initiation error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Login failed: {str(e)}")
 
+from fastapi import Request
 
+@app.get("/auth/google/callback")
+async def google_callback(request: Request):
+    """
+    Handle Google OAuth callback after user authorization
+    """
+    try:
+        # Get the authorization code from the query parameters
+        code = request.query_params.get("code")
+        state = request.query_params.get("state")
 
+        if not code:
+            print("❌ No authorization code received from Google")
+            return RedirectResponse(url="/?error=authorization_failed", status_code=302)
+
+        print(f"✅ Received Google authorization code: {code[:10]}...")
+
+        # Exchange authorization code for access token
+        token_url = "https://oauth2.googleapis.com/token"
+        token_data = {
+            "client_id": os.getenv("GOOGLE_CLIENT_ID"),
+            "client_secret": os.getenv("GOOGLE_CLIENT_SECRET"),
+            "code": code,
+            "redirect_uri": os.getenv("GOOGLE_CALLBACK_URL", "http://localhost:8000/auth/google/callback"),
+            "grant_type": "authorization_code"
+        }
+        token_headers = {
+            "Content-Type": "application/x-www-form-urlencoded"
+        }
+
+        print("🔄 Exchanging code for access token...")
+        token_response = requests.post(token_url, data=token_data, headers=token_headers)
+
+        if token_response.status_code != 200:
+            print(f"❌ Token exchange failed: {token_response.text}")
+            return RedirectResponse(url="/?error=token_exchange_failed", status_code=302)
+
+        token_info = token_response.json()
+        access_token = token_info.get("access_token")
+
+        if not access_token:
+            print(f"❌ No access token received: {token_info}")
+            return RedirectResponse(url="/?error=no_access_token", status_code=302)
+
+        print("✅ Access token received successfully")
+
+        # Get user information
+        user_info_url = "https://www.googleapis.com/oauth2/v2/userinfo"
+        user_headers = {
+            "Authorization": f"Bearer {access_token}"
+        }
+        user_response = requests.get(user_info_url, headers=user_headers)
+
+        if user_response.status_code != 200:
+            print(f"❌ Failed to get user info: {user_response.text}")
+            return RedirectResponse(url="/?error=user_info_failed", status_code=302)
+
+        user_info = user_response.json()
+        email = user_info.get("email", "unknown")
+        name = user_info.get("name", "unknown")
+        picture = user_info.get("picture", "")
+
+        print(f"✅ User authenticated: {email} ({name})")
+
+        # Redirect to frontend with success and user info
+        redirect_url = f"/?auth=success&user={email}&name={name}&avatar={picture}"
+        print(f"🚀 Redirecting user to: {redirect_url}")
+
+        return RedirectResponse(url=redirect_url, status_code=302)
+
+    except Exception as e:
+        print(f"❌ OAuth callback error: {str(e)}")
+        return RedirectResponse(url=f"/?error=callback_failed&message={str(e)}", status_code=302)
+@app.get("/auth/google/login")
+async def google_login():
+    """
+    Initiate Google OAuth login
+    Redirects user to Google's OAuth consent screen
+    """
+    try:
+        google_client_id = os.getenv("GOOGLE_CLIENT_ID")
+        google_callback_url = os.getenv("GOOGLE_CALLBACK_URL", "http://localhost:8000/auth/google/callback")
+        if not google_client_id:
+            raise HTTPException(status_code=500, detail="Google Client ID not configured")
+
+        # Generate a random state parameter for security
+        state = secrets.token_urlsafe(32)
+
+        # Google OAuth authorization URL
+        google_auth_url = (
+            "https://accounts.google.com/o/oauth2/v2/auth"
+            f"?client_id={google_client_id}"
+            f"&redirect_uri={google_callback_url}"
+            "&response_type=code"
+            "&scope=openid%20email%20profile"
+            f"&state={state}"
+            "&access_type=offline"
+            "&prompt=consent"
+        )
+
+        print(f"🔗 Redirecting to Google OAuth: {google_auth_url}")
+        return RedirectResponse(url=google_auth_url, status_code=302)
+
+    except Exception as e:
+        print(f"❌ Google login initiation error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Google login failed: {str(e)}")
 @app.get("/auth/status")
 async def auth_status():
     """
@@ -2322,7 +2428,7 @@ async def auth_status():
         "github_app_configured": bool(os.getenv("GITHUB_APP_ID")),
         "github_client_id_configured": bool(os.getenv("GITHUB_CLIENT_ID")),  # Added
         "github_client_secret_configured": bool(os.getenv("GITHUB_CLIENT_SECRET")),
-        "callback_url": os.getenv("GITHUB_CALLBACK_URL", "https://509734077728.ngrok-free.app/auth/github/callback"),
+        "callback_url": os.getenv("GITHUB_CALLBACK_URL", "http://localhost:8000/auth/github/callback"),
         "login_url": "/auth/github/login",
         "timestamp": datetime.now().isoformat()
     }
@@ -2374,7 +2480,7 @@ async def manual_deploy(request: dict):
                 "owner": owner,
                 "url": repo_url
             },
-            "deployment_url": f"https://legal-actively-glider.ngrok-free.app/{repo_name}",
+            "deployment_url": f"http://localhost:8000/{repo_name}",
             "timestamp": datetime.now().isoformat()
         }
         

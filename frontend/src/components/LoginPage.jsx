@@ -347,10 +347,18 @@ const LoginPage = () => {
                 </div>
 
                 <div className="social-login">
-                    <button className="social-button">
+                    
+                    <button
+                        className="social-button"
+                        onClick={() => window.location.href = "http://localhost:8000/auth/google/login"}
+                    >
                         Continue with Google
                     </button>
-                    <button className="social-button">
+
+                    <button
+                        className="social-button"
+                        onClick={() => window.location.href = "http://localhost:8000/auth/github/login"}
+                    >
                         Continue with GitHub
                     </button>
                 </div>
