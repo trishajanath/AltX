@@ -11,73 +11,7 @@ import LandingPage from './components/LandingPage';
 import SignupPage from './components/SignupPage';
 import LoginPage from './components/LoginPage';
 
-function Navigation() {
-  const location = useLocation();
-  const activeTab = location.pathname === '/' ? 'landing' : location.pathname.slice(1);
-  
-  // Don't show navigation on landing, login, or signup pages
-  if (location.pathname === '/' || location.pathname === '/login' || location.pathname === '/signup') {
-    return null;
-  }
 
-  return (
-    <nav className="nav">
-      <Link to="/home" className="logo">
-        Xverta
-      </Link>
-      <ul className="nav-links">
-        <li>
-          <Link 
-            to="/home"
-            className={`nav-link ${activeTab === 'home' ? 'active' : ''}`}
-          >
-            Home
-          </Link>
-        </li>
-        <li>
-          <Link 
-            to="/build"
-            className={`nav-link ${activeTab === 'build' ? 'active' : ''}`}
-          >
-            Build Apps
-          </Link>
-        </li>
-        <li>
-          <Link 
-            to="/deploy"
-            className={`nav-link ${activeTab === 'deploy' ? 'active' : ''}`}
-          >
-            Deploy
-          </Link>
-        </li>
-        <li>
-          <Link 
-            to="/security"
-            className={`nav-link ${activeTab === 'security' ? 'active' : ''}`}
-          >
-            Security Scan
-          </Link>
-        </li>
-        <li>
-          <Link 
-            to="/repo-analysis"
-            className={`nav-link ${activeTab === 'repo-analysis' ? 'active' : ''}`}
-          >
-            Repository Analysis
-          </Link>
-        </li>
-        <li>
-          <Link 
-            to="/report"
-            className={`nav-link ${activeTab === 'report' ? 'active' : ''}`}
-          >
-            Reports
-          </Link>
-        </li>
-      </ul>
-    </nav>
-  );
-}
 
 function App() {
   const [scanResult, setScanResult] = useState(null);
@@ -85,7 +19,7 @@ function App() {
   return (
     <Router>
       <div className="App">
-        <Navigation />
+  {/* Navigation removed: sidebar/menu is now handled in HomePage.jsx */}
         <div className="page-container">
           <Routes>
             <Route path="/" element={<div className="page"><LandingPage /></div>} />

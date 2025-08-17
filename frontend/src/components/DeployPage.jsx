@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { ArrowRight } from 'lucide-react';
 import PageWrapper from './PageWrapper';
 import usePreventZoom from './usePreventZoom';
+
+
 const DeployPage = ({ setScanResult }) => {
   usePreventZoom();
   const [repoUrl, setRepoUrl] = useState('');
@@ -107,7 +109,7 @@ const DeployPage = ({ setScanResult }) => {
         {`
           :root {
             --primary-green: #00f5c3;
-            --background-dark: #0a0a0a;
+            --background-dark: #000;
             --card-bg: rgba(26, 26, 26, 0.5);
             --card-bg-hover: rgba(36, 36, 36, 0.7);
             --card-border: rgba(255, 255, 255, 0.1);
@@ -141,6 +143,11 @@ const DeployPage = ({ setScanResult }) => {
             text-align: center;
             padding: 5rem 0;
           }
+          .hero-title, .hero-title-highlight, .hero-subtitle, .summary-item-title, .feature-title {
+            font-family: 'Chakra Petch', sans-serif !important;
+            color: #fff !important;
+            text-shadow: none !important;
+          }
           .hero-title {
             font-size: 3rem; /* Adjusted for better mobile view */
             font-weight: 900;
@@ -161,14 +168,15 @@ const DeployPage = ({ setScanResult }) => {
           
           /* --- Main Deployment Card --- */
           .deploy-card {
-            background-color: var(--card-bg);
-            border: 1px solid var(--card-border);
+            background-color: transparent;
+            border: 1px solid rgba(255,255,255,0.08);
             border-radius: 1rem;
             padding: 2rem;
             margin-top: 2.5rem;
             width: 100%;
             max-width: 500px;
-            backdrop-filter: blur(4px);
+            backdrop-filter: blur(1px);
+            box-shadow: none;
           }
           .deploy-card h3 {
             font-size: 1.5rem;
@@ -308,20 +316,20 @@ const DeployPage = ({ setScanResult }) => {
           }
 
           /* --- Features Section --- */
-          .features-grid {
-            display: grid;
-            grid-template-columns: repeat(1, 1fr);
-            gap: 2rem;
-            margin-top: 5rem;
-          }
           .feature-card {
-            background-color: var(--card-bg);
-            backdrop-filter: blur(4px);
-            border: 1px solid var(--card-border);
+            background-color: transparent;
+            border: 1px solid rgba(255,255,255,0.08);
             border-radius: 1rem;
-            padding: 2rem;
+            padding: 1.5rem;
             display: flex;
             flex-direction: column;
+            min-height: 220px;
+            box-shadow: none;
+            transition: box-shadow 0.3s ease, transform 0.3s ease;
+            margin-bottom: 1.5rem;
+            position: relative;
+            overflow: hidden;
+          }
             align-items: flex-start;
             gap: 1rem;
             transition: all 0.3s ease;

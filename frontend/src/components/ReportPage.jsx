@@ -1351,6 +1351,10 @@ const ReportPage = ({ scanResult }) => {
                           <ChatResponseFormatter 
                             message={chat.message}
                             type={chat.type}
+                          /> key={index} style={{ marginBottom: '20px', fontSize: '15px', lineHeight: '1.5' }}
+                          <ChatResponseFormatter 
+                            message={chat.message}
+                            type={chat.type}
                           />
                         </div>
                       ))

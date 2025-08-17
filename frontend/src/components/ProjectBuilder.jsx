@@ -36,6 +36,10 @@ const ProjectBuilder = () => {
   const [techStack, setTechStack] = useState('auto');
   const [projectType, setProjectType] = useState('web-app');
   const [complexity, setComplexity] = useState('medium');
+  const [fileTree, setFileTree] = useState([]);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [fileContent, setFileContent] = useState('');
+  const [previewUrl, setPreviewUrl] = useState('');
   const textareaRef = useRef(null);
 
   // Auto-resize textarea
@@ -93,6 +97,20 @@ const ProjectBuilder = () => {
       if (data.success) {
         setBuildProgress(prev => [...prev, steps[steps.length - 1]]);
         setGeneratedProject(data.project);
+
+        // Fetch file tree
+        const treeRes = await fetch(`http://localhost:8000/project-file-tree?project_name=${encodeURIComponent(data.project.name)}`);
+        const treeData = await treeRes.json();
+        if (treeData.success) {
+          setFileTree(treeData.tree || []);
+        }
+
+        // Fetch preview URL
+        const previewRes = await fetch(`http://localhost:8000/project-preview-url?project_name=${encodeURIComponent(data.project.name)}`);
+        const previewData = await previewRes.json();
+        if (previewData.success) {
+          setPreviewUrl(previewData.url);
+        }
       } else {
         throw new Error(data.error || 'Project generation failed');
       }
@@ -106,10 +124,14 @@ const ProjectBuilder = () => {
   };
 
   const resetBuilder = () => {
-    setProjectIdea('');
-    setBuildProgress([]);
-    setGeneratedProject(null);
-    setIsBuilding(false);
+  setProjectIdea('');
+  setBuildProgress([]);
+  setGeneratedProject(null);
+  setFileTree([]);
+  setSelectedFile(null);
+  setFileContent('');
+  setPreviewUrl('');
+  setIsBuilding(false);
   };
 
   return (
@@ -156,6 +178,9 @@ const ProjectBuilder = () => {
             -webkit-text-fill-color: transparent;
             margin-bottom: 1rem;
             line-height: 1.1;
+            font-family: 'Chakra Petch', sans-serif !important;
+            color: #ffffffff !important;
+            text-shadow: none !important;
           }
           
           .hero-subtitle {
@@ -164,6 +189,9 @@ const ProjectBuilder = () => {
             max-width: 600px;
             margin: 0 auto 2rem;
             line-height: 1.6;
+            font-family: 'Chakra Petch', sans-serif !important;
+            color: #fff !important;
+            text-shadow: none !important;
           }
           
           .build-card {
@@ -326,12 +354,18 @@ const ProjectBuilder = () => {
             font-weight: 800;
             color: var(--primary-green);
             margin-bottom: 0.5rem;
+            font-family: 'Chakra Petch', sans-serif !important;
+            color: #fff !important;
+            text-shadow: none !important;
           }
           
           .project-description {
             color: var(--text-dark);
             font-size: 1rem;
             line-height: 1.5;
+            font-family: 'Chakra Petch', sans-serif !important;
+            color: #fff !important;
+            text-shadow: none !important;
           }
           
           .project-actions {
@@ -381,6 +415,9 @@ const ProjectBuilder = () => {
             display: flex;
             align-items: center;
             gap: 0.5rem;
+            font-family: 'Chakra Petch', sans-serif !important;
+            color: #fff !important;
+            text-shadow: none !important;
           }
           
           .tech-stack {
@@ -587,6 +624,55 @@ const ProjectBuilder = () => {
               </div>
             </div>
 
+            <div style={{ display: 'flex', gap: '2rem', flexWrap: 'wrap' }}>
+              {/* File Tree Sidebar */}
+              <div style={{ minWidth: 220, maxWidth: 320 }}>
+                <h3 className="detail-title">📂 File Tree</h3>
+                <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                  {fileTree.length === 0 && <li style={{ color: 'var(--text-dark)' }}>No files found.</li>}
+                  {fileTree.map((file, idx) => (
+                    <li key={idx} style={{ padding: '0.5rem 0', cursor: 'pointer', color: selectedFile === file.path ? 'var(--primary-green)' : 'var(--text-light)' }}
+                      onClick={async () => {
+                        setSelectedFile(file.path);
+                        setFileContent('Loading...');
+                        const res = await fetch(`http://localhost:8000/project-file-content?project_name=${encodeURIComponent(generatedProject.name)}&file_path=${encodeURIComponent(file.path)}`);
+                        const data = await res.json();
+                        setFileContent(data.content || 'No content found.');
+                      }}
+                    >
+                      {file.type === 'dir' ? '📁' : '📄'} {file.name}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              {/* Code Editor Panel */}
+              <div style={{ flex: 1, minWidth: 320 }}>
+                <h3 className="detail-title">📝 Code Editor</h3>
+                <div style={{ background: 'rgba(0,0,0,0.2)', borderRadius: 12, padding: '1rem', minHeight: 300, fontFamily: 'SF Mono, Monaco, monospace', color: 'var(--text-light)', whiteSpace: 'pre-wrap', overflowX: 'auto' }}>
+                  {selectedFile ? (
+                    <>
+                      <div style={{ marginBottom: 8, color: 'var(--primary-green)', fontWeight: 600 }}>{selectedFile}</div>
+                      <div>{fileContent}</div>
+                    </>
+                  ) : (
+                    <div style={{ color: 'var(--text-dark)' }}>Select a file to view its code.</div>
+                  )}
+                </div>
+              </div>
+
+              {/* Live Preview Panel */}
+              <div style={{ minWidth: 320, maxWidth: 480 }}>
+                <h3 className="detail-title">🚀 Live Preview</h3>
+                {previewUrl ? (
+                  <iframe src={previewUrl} title="Live Preview" style={{ width: '100%', height: 320, borderRadius: 12, border: '1px solid var(--primary-green)', background: '#fff' }} />
+                ) : (
+                  <div style={{ color: 'var(--text-dark)' }}>Preview not available.</div>
+                )}
+              </div>
+            </div>
+
+            {/* Project Details Section */}
             <div className="project-details">
               <div className="detail-section">
                 <h3 className="detail-title">🛠️ Tech Stack</h3>

@@ -1,431 +1,505 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+// Note: react-router-dom is used for navigation.
+// Ensure this component is rendered within a <Router> from react-router-dom.
 import { useNavigate } from 'react-router-dom';
-import { Code, Shield, Box } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 
 // --- Main Landing Page Component ---
-const LandingPage = () => {
-    const canvasRef = useRef(null);
-    // The useNavigate hook is for client-side routing.
-    // Since this is a single page, we will simulate navigation.
+const VexelLandingPage = () => {
+    const mountRef = useRef(null);
+    const navigate = useNavigate();
+    const [threeLoaded, setThreeLoaded] = useState(false);
+    const [effectsActive, setEffectsActive] = useState(false);
+    const [blastOff, setBlastOff] = useState(false);
+    const [activeButton, setActiveButton] = useState(null);
+    const [performanceWarning, setPerformanceWarning] = useState(false);
 
-
-    // Effect for the animated "Matrix" background
+    // Effect for the interactive 3D particle animation
     useEffect(() => {
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-        const ctx = canvas.getContext('2d');
+        let scene, camera, renderer, particles, lines;
+        let animationId;
+        const mountNode = mountRef.current;
+        let mouse, targetRotation;
+        let performanceMode = false;
 
-        const fontSize = 16;
-        let columns;
-        let rainDrops = [];
-
-        const katakana = 'アァカサタナハマヤャラワガザダバパイィキシチニヒミリヰギジヂビピウゥクスツヌフムユュルグズブヅプエェケセテネヘメレヱゲゼデベペオォコソトノホモヨョロヲゴゾドボポヴッン';
-        const latin = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-        const nums = '0123456789';
-        const alphabet = katakana + latin + nums;
-
-        // Handles resizing of the canvas to fit the window
-        const resizeCanvas = () => {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
-            columns = Math.floor(canvas.width / fontSize);
-            rainDrops = Array(columns).fill(1);
+        // Adaptive particle count based on device capability
+        const getOptimalParticleCount = () => {
+            const isMobile = window.innerWidth < 768;
+            if (isMobile) return 1500; // Lower count for mobile devices
+            return 3000; // Higher count for desktops
         };
 
-        // Main animation drawing function
-        const draw = () => {
-            ctx.fillStyle = 'rgba(10, 10, 10, 0.05)'; // Use a slightly off-black for a softer effect
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        const particleCount = getOptimalParticleCount();
+        const positions = new Float32Array(particleCount * 3);
+        const colors = new Float32Array(particleCount * 3);
+        const velocities = new Float32Array(particleCount * 3);
 
-            ctx.fillStyle = '#00f5c3'; // Use the primary neon green color
-            ctx.font = fontSize + 'px monospace';
-
-            for (let i = 0; i < rainDrops.length; i++) {
-                const text = alphabet.charAt(Math.floor(Math.random() * alphabet.length));
-                ctx.fillText(text, i * fontSize, rainDrops[i] * fontSize);
-
-                if (rainDrops[i] * fontSize > canvas.height && Math.random() > 0.975) {
-                    rainDrops[i] = 0;
+        const loadThreeJS = () => {
+            return new Promise((resolve, reject) => {
+                if (window.THREE) {
+                    resolve();
+                    return;
                 }
-                rainDrops[i]++;
+                const script = document.createElement('script');
+                script.src = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
+                script.onload = () => { setThreeLoaded(true); resolve(); };
+                script.onerror = reject;
+                document.head.appendChild(script);
+            });
+        };
+
+        const init = async () => {
+            if (!mountNode) return;
+
+            try {
+                await loadThreeJS();
+                if (!window.THREE) { console.error("Three.js failed to load"); return; }
+
+                mouse = new window.THREE.Vector2();
+                targetRotation = new window.THREE.Vector2();
+
+                scene = new window.THREE.Scene();
+
+                camera = new window.THREE.PerspectiveCamera(75, mountNode.clientWidth / mountNode.clientHeight, 0.1, 1000);
+                camera.position.z = 120; // Adjusted camera position for the visual effect
+
+                renderer = new window.THREE.WebGLRenderer({
+                    antialias: !window.innerWidth < 768,
+                    alpha: true,
+                    powerPreference: "high-performance",
+                });
+                renderer.setSize(mountNode.clientWidth, mountNode.clientHeight);
+                renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+                renderer.setClearColor(0x000000, 0);
+                mountNode.appendChild(renderer.domElement);
+
+                // Particles shaped into the curved structure
+                const colorAqua = new window.THREE.Color(0x00c0ff);
+                const segments = 64;
+                const rings = 128;
+                let particleIndex = 0;
+
+                for (let i = 0; i < particleCount; i++) {
+                    const i3 = i * 3;
+                    
+                    // Create a large, curved, semi-toroidal shape
+                    const ringRadius = 100;
+                    const tubeRadius = 30;
+                    const u = (i % segments / segments) * 2 * Math.PI;
+                    const v = Math.floor(i / segments) / rings * Math.PI; // Only half a torus
+
+                    const x = (ringRadius + tubeRadius * Math.cos(v)) * Math.cos(u);
+                    const y = (ringRadius + tubeRadius * Math.cos(v)) * Math.sin(u);
+                    const z = tubeRadius * Math.sin(v) - 50; // Offset to push it back
+
+                    positions[i3] = x + (Math.random() - 0.5) * 5;
+                    positions[i3 + 1] = y + (Math.random() - 0.5) * 5;
+                    positions[i3 + 2] = z + (Math.random() - 0.5) * 5;
+
+                    velocities[i3] = (Math.random() - 0.5) * 0.1;
+                    velocities[i3 + 1] = (Math.random() - 0.5) * 0.1;
+                    velocities[i3 + 2] = (Math.random() - 0.5) * 0.1;
+
+                    colors[i3] = colorAqua.r;
+                    colors[i3 + 1] = colorAqua.g;
+                    colors[i3 + 2] = colorAqua.b;
+                }
+
+                const particleGeometry = new window.THREE.BufferGeometry();
+                particleGeometry.setAttribute('position', new window.THREE.BufferAttribute(positions, 3));
+                particleGeometry.setAttribute('color', new window.THREE.BufferAttribute(colors, 3));
+
+                const particleMaterial = new window.THREE.PointsMaterial({
+                    size: window.innerWidth < 768 ? 0.8 : 1.2,
+                    vertexColors: true,
+                    blending: window.THREE.AdditiveBlending,
+                    transparent: true,
+                    opacity: 0.9,
+                    depthWrite: false,
+                    sizeAttenuation: true
+                });
+
+                particles = new window.THREE.Points(particleGeometry, particleMaterial);
+                particles.rotation.x = 0.5; // Tilt the structure
+                scene.add(particles);
+
+                window.addEventListener('resize', onWindowResize, false);
+                window.addEventListener('mousemove', onMouseMove, false);
+                setEffectsActive(true);
+                animate();
+            } catch (error) {
+                console.error('Failed to initialize Three.js:', error);
+                setEffectsActive(false);
             }
         };
 
-        resizeCanvas();
-        const interval = setInterval(draw, 33); // Adjusted for smoother animation
-        window.addEventListener('resize', resizeCanvas);
-
-        // Cleanup function to remove listeners and interval
-        return () => {
-            clearInterval(interval);
-            window.removeEventListener('resize', resizeCanvas);
+        const onWindowResize = () => {
+            if (!camera || !renderer || !mountNode) return;
+            camera.aspect = mountNode.clientWidth / mountNode.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(mountNode.clientWidth, mountNode.clientHeight);
         };
-    }, []);
 
-    // Smooth scroll functionality for navigation links
-    const scrollToSection = (sectionId) => {
-        const element = document.getElementById(sectionId);
-        element?.scrollIntoView({ behavior: 'smooth' });
+        const onMouseMove = (event) => {
+            if (mountNode) {
+                mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+                mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+                targetRotation.x = mouse.y * 0.1;
+                targetRotation.y = mouse.x * 0.1;
+            }
+        };
+
+        let lastFrameTime = performance.now();
+        const animate = () => {
+            animationId = requestAnimationFrame(animate);
+
+            const time = Date.now() * 0.0005;
+            
+            // Performance monitoring
+            const frameTime = performance.now();
+            const deltaTime = frameTime - lastFrameTime;
+            lastFrameTime = frameTime;
+
+            if (deltaTime > 33) { // Below 30 FPS
+                if (!performanceMode) {
+                    performanceMode = true;
+                    setPerformanceWarning(true);
+                }
+            } else if (deltaTime < 20) { // Stable FPS
+                if (performanceMode) {
+                    performanceMode = false;
+                    setPerformanceWarning(false);
+                }
+            }
+            
+            const posArray = particles.geometry.attributes.position.array;
+            const colArray = particles.geometry.attributes.color.array;
+
+            // Smooth rotation towards mouse target
+            particles.rotation.y += (targetRotation.y - particles.rotation.y) * 0.05;
+            particles.rotation.x += (targetRotation.x - particles.rotation.x) * 0.05;
+
+            // Subtle wave motion
+            for (let i = 0; i < particleCount; i++) {
+                const i3 = i * 3;
+                const x = posArray[i3];
+                const y = posArray[i3 + 1];
+
+                if (blastOff) {
+                    posArray[i3] += velocities[i3] * 10.0;
+                    posArray[i3 + 1] += velocities[i3 + 1] * 10.0;
+                    posArray[i3 + 2] += velocities[i3 + 2] * 10.0;
+                } else {
+                     posArray[i3 + 2] += Math.sin(i * 0.1 + time * 3) * 0.05;
+                }
+
+                 // Glow effect
+                const glow = Math.sin(i * 0.5 + time * 5) * 0.5 + 0.5;
+                colArray[i3] = 0.0 * (1 - glow) + 1.0 * glow; // Interpolate from blue to white
+                colArray[i3 + 1] = 0.75 * (1 - glow) + 1.0 * glow;
+                colArray[i3 + 2] = 1.0 * (1 - glow) + 1.0 * glow;
+            }
+
+            particles.geometry.attributes.position.needsUpdate = true;
+            particles.geometry.attributes.color.needsUpdate = true;
+            
+            particles.rotation.z += 0.0002; // Slow base rotation
+
+            renderer.render(scene, camera);
+        };
+
+        init();
+
+        return () => {
+            cancelAnimationFrame(animationId);
+            window.removeEventListener('resize', onWindowResize);
+            window.removeEventListener('mousemove', onMouseMove);
+            if (mountNode && renderer && renderer.domElement) {
+                mountNode.removeChild(renderer.domElement);
+            }
+            if (renderer) renderer.dispose();
+        };
+    }, [blastOff]);
+
+    const triggerBlastOff = (buttonId) => {
+        setActiveButton(buttonId);
+        setBlastOff(true);
+        // Reset blast effect after animation
+        setTimeout(() => {
+            setBlastOff(false);
+            setActiveButton(null);
+        }, 1500);
+    };
+    
+    const handleGetStarted = () => {
+        triggerBlastOff('getstarted');
+        setTimeout(() => navigate('/signup'), 800);
     };
 
-    // --- Event Handlers for Buttons ---
-    const navigate = useNavigate();
-    
-    const handleLogin = () => navigate('/login');
-    const handleSignUp = () => navigate('/signup');
-    const handleGetStarted = () => navigate('/signup');
+    const handleExplore = () => {
+        triggerBlastOff('explore');
+        // Add scroll or navigation logic here
+        setTimeout(() => {
+            window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+        }, 800);
+    };
+
 
     return (
-        <div className="landing-container">
-            {/* All styles are encapsulated within this component */}
-            <style>{`
-                /* --- FONT IMPORTS --- */
-                @import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@700&family=Inter:wght@400;500;600;700&display=swap');
+        <div className="vexel-container">
+             <style>{`
+                @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap');
 
-                /* --- CSS VARIABLES (THEME) --- */
-                :root {
-                    --font-heading: 'Chakra Petch', sans-serif;
-                    --font-body: 'Inter', sans-serif;
-                    
-                    --primary-green: #00f5c3;
-                    --text-light: #e2e8f0;
-                    --text-medium: #94a3b8;
-                    --text-dark: #64748b;
-                    --bg-dark: #0a0a0a;
-                    --card-bg: rgba(16, 16, 16, 0.5);
-                    --border-color: rgba(0, 245, 195, 0.15);
-                    --border-color-hover: rgba(0, 245, 195, 0.4);
-                }
-
-                /* --- BASE & LAYOUT STYLES --- */
-                .landing-container {
-                    font-family: var(--font-body);
-                    background-color: var(--bg-dark);
-                    color: var(--text-light);
-                    overflow-x: hidden;
+                .vexel-container {
+                    font-family: 'Inter', sans-serif;
+                    background: #000000;
+                    color: #fff;
+                    min-height: 100vh;
                     position: relative;
+                    overflow: hidden;
                 }
 
-                .main-content {
-                    padding-top: 6rem; /* Space for fixed header */
-                    position: relative;
-                    z-index: 2;
-                }
-
-                .container {
-                    max-width: 1200px;
-                    margin: 0 auto;
-                    padding: 0 1.5rem;
-                }
-
-                /* --- BACKGROUND EFFECTS --- */
-                .canvas-background {
-                    position: fixed;
-                    top: 0;
-                    left: 0;
-                    width: 100vw;
-                    height: 100vh;
-                    z-index: 0;
-                    opacity: 0.2;
-                    pointer-events: none;
-                }
-                .grid-background {
-                    position: fixed;
-                    top: 0;
-                    left: 0;
-                    width: 100vw;
-                    height: 100vh;
-                    z-index: -1;
-                    background-image: 
-                        linear-gradient(to right, rgba(0, 245, 195, 0.05) 1px, transparent 1px),
-                        linear-gradient(to bottom, rgba(0, 245, 195, 0.05) 1px, transparent 1px);
-                    background-size: 50px 50px;
-                    animation: moveGrid 30s linear infinite;
-                    pointer-events: none;
-                }
-                @keyframes moveGrid {
-                    from { background-position: 0 0; }
-                    to { background-position: 50px 50px; }
-                }
-
-                /* --- HEADER & NAVIGATION --- */
-                .header {
+                .background-canvas {
                     position: fixed;
                     top: 0;
                     left: 0;
                     width: 100%;
-                    background: rgba(10, 10, 10, 0.7);
-                    backdrop-filter: blur(10px);
+                    height: 100%;
+                    z-index: 0;
+                }
+
+                .page-content {
+                    position: relative;
+                    z-index: 10;
+                    display: flex;
+                    flex-direction: column;
+                    min-height: 100vh;
+                }
+
+
+                .header {
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    right: 0;
                     z-index: 50;
-                    border-bottom: 1px solid var(--border-color);
-                }
-                .header-content {
-                    display: flex;
-                    justify-content: space-between;
+                    padding: 1.5rem 2.5rem;
+                    display: grid;
+                    grid-template-columns: 1fr auto 1fr; /* Three-column layout */
                     align-items: center;
-                    padding: 1rem 1.5rem;
+                    width: 100%;
+                    max-width: 1600px;
+                    margin: 0 auto;
+                    box-sizing: border-box;
                 }
+
+
                 .logo {
-                    font-family: var(--font-heading);
-                    font-size: 1.75rem;
+                    font-family: 'Chakra Petch', sans-serif;
+                    font-size: 1.8rem;
                     font-weight: 700;
-                    letter-spacing: 1px;
-                }
-                .nav {
-                    display: none; /* Hidden on mobile */
-                    gap: 2.5rem;
-                }
-                @media (min-width: 768px) { .nav { display: flex; } }
-                .nav a {
-                    color: var(--text-medium);
-                    text-decoration: none;
-                    transition: color 0.3s;
-                    font-weight: 500;
-                }
-                .nav a:hover { color: var(--primary-green); }
-                .header-buttons { display: flex; gap: 1rem; }
-
-                /* --- BUTTON STYLES --- */
-                .btn {
-                    padding: 0.6rem 1.25rem;
-                    border-radius: 0.375rem;
-                    font-size: 0.9rem;
-                    font-weight: 600;
+                    letter-spacing: 2px;
                     cursor: pointer;
-                    transition: all 0.3s;
-                    border: 1px solid transparent;
-                }
-                .btn-ghost {
-                    background: transparent;
-                    color: var(--text-medium);
-                }
-                .btn-ghost:hover { background: rgba(255, 255, 255, 0.05); }
-                .btn-primary {
-                    background: var(--primary-green);
-                    color: #000;
-                    border-color: var(--primary-green);
-                }
-                .neon-glow {
-                    transition: all 0.3s ease;
-                    box-shadow: 0 0 5px var(--primary-green), 0 0 10px var(--primary-green);
-                }
-                .neon-glow:hover {
-                    box-shadow: 0 0 10px var(--primary-green), 0 0 20px var(--primary-green);
-                    transform: translateY(-2px);
+                    color: #ffffffff !important;
+                    text-shadow: none !important;
+                    filter: none !important;
+                    background: none !important;
+                    background-color: transparent !important;
+                    justify-self: start;
+                    -webkit-text-fill-color: #ffffff !important;
+                    -webkit-text-stroke: none !important;
                 }
 
-                /* --- TYPOGRAPHY & TEXT STYLES --- */
-                h1, h2, h3 { font-family: var(--font-heading); letter-spacing: 1px; text-transform: uppercase; }
-                p { color: var(--text-medium); line-height: 1.7; }
-                .neon-text {
-                    color: var(--primary-green);
-                    text-shadow: 0 0 5px var(--primary-green), 0 0 15px rgba(0, 245, 195, 0.5);
+                .logo-text::before,
+                .logo-text::after {
+                    display: none !important;
                 }
 
-                /* --- HERO SECTION --- */
-                .hero { padding: 6rem 0 8rem; text-align: center; }
-                .hero .brand-name {
-                    font-size: 5rem;
-                    line-height: 1;
-                    font-weight: 700;
+                .nav {
+                    display: flex;
+                    gap: 2.5rem;
+                    justify-self: center;
                 }
-                .hero .tagline {
-                    font-size: 2.5rem;
-                    line-height: 1.1;
-                    margin-top: 0.5rem;
-                    color: var(--text-light);
-                }
-                @media (min-width: 768px) {
-                    .hero .brand-name { font-size: 8rem; }
-                    .hero .tagline { font-size: 4rem; }
-                }
-                .hero p {
-                    margin-top: 2rem;
-                    max-width: 36rem;
-                    margin-left: auto;
-                    margin-right: auto;
-                    font-size: 1.125rem;
-                }
-                .hero-cta { margin-top: 3rem; }
-                .btn-hero {
-                    padding: 0.8rem 2.5rem;
-                    font-size: 1.125rem;
-                    font-weight: 700;
-                    border-radius: 0.375rem;
-                }
-
-                /* --- SECTIONS & CARDS --- */
-                .section { padding: 6rem 0; }
-                .section-header { text-align: center; margin-bottom: 4rem; }
-                .section-title { font-size: 3rem; font-weight: 700; }
-                @media (min-width: 768px) { .section-title { font-size: 3.5rem; } }
-                .section-subtitle { margin-top: 1rem; color: var(--text-medium); max-width: 32rem; margin-left: auto; margin-right: auto; }
-
-                .features-grid { display: grid; grid-template-columns: 1fr; gap: 2rem; }
-                @media (min-width: 768px) { .features-grid { grid-template-columns: repeat(3, 1fr); } }
                 
-                .feature-card {
-                    background: var(--card-bg);
-                    border: 1px solid var(--border-color);
-                    backdrop-filter: blur(10px);
-                    transition: all 0.3s ease;
-                    border-radius: 1rem;
-                    padding: 2rem;
+                .nav-link {
+                    color: #a3a3a3;
+                    text-decoration: none;
+                    font-weight: 500;
+                    transition: color 0.3s ease;
+                    font-size: 0.9rem;
                 }
-                .feature-card:hover {
-                    transform: translateY(-5px);
-                    border-color: var(--border-color-hover);
-                    box-shadow: 0 0 25px rgba(0, 245, 195, 0.1);
+                .nav-link:hover {
+                    color: #fff;
                 }
-                .feature-icon-container {
-                    background: rgba(0, 245, 195, 0.1);
-                    border-radius: 9999px;
-                    width: 3.5rem;
-                    height: 3.5rem;
+                .auth-buttons {
                     display: flex;
                     align-items: center;
-                    justify-content: center;
-                    margin-bottom: 1.5rem;
+                    gap: 1.5rem;
+                    justify-self: end;
                 }
-                .feature-title { font-size: 1.25rem; font-weight: 700; margin-bottom: 0.5rem; color: var(--text-light); }
 
-                /* --- ABOUT SECTION --- */
-                .about-content { display: flex; flex-direction: column; align-items: center; gap: 4rem; }
-                @media (min-width: 768px) { .about-content { flex-direction: row; } }
-                .about-text { flex: 1; }
-                .about-image { flex: 1; }
-                .image-container { padding: 0.5rem; border-radius: 1rem; border: 1px solid var(--border-color-hover); }
-                .team-image { border-radius: 0.75rem; width: 100%; height: auto; display: block; }
+                .btn-signin {
+                    background: transparent;
+                    border: none;
+                    color: #a3a3a3;
+                    cursor: pointer;
+                    font-size: 0.9rem;
+                    font-weight: 500;
+                    transition: color 0.3s ease;
+                }
+                .btn-signin:hover {
+                    color: #fff;
+                }
 
-                /* --- CONTACT & FOOTER --- */
-                .contact-form { margin-top: 3rem; max-width: 32rem; margin-left: auto; margin-right: auto; display: flex; flex-direction: column; gap: 1rem; }
-                @media (min-width: 640px) { .contact-form { flex-direction: row; } }
-                .email-input {
+                .btn-signup {
+                    background: #fff;
+                    color: #000;
+                    border: 1px solid #fff;
+                    padding: 0.6rem 1.2rem;
+                    border-radius: 6px;
+                    cursor: pointer;
+                    font-weight: 500;
+                    transition: all 0.3s ease;
+                    font-size: 0.9rem;
+                }
+                .btn-signup:hover {
+                    background: transparent;
+                    color: #fff;
+                }
+
+                
+                .main-content {
                     flex-grow: 1;
-                    padding: 0.75rem 1rem;
-                    background: #111827;
-                    border: 1px solid #374151;
-                    border-radius: 0.375rem;
-                    color: white;
-                    outline: none;
-                    transition: all 0.3s;
+                    position: relative;
+                    z-index: 2;
+                    display: grid;
+                    grid-template-columns: 1fr 1fr;
+                    align-items: center;
+                    max-width: 1400px;
+                    margin: 0 auto;
+                    padding: 8rem 2rem 2rem;
+                    min-height: 100vh;
                 }
-                .email-input:focus { border-color: var(--primary-green); box-shadow: 0 0 0 2px rgba(0, 245, 195, 0.2); }
-                .footer { border-top: 1px solid var(--border-color); }
-                .footer-content { padding: 3rem 1.5rem; text-align: center; color: var(--text-dark); }
-                .social-links { display: flex; justify-content: center; gap: 1.5rem; margin-top: 1rem; }
-                .social-links a { color: var(--text-dark); text-decoration: none; transition: color 0.3s; }
-                .social-links a:hover { color: var(--primary-green); }
 
-                /* --- ANIMATIONS --- */
-                @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-                .fade-in { animation: fadeIn 1s ease-out 0.2s forwards; opacity: 0; }
+                .hero-text {
+                    text-align: left;
+                }
+
+                .hero-subtitle {
+                    font-size: 0.9rem;
+                    color: #a3a3a3;
+                    font-weight: 500;
+                    letter-spacing: 2px;
+                    margin-bottom: 1rem;
+                }
+
+                .hero-title {
+                    font-size: clamp(3rem, 7vw, 6rem);
+                    font-weight: 700;
+                    line-height: 1.1;
+                    margin-bottom: 2rem;
+                    letter-spacing: -2px;
+                }
+                
+                .hero-description {
+                    position: absolute;
+                    bottom: 5rem;
+                    right: 2rem;
+                    max-width: 300px;
+                    font-size: 0.9rem;
+                    color: #a3a3a3;
+                    line-height: 1.6;
+                    text-align: right;
+                }
+                
+                .action-buttons {
+                    position: absolute;
+                    bottom: 5rem;
+                    left: 2rem;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 1rem;
+                    align-items: flex-start;
+                }
+
+                .scroll-down {
+                    font-size: 0.8rem;
+                    color: #a3a3a3;
+                    letter-spacing: 1px;
+                    text-transform: uppercase;
+                }
+
+                .btn-explore {
+                    background: rgba(255, 255, 255, 0.1);
+                    border: 1px solid rgba(255, 255, 255, 0.2);
+                    backdrop-filter: blur(5px);
+                    color: #fff;
+                    padding: 0.8rem 1.5rem;
+                    border-radius: 6px;
+                    cursor: pointer;
+                    font-weight: 500;
+                    transition: all 0.3s ease;
+                }
+
+                .btn-explore:hover {
+                    background: #fff;
+                    color: #000;
+                }
+                
+                .btn-active {
+                   border: 1px solid #00c0ff !important;
+                   box-shadow: 0 0 20px rgba(0, 192, 255, 0.5) !important;
+                }
+
+                /* Responsive Design */
+
+
+                @media (max-width: 768px) {
+                    .header {
+                        padding: 1.5rem 1rem;
+                        grid-template-columns: 1fr 1fr;
+                    }
+                    .nav {
+                        display: none;
+                    }
+                    .hero-title {
+                        font-size: 2.5rem;
+                    }
+                }
             `}</style>
+
+            <div ref={mountRef} className="background-canvas"></div>
             
-            <div className="grid-background"></div>
-            <canvas ref={canvasRef} className="canvas-background"></canvas>
-
             <header className="header">
-                <div className="container header-content">
-                    <h1 className="logo neon-text">Xverta</h1>
+
+                    <div className="logo">xVerta</div>
                     <nav className="nav">
-                        <a href="#features" onClick={(e) => { e.preventDefault(); scrollToSection('features'); }}>Features</a>
-                        <a href="#about" onClick={(e) => { e.preventDefault(); scrollToSection('about'); }}>About</a>
-                        <a href="#contact" onClick={(e) => { e.preventDefault(); scrollToSection('contact'); }}>Contact</a>
+                        <a href="#about" className="nav-link">ABOUT</a>
+                        <a href="#features" className="nav-link">FEATURES</a>
+                        <a href="#use-cases" className="nav-link">USE CASES</a>
                     </nav>
-                    <div className="header-buttons">
-                        <button className="btn btn-ghost" onClick={handleLogin}>Login</button>
-                        <button className="btn btn-primary neon-glow" onClick={handleSignUp}>Sign Up</button>
+                    <div className="auth-buttons">
+                        <button className="btn-signin" onClick={(e) => navigate('/login')}>Login</button>
+                        <button className="btn-signup" onClick={(e) => navigate('/signup')}>Sign Up</button>
                     </div>
-                </div>
             </header>
-
+            
             <main className="main-content">
-                <section id="home" className="hero container">
-                    <div className="fade-in">
-                        <h1 className="brand-name neon-text">xverta</h1>
-                        <h2 className="tagline">Build With Security.</h2>
-                        <p>
-                            The all-in-one platform for Software Engineers & Cybersecurity Analysts.
-                            Integrate security seamlessly into your development lifecycle.
-                        </p>
-                        <div className="hero-cta">
-                            <button className="btn btn-hero btn-primary neon-glow" onClick={handleGetStarted}>Get Started for Free</button>
-                        </div>
-                    </div>
-                </section>
-
-                <section id="features" className="section">
-                    <div className="container">
-                        <div className="section-header fade-in">
-                            <h2 className="section-title">A New Era of <span className="neon-text">DevSecOps</span></h2>
-                            <p className="section-subtitle">Everything you need to ship resilient applications.</p>
-                        </div>
-                        <div className="features-grid">
-                            <div className="feature-card fade-in" style={{ animationDelay: '0.3s' }}>
-                                <div className="feature-icon-container"><Code size={28} color="var(--primary-green)" /></div>
-                                <h3 className="feature-title">Secure Code IDE</h3>
-                                <p>Real-time vulnerability detection and smart-fixes directly in your development environment.</p>
-                            </div>
-                            <div className="feature-card fade-in" style={{ animationDelay: '0.5s' }}>
-                                <div className="feature-icon-container"><Shield size={28} color="var(--primary-green)" /></div>
-                                <h3 className="feature-title">Automated Threat Analysis</h3>
-                                <p>Leverage AI to model threats, identify attack vectors, and prioritize security efforts before deployment.</p>
-                            </div>
-                            <div className="feature-card fade-in" style={{ animationDelay: '0.7s' }}>
-                                <div className="feature-icon-container"><Box size={28} color="var(--primary-green)" /></div>
-                                <h3 className="feature-title">CI/CD Security Pipeline</h3>
-                                <p>Integrate security gates into your build and release pipelines to catch issues automatically.</p>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-
-                <section id="about" className="section">
-                    <div className="container about-content">
-                        <div className="about-text fade-in">
-                            <h2 className="section-title">Who We Are</h2>
-                            <p>
-                                CodeSecure was born from the collaboration between seasoned software architects and elite cybersecurity analysts. We saw the growing divide between development speed and security rigor and decided to bridge the gap.
-                            </p>
-                            <p>
-                                Our mission is to empower developers to be the first line of defense and provide security teams with the tools they need to succeed in a fast-paced, agile world. We believe secure code is better code.
-                            </p>
-                        </div>
-                        <div className="about-image fade-in" style={{ animationDelay: '0.3s' }}>
-                            <div className="image-container">
-                                <img src="https://placehold.co/600x400/0a0a0a/00f5c3?text=Our+Team" alt="CodeSecure Team" className="team-image"/>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-
-                <section id="contact" className="section">
-                    <div className="container section-header fade-in">
-                        <h2 className="section-title">Ready to <span className="neon-text">Secure</span> Your Code?</h2>
-                        <p className="section-subtitle">
-                            Join the waitlist to get early access and start building more secure applications today.
-                        </p>
-                        <div className="contact-form">
-                            <input type="email" placeholder="your-email@company.com" className="email-input"/>
-                            <button className="btn btn-primary neon-glow">Join Waitlist</button>
-                        </div>
-                    </div>
-                </section>
+                <div className="hero-text">
+                    <div className="hero-subtitle">xVerta</div>
+                    <h1 className="hero-title">Build safely with AI.</h1>
+                </div>
             </main>
 
-            <footer className="footer">
-                <div className="footer-content container">
-                    <p>&copy; 2024 CodeSecure. All rights reserved.</p>
-                    <div className="social-links">
-                        <a href="#">Twitter</a>
-                        <a href="#">LinkedIn</a>
-                        <a href="#">GitHub</a>
-                    </div>
-                </div>
-            </footer>
+            <div className="hero-description">
+                <p>
+                    xVerta is an AI-powered platform that transforms your ideas into reality. 
+                    Whether you're a developer, designer, or entrepreneur, xVerta helps you build 
+                    and deploy projects with ease and confidence.
+                </p>
+            </div>
         </div>
     );
 };
 
-export default LandingPage;
+export default VexelLandingPage;

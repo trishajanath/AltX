@@ -543,7 +543,7 @@ const RepoAnalysisPage = () => {
         {`
           :root {
             --primary-green: #00f5c3;
-            --background-dark: #0a0a0a;
+            --background-dark: #000;
             --card-bg: rgba(26, 26, 26, 0.5);
             --card-bg-hover: rgba(36, 36, 36, 0.7);
             --card-border: rgba(255, 255, 255, 0.1);
@@ -596,7 +596,17 @@ const RepoAnalysisPage = () => {
             font-weight: 900;
             letter-spacing: -0.05em;
             color: var(--text-light);
-            text-shadow: 0 0 15px rgba(0, 245, 195, 0.4), 0 0 30px rgba(0, 245, 195, 0.2);
+            text-shadow: none !important;
+            margin-bottom: 1.5rem;
+            line-height: 1.1;
+          }
+          
+          .hero-title-highlight {
+            font-size: 5rem;
+            font-weight: 900;
+            letter-spacing: -0.05em;
+            color: #00f5c3;
+            text-shadow: none !important;
             margin-bottom: 1.5rem;
             line-height: 1.1;
           }
@@ -1908,7 +1918,7 @@ const RepoAnalysisPage = () => {
                               padding: '6px 12px',
                               borderRadius: '16px',
                               fontSize: '12px',
-                              fontWeight: '600'
+                              fontWeight: '700'
                             }}>
                               {safeRender(issue.severity || 'Medium')}
                             </span>

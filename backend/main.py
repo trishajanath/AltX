@@ -1,3 +1,4 @@
+
 import os
 import secrets
 import shutil
@@ -93,6 +94,59 @@ class FixRequest(BaseModel):
     repo_url: str
     issue: Dict[str, Any]
     branch_name: Optional[str] = None
+
+from fastapi import Query
+# --- Project File Tree Endpoint ---
+@app.get("/project-file-tree")
+async def get_project_file_tree(project_name: str = Query(...)):
+    """
+    Returns a mock file tree for the generated project.
+    In production, this should read from the actual generated files.
+    """
+    # For demo, return a static file tree
+    tree = [
+        {"name": "src", "type": "dir", "path": "src/"},
+        {"name": "App.jsx", "type": "file", "path": "src/App.jsx"},
+        {"name": "index.js", "type": "file", "path": "src/index.js"},
+        {"name": "components", "type": "dir", "path": "src/components/"},
+        {"name": "TodoList.jsx", "type": "file", "path": "src/components/TodoList.jsx"},
+        {"name": "public", "type": "dir", "path": "public/"},
+        {"name": "index.html", "type": "file", "path": "public/index.html"},
+        {"name": "package.json", "type": "file", "path": "package.json"},
+        {"name": "README.md", "type": "file", "path": "README.md"}
+    ]
+    return {"success": True, "tree": tree}
+
+# --- Project File Content Endpoint ---
+@app.get("/project-file-content")
+async def get_project_file_content(project_name: str = Query(...), file_path: str = Query(...)):
+    """
+    Returns mock file content for a given file in the generated project.
+    In production, this should read the actual file content.
+    """
+    # Demo content for some files
+    demo_files = {
+        "src/App.jsx": "import React, { useState } from 'react';\nimport TodoList from './components/TodoList';\nfunction App() {\n  return <div><h1>To Do App</h1><TodoList /></div>;\n}\nexport default App;",
+        "src/components/TodoList.jsx": "import React, { useState } from 'react';\nexport default function TodoList() {\n  const [items, setItems] = useState([]);\n  const [input, setInput] = useState('');\n  return (<div><input value={input} onChange={e => setInput(e.target.value)} /><button onClick={() => { setItems([...items, input]); setInput(''); }}>Add</button><ul>{items.map((item, i) => <li key={i}>{item}</li>)}</ul></div>);\n}",
+        "src/index.js": "import React from 'react';\nimport ReactDOM from 'react-dom';\nimport App from './App';\nReactDOM.render(<App />, document.getElementById('root'));",
+        "public/index.html": "<!DOCTYPE html><html><head><title>To Do App</title></head><body><div id='root'></div></body></html>",
+        "package.json": "{\n  \"name\": \"todo-app\",\n  \"version\": \"1.0.0\",\n  \"dependencies\": {\n    \"react\": \"^18.0.0\",\n    \"react-dom\": \"^18.0.0\"\n  }\n}",
+        "README.md": "# To Do App\nA simple React to-do application."
+    }
+    content = demo_files.get(file_path, f"// No content available for {file_path}")
+    return {"success": True, "content": content}
+
+# --- Project Preview URL Endpoint ---
+@app.get("/project-preview-url")
+async def get_project_preview_url(project_name: str = Query(...)):
+    """
+    Returns a mock live preview URL for the generated project.
+    In production, this should point to the actual deployed preview.
+    """
+    # Demo: return a placeholder preview URL
+    url = f"https://demo.altx.app/{project_name.lower().replace(' ', '-')}-preview"
+    return {"success": True, "url": url}
+
 
 @app.get("/debug/test-token")
 async def test_github_token_direct():

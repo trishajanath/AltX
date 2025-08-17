@@ -212,7 +212,7 @@ Ready to start? Enter a URL above and select your preferred analysis model!`,
         {`
           :root {
             --primary-green: #00f5c3;
-            --background-dark: #0a0a0a;
+            --background-dark: #000;
             --card-bg: rgba(26, 26, 26, 0.5);
             --card-bg-hover: rgba(36, 36, 36, 0.7);
             --card-border: rgba(255, 255, 255, 0.1);
@@ -256,8 +256,8 @@ Ready to start? Enter a URL above and select your preferred analysis model!`,
             font-size: 2.5rem;
             font-weight: 900;
             letter-spacing: -0.05em;
-            color: var(--text-light);
-            text-shadow: 0 0 15px rgba(0, 245, 195, 0.4), 0 0 30px rgba(0, 245, 195, 0.2);
+             color: #fff !important;
+             text-shadow: none !important;
             margin-bottom: 1.5rem;
             line-height: 1.1;
           }
@@ -265,7 +265,7 @@ Ready to start? Enter a URL above and select your preferred analysis model!`,
           .hero-subtitle {
             font-size: 1.125rem;
             line-height: 1.75rem;
-            color: var(--text-dark);
+             color: #fff !important;
             margin-bottom: 2rem;
           }
           
@@ -402,7 +402,7 @@ Ready to start? Enter a URL above and select your preferred analysis model!`,
             font-size: 1.25rem;
             font-weight: 700;
           }
-          .status-success {
+             color: #fff !important;
             background: rgba(34, 197, 94, 0.1); 
             border: 1px solid rgba(34, 197, 94, 0.2);
             color: #22c55e;
@@ -446,7 +446,7 @@ Ready to start? Enter a URL above and select your preferred analysis model!`,
           .feature-title {
             font-size: 1.25rem;
             font-weight: 700;
-            color: var(--text-light);
+             color: #fff !important;
           }
           .feature-content {
             color: var(--text-dark);

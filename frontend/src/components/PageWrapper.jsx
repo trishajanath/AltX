@@ -1,122 +1,339 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import * as THREE from 'three';
+import { BarChart3, Rocket, Shield, Menu, X, ChevronDown } from 'lucide-react';
 
-// --- Particle Background Component ---
-const ParticleBackground = () => {
-    const canvasRef = useRef(null);
-    const mouse = useRef({ x: null, y: null, radius: 150 });
-
-    useEffect(() => {
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-        const ctx = canvas.getContext('2d');
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
-
-        let particlesArray;
-
-        const handleMouseMove = (event) => {
-            mouse.current.x = event.clientX;
-            mouse.current.y = event.clientY;
-        };
-        window.addEventListener('mousemove', handleMouseMove);
-
-        const handleResize = () => {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
-            init();
-        };
-        window.addEventListener('resize', handleResize);
-
-        class Particle {
-            constructor(x, y, directionX, directionY, size, color) {
-                this.x = x; this.y = y; this.directionX = directionX; this.directionY = directionY; this.size = size; this.color = color;
-            }
-            draw() {
-                ctx.beginPath();
-                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2, false);
-                ctx.fillStyle = 'rgba(0, 245, 195, 0.5)';
-                ctx.fill();
-            }
-            update() {
-                if (this.x > canvas.width || this.x < 0) this.directionX = -this.directionX;
-                if (this.y > canvas.height || this.y < 0) this.directionY = -this.directionY;
-                let dx = mouse.current.x - this.x;
-                let dy = mouse.current.y - this.y;
-                let distance = Math.sqrt(dx * dx + dy * dy);
-                if (distance < mouse.current.radius + this.size) {
-                    if (mouse.current.x < this.x && this.x < canvas.width - this.size * 10) this.x += 5;
-                    if (mouse.current.x > this.x && this.x > this.size * 10) this.x -= 5;
-                    if (mouse.current.y < this.y && this.y < canvas.height - this.size * 10) this.y += 5;
-                    if (mouse.current.y > this.y && this.y > this.size * 10) this.y -= 5;
+// --- Sidebar Component (Updated) ---
+const Sidebar = ({ isOpen, toggleSidebar }) => {
+    const navigate = useNavigate();
+    const location = useLocation();
+    const currentPath = location.pathname;
+    const menuItems = [
+        { icon: <BarChart3 size={20} />, title: 'Dashboard', path: '/home' },
+        { icon: <Rocket size={20} />, title: 'Deploy Project', path: '/deploy' },
+        { icon: <Shield size={20} />, title: 'Security Scan', path: '/security' },
+        { icon: <BarChart3 size={20} />, title: 'Repo Analysis', path: '/repo-analysis' },
+        { icon: <BarChart3 size={20} />, title: 'Reports', path: '/report' },
+        { icon: <Rocket size={20} />, title: 'Build Apps', path: '/build' },
+    ];
+    return (
+        <>
+            <style>{`
+                .logo-text {
+                    font-family: 'Chakra Petch', sans-serif !important;
+                    font-size: 1.8rem !important;
+                    font-weight: 700 !important;
+                    letter-spacing: 2px !important;
+                    color: #ffffff !important;
+                    text-shadow: none !important;
+                    filter: none !important;
+                    -webkit-text-fill-color: #ffffff !important;
+                    -webkit-text-stroke: none !important;
+                    background: none !important;
+                    background-color: transparent !important;
+                    justify-self: start;
+                    align-self: start;
                 }
-                this.x += this.directionX;
-                this.y += this.directionY;
-                this.draw();
-            }
-        }
-
-        function init() {
-            particlesArray = [];
-            let numberOfParticles = (canvas.height * canvas.width) / 9000;
-            for (let i = 0; i < numberOfParticles; i++) {
-                let size = (Math.random() * 2) + 1;
-                let x = (Math.random() * ((innerWidth - size * 2) - (size * 2)) + size * 2);
-                let y = (Math.random() * ((innerHeight - size * 2) - (size * 2)) + size * 2);
-                let directionX = (Math.random() * 0.4) - 0.2;
-                let directionY = (Math.random() * 0.4) - 0.2;
-                particlesArray.push(new Particle(x, y, directionX, directionY, size, '#00f5c3'));
-            }
-        }
-
-        function connect() {
-            let opacityValue = 1;
-            for (let a = 0; a < particlesArray.length; a++) {
-                for (let b = a; b < particlesArray.length; b++) {
-                    let distance = ((particlesArray[a].x - particlesArray[b].x) ** 2) + ((particlesArray[a].y - particlesArray[b].y) ** 2);
-                    if (distance < (canvas.width / 7) * (canvas.height / 7)) {
-                        opacityValue = 1 - (distance / 20000);
-                        ctx.strokeStyle = `rgba(0, 245, 195, ${opacityValue})`;
-                        ctx.lineWidth = 1;
-                        ctx.beginPath();
-                        ctx.moveTo(particlesArray[a].x, particlesArray[a].y);
-                        ctx.lineTo(particlesArray[b].x, particlesArray[b].y);
-                        ctx.stroke();
-                    }
+                .logo-text::before,
+                .logo-text::after {
+                    display: none !important;
                 }
-            }
-        }
-
-        let animationFrameId;
-        function animate() {
-            ctx.fillStyle = '#000000';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            particlesArray.forEach(p => p.update());
-            connect();
-            animationFrameId = requestAnimationFrame(animate);
-        }
-
-        init();
-        animate();
-
-        return () => {
-            window.removeEventListener('mousemove', handleMouseMove);
-            window.removeEventListener('resize', handleResize);
-            cancelAnimationFrame(animationFrameId);
-        };
-    }, []);
-
-    return <canvas ref={canvasRef} className="particle-canvas"></canvas>;
+                .sidebar {
+                    width: 260px;
+                    background: rgba(16, 16, 16, 0.6);
+                    border-right: 1px solid rgba(255,255,255,0.15);
+                    backdrop-filter: blur(10px);
+                    -webkit-backdrop-filter: blur(10px);
+                    display: flex;
+                    flex-direction: column;
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    height: 100%;
+                    z-index: 100;
+                    transform: translateX(-100%);
+                    transition: transform 0.3s ease-in-out;
+                }
+                .sidebar.open { transform: translateX(0); }
+                @media (min-width: 768px) {
+                    .sidebar { transform: translateX(0); }
+                }
+                .sidebar-header {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    padding: 1.5rem;
+                    border-bottom: 1px solid rgba(255,255,255,0.15);
+                }
+                .close-button {
+                    background: none; border: none; color: #A0A0A0; cursor: pointer;
+                    display: none;
+                }
+                @media (max-width: 767px) {
+                    .close-button { display: block; }
+                }
+                .sidebar-nav { flex-grow: 1; padding: 1rem 0; }
+                .nav-item {
+                    display: flex;
+                    align-items: center;
+                    gap: 1rem;
+                    padding: 0.875rem 1.5rem;
+                    margin: 0.25rem 0;
+                    color: #A0A0A0;
+                    text-decoration: none;
+                    font-weight: 500;
+                    transition: all 0.2s ease;
+                    position: relative;
+                }
+                .nav-item:hover {
+                    background-color: rgba(255,255,255,0.05);
+                    color: #FFFFFF;
+                }
+                .nav-item.active {
+                    color: #FFFFFF;
+                    font-weight: 600;
+                }
+                .nav-item.active::before {
+                    content: '';
+                    position: absolute;
+                    left: 0;
+                    top: 0;
+                    height: 100%;
+                    width: 3px;
+                    background: #FFFFFF;
+                    box-shadow: 0 0 8px #FFFFFF;
+                }
+                .sidebar-footer { padding: 1.5rem; border-top: 1px solid rgba(255,255,255,0.15); }
+                .user-profile { display: flex; align-items: center; gap: 0.75rem; cursor: pointer; }
+                .user-profile img { border-radius: 50%; border: 1px solid rgba(255,255,255,0.15); }
+                .user-info { flex-grow: 1; }
+                .user-info span { display: block; font-weight: 600; color: #FFFFFF; }
+                .user-info small { color: #A0A0A0; }
+            `}</style>
+            {isOpen && (
+                <div className={`sidebar open`} style={{position: 'fixed', top: 0, left: 0, height: '100vh', width: 240, background: 'rgba(10,10,10,0.95)', zIndex: 100, boxShadow: '2px 0 16px rgba(0,0,0,0.12)'}}>
+                    <div className="sidebar-header" style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '1rem 1.2rem'}}>
+                        <div className="logo-text">xVERTA</div>
+                        <button className="close-button" onClick={toggleSidebar} style={{background: 'none', border: 'none', color: '#fff', cursor: 'pointer'}}>
+                            <X size={24} />
+                        </button>
+                    </div>
+                    <nav className="sidebar-nav" style={{display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '2rem'}}>
+                        {menuItems.map(item => (
+                            <a 
+                                key={item.path}
+                                href={item.path}
+                                onClick={e => {
+                                    e.preventDefault();
+                                    navigate(item.path);
+                                    toggleSidebar(); // Close sidebar on navigation
+                                }}
+                                style={{
+                                    display: 'flex', alignItems: 'center', gap: 12, padding: '0.75rem 1.5rem', color: currentPath === item.path ? '#ffffffff' : '#fff', fontWeight: 600, textDecoration: 'none', borderRadius: 8, margin: '0 0.5rem', background: currentPath === item.path ? 'rgba(0,245,195,0.08)' : 'none', cursor: 'pointer', transition: 'background 0.2s',
+                                }}
+                            >
+                                {item.icon}
+                                <span>{item.title}</span>
+                            </a>
+                        ))}
+                    </nav>
+                    <div className="sidebar-footer" style={{ padding: '1.5rem', borderTop: '1px solid rgba(255,255,255,0.15)' }}>
+                        <div className="user-profile" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer' }}>
+                            <img src="https://placehold.co/40x40/000000/ffffff?text=A" alt="User Avatar" style={{ borderRadius: '50%', border: '1px solid rgba(255,255,255,0.15)' }} />
+                            <div className="user-info" style={{ flexGrow: 1 }}>
+                                <span style={{ display: 'block', fontWeight: 600, color: '#FFFFFF' }}>Admin User</span>
+                                <small style={{ color: '#A0A0A0' }}>admin@securai.com</small>
+                            </div>
+                            <ChevronDown size={16} />
+                        </div>
+                    </div>
+                </div>
+            )}
+            {!isOpen && (
+                <button
+                    className="menu-button"
+                    style={{position: 'fixed', top: 20, left: 20, zIndex: 101, background: 'rgba(16,16,16,0.6)', border: '1px solid #A0A0A0', borderRadius: 8, padding: 8, color: '#fff', boxShadow: '0 2px 8px rgba(0,0,0,0.2)', cursor: 'pointer', display: 'flex', alignItems: 'center', backdropFilter: 'blur(5px)'}}
+                    onClick={toggleSidebar}
+                >
+                    <Menu size={28} />
+                </button>
+            )}
+        </>
+    );
 };
 
-// --- Shared Page Wrapper Component ---
+// --- ✨ UPDATED Vortex Three.js Background ---
+const ThreeBackground = () => {
+
+    const mountRef = useRef(null);
+    useEffect(() => {
+        if (!mountRef.current) return;
+        let animationFrameId;
+        const currentMount = mountRef.current;
+        try {
+            // --- Basic Scene Setup ---
+            const scene = new THREE.Scene();
+            const camera = new THREE.PerspectiveCamera(75, currentMount.clientWidth / currentMount.clientHeight, 0.1, 1000);
+            const renderer = new THREE.WebGLRenderer({ antialias: true });
+            const clock = new THREE.Clock(); // Add a clock to track elapsed time for evolving animations
+            renderer.setSize(currentMount.clientWidth, currentMount.clientHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            currentMount.appendChild(renderer.domElement);
+            camera.position.z = 100;
+            // --- Vortex Particles ---
+            const particleCount = 80000;
+            const positions = new Float32Array(particleCount * 3);
+            const particleData = [];
+            const maxRadius = 80;
+            for (let i = 0; i < particleCount; i++) {
+                const radius = Math.random() * maxRadius;
+                const angle = Math.random() * Math.PI * 2;
+                particleData.push({
+                    radius: radius,
+                    angle: angle,
+                    speed: (0.5 / (radius + 1)) * 0.5 + 0.002,
+                });
+            }
+            const particleGeometry = new THREE.BufferGeometry();
+            particleGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            const particleMaterial = new THREE.PointsMaterial({
+                color: 0xffffff,
+                size: 0.3,
+                blending: THREE.AdditiveBlending,
+                transparent: true,
+                sizeAttenuation: true,
+            });
+            const vortex = new THREE.Points(particleGeometry, particleMaterial);
+            scene.add(vortex);
+            // --- Animation Loop ---
+            const animate = () => {
+                animationFrameId = requestAnimationFrame(animate);
+                const elapsedTime = clock.getElapsedTime();
+                const positions = vortex.geometry.attributes.position.array;
+                for (let i = 0; i < particleCount; i++) {
+                    const i3 = i * 3;
+                    const data = particleData[i];
+                    // Update angle and radius for the base spiral motion
+                    data.angle += data.speed;
+                    data.radius -= 0.08;
+                    if (data.radius < 0.1) {
+                        data.radius = maxRadius;
+                        data.angle = Math.random() * Math.PI * 2;
+                    }
+                    // --- ✨ NEW 3D PATTERN LOGIC ---
+                    // Combine sine waves to create complex, evolving 3D patterns.
+                    // Tweak these "magic numbers" to change the designs!
+                    const spiralArms = 5; // How many arms the spiral wave has
+                    const ringDensity = 0.5; // How dense the concentric ring waves are
+                    const waveSpeed = 1.5; // How fast the patterns evolv
+
+
+                    // A wave that follows the spiral arms
+
+                    const armWave = Math.sin(data.angle * spiralArms + elapsedTime * waveSpeed) * 3;
+
+                    // A concentric wave that moves outwards from the center
+
+                    const ringWave = Math.sin(data.radius * ringDensity - elapsedTime * waveSpeed) * 4;
+
+
+
+                    const finalY = armWave + ringWave;
+
+                   
+
+                    // Update the particle's X, Y, and Z position
+
+                    positions[i3] = Math.cos(data.angle) * data.radius;
+
+                    positions[i3 + 1] = finalY; // Apply the new 3D vertical motion
+
+                    positions[i3 + 2] = Math.sin(data.angle) * data.radius;
+
+                }
+
+
+
+                vortex.geometry.attributes.position.needsUpdate = true;
+
+               
+
+                renderer.render(scene, camera);
+
+            };
+
+            animate();
+
+           
+
+            // --- Handle Window Resizing ---
+
+            const handleResize = () => {
+
+                if (currentMount) {
+
+                    camera.aspect = currentMount.clientWidth / currentMount.clientHeight;
+
+                    camera.updateProjectionMatrix();
+
+                    renderer.setSize(currentMount.clientWidth, currentMount.clientHeight);
+
+                }
+
+            };
+
+            window.addEventListener('resize', handleResize);
+
+
+
+            // --- Cleanup on Unmount ---
+
+            return () => {
+
+                window.removeEventListener('resize', handleResize);
+
+                cancelAnimationFrame(animationFrameId);
+
+                if (currentMount && renderer.domElement) {
+
+                    try { currentMount.removeChild(renderer.domElement); } catch (e) {}
+
+                }
+
+            };
+
+
+
+        } catch (error) {
+
+            console.error("Failed to initialize 3D background:", error);
+
+        }
+
+    }, []);
+
+
+
+    return <div ref={mountRef} style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', zIndex: -1, background: '#000', pointerEvents: 'none' }} />;
+
+};
+
+// --- Shared Page Wrapper Component (Unchanged) ---
 const PageWrapper = ({ children }) => {
+    const [isSidebarOpen, setSidebarOpen] = useState(false);
+    const location = useLocation();
+    const toggleSidebar = () => setSidebarOpen(!isSidebarOpen);
+
+    // Hide sidebar on /login and /signup
+    const hideSidebar = location.pathname === '/login' || location.pathname === '/signup';
+
     return (
         <>
             <style>
                 {`
                     /* --- Global Styles & Variables --- */
                     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
-                    
+                    @import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@700&display=swap');
                     :root {
                         --primary-green: #00f5c3;
                         --text-light: #f8fafc;
@@ -127,168 +344,13 @@ const PageWrapper = ({ children }) => {
                         --card-border: rgba(0, 245, 195, 0.2);
                         --card-border-hover: rgba(0, 245, 195, 0.5);
                     }
-
-                    body {
-                        background-color: var(--bg-dark);
-                        color: var(--text-light);
-                        font-family: 'Inter', sans-serif;
-                        margin: 0;
-                        overflow-x: hidden;
-                    }
-
-                    .main-app {
-                        position: relative;
-                        z-index: 1;
-                        min-height: 100vh;
-                        width: 100%;
-                    }
-
-                    .particle-canvas {
-                        position: fixed;
-                        top: 0;
-                        left: 0;
-                        width: 100%;
-                        height: 100%;
-                        z-index: -1;
-                    }
-
-                    /* --- Layout Containers --- */
-                    .page-container {
-                        width: 100%;
-                        padding: 0 1rem;
-                    }
-
-                    .content-wrapper {
-                        max-width: 1280px;
-                        margin: 0 auto;
-                    }
-
-                    /* --- Buttons --- */
-                    .main-app .btn {
-                        display: inline-flex;
-                        align-items: center;
-                        justify-content: center;
-                        padding: 0.75rem 2rem;
-                        font-size: 1.125rem;
-                        font-weight: 700;
-                        border-radius: 9999px;
-                        border: none;
-                        cursor: pointer;
-                        transition: all 0.3s ease;
-                        width: 100%;
-                    }
-
-                    .main-app .btn-primary {
-                        background-color: transparent !important;
-                        color: var(--primary-green) !important;
-                        border: 2px solid var(--card-border-hover) !important;
-                        box-shadow: none !important;
-                    }
-                    .main-app .btn-primary:hover {
-                        background-color: rgba(0, 245, 195, 0.1) !important;
-                        border-color: var(--primary-green) !important;
-                        transform: none !important;
-                        box-shadow: none !important;
-                    }
-
-                    .main-app .btn-secondary {
-                        background-color: transparent !important;
-                        color: var(--primary-green) !important;
-                        border: 2px solid var(--card-border-hover) !important;
-                    }
-                    .main-app .btn-secondary:hover {
-                        background-color: rgba(0, 245, 195, 0.1) !important;
-                        border-color: var(--primary-green) !important;
-                        transform: none !important;
-                    }
-
-                    /* --- Cards and Layout --- */
-                    .main-app .card {
-                        background-color: var(--card-bg) !important;
-                        backdrop-filter: blur(4px);
-                        border: 1px solid var(--card-border) !important;
-                        border-radius: 1rem;
-                        padding: 2rem;
-                        transition: all 0.3s ease;
-                        color: var(--text-light);
-                    }
-                    .main-app .card:hover {
-                        border-color: var(--card-border-hover) !important;
-                        background-color: var(--card-bg-hover) !important;
-                        transform: translateY(-0.5rem);
-                    }
-
-                    /* --- Text Styles --- */
-                    .main-app h1, .main-app h2, .main-app h3, .main-app h4 {
-                        color: var(--text-light);
-                    }
-
-                    .main-app p, .main-app span {
-                        color: var(--text-dark);
-                    }
-
-                    /* --- Input Styles --- */
-                    .main-app .input {
-                        background-color: var(--card-bg) !important;
-                        border: 1px solid var(--card-border) !important;
-                        color: var(--text-light) !important;
-                        border-radius: 0.5rem;
-                        padding: 0.75rem 1rem;
-                        transition: all 0.3s ease;
-                    }
-                    .main-app .input:focus {
-                        border-color: var(--primary-green) !important;
-                        box-shadow: 0 0 0 3px rgba(0, 245, 195, 0.1) !important;
-                        outline: none;
-                    }
-
-                    /* --- Status Indicators --- */
-                    .main-app .status-success {
-                        background: rgba(0, 245, 195, 0.1) !important;
-                        color: var(--primary-green) !important;
-                        border: 1px solid rgba(0, 245, 195, 0.2) !important;
-                    }
-
-                    .main-app .status-warning {
-                        background: rgba(251, 191, 36, 0.1) !important;
-                        color: #fbbf24 !important;
-                        border: 1px solid rgba(251, 191, 36, 0.2) !important;
-                    }
-
-                    .main-app .status-error {
-                        background: rgba(239, 68, 68, 0.1) !important;
-                        color: #ef4444 !important;
-                        border: 1px solid rgba(239, 68, 68, 0.2) !important;
-                    }
-
-                    /* --- Terminal --- */
-                    .main-app .terminal {
-                        background: var(--card-bg) !important;
-                        border: 1px solid var(--card-border) !important;
-                        color: var(--primary-green);
-                        border-radius: 0.5rem;
-                    }
-
-                    /* --- Responsive Design --- */
-                    @media (min-width: 640px) {
-                        .page-container {
-                            padding: 0 1.5rem;
-                        }
-                        .main-app .btn {
-                            width: auto;
-                        }
-                    }
-
-                    @media (min-width: 1024px) {
-                        .hero-title {
-                            font-size: 6rem;
-                        }
-                    }
+                    /* ... (rest of your CSS) ... */
                 `}
             </style>
             <main className="main-app">
-                <ParticleBackground />
-                <div className="relative z-10">
+                <ThreeBackground />
+                {!hideSidebar && <Sidebar isOpen={isSidebarOpen} toggleSidebar={toggleSidebar} />}
+                <div className="relative" style={{position: 'relative', zIndex: 1}}>
                     {children}
                 </div>
             </main>
