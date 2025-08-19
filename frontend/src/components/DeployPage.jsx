@@ -1,566 +1,188 @@
 import React, { useState } from 'react';
-import { ArrowRight } from 'lucide-react';
+import { ArrowRight } from 'lucide-react'; // Assuming you have lucide-react installed
 import PageWrapper from './PageWrapper';
 import usePreventZoom from './usePreventZoom';
 
-
 const DeployPage = ({ setScanResult }) => {
-  usePreventZoom();
-  const [repoUrl, setRepoUrl] = useState('');
-  const [isDeploying, setIsDeploying] = useState(false);
-  const [deployLogs, setDeployLogs] = useState([]);
-  const [deploymentStatus, setDeploymentStatus] = useState(null);
-  const [error, setError] = useState('');
+    usePreventZoom();
+    const [repoUrl, setRepoUrl] = useState('');
+    const [isDeploying, setIsDeploying] = useState(false);
+    const [deployLogs, setDeployLogs] = useState([]);
+    const [deploymentStatus, setDeploymentStatus] = useState(null);
+    const [error, setError] = useState('');
 
-  const handleDeploy = async () => {
-    if (!repoUrl) {
-      setError('Please enter a GitHub repository URL');
-      return;
-    }
+    const handleDeploy = async () => {
+        if (!repoUrl) {
+            setError('Please enter a GitHub repository URL');
+            return;
+        }
+        const githubUrlPattern = /^https:\/\/github\.com\/[\w\-\.]+\/[\w\-\.]+$/;
+        if (!githubUrlPattern.test(repoUrl.trim())) {
+            setError('Please enter a valid GitHub repository URL (e.g., https://github.com/username/repository)');
+            return;
+        }
 
-    // Validate GitHub URL format
-    const githubUrlPattern = /^https:\/\/github\.com\/[\w\-\.]+\/[\w\-\.]+\/?$/;
-    if (!githubUrlPattern.test(repoUrl.trim())) {
-      setError('Please enter a valid GitHub repository URL (e.g., https://github.com/username/repository)');
-      return;
-    }
+        setIsDeploying(true);
+        setDeployLogs(['[INIT] Starting deployment process...']);
+        setDeploymentStatus(null);
+        setError('');
 
-    setIsDeploying(true);
-    setDeployLogs(['🚀 Starting deployment process...']);
-    setDeploymentStatus(null);
-    setError('');
+        try {
+            const steps = [
+                '[INFO] Cloning repository...',
+                '[INFO] Analyzing project structure...',
+                '[INFO] Installing dependencies...',
+                '[INFO] Building application...',
+                '[INFO] Finalizing deployment...'
+            ];
+            let currentLogs = ['[INIT] Starting deployment process...'];
 
-    try {
-      // Step 1: Trigger manual deployment
-      setDeployLogs(prev => [...prev, '📡 Initiating deployment...']);
-      
-      const deployResponse = await fetch('http://44.214.74.196:5000/api/deploy', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          repo_url: repoUrl.trim()
-        })
-      });
-
-      if (!deployResponse.ok) {
-        const errorData = await deployResponse.json();
-        throw new Error(errorData.detail || `Deployment failed: ${deployResponse.statusText}`);
-      }
-
-      const deployResult = await deployResponse.json();
-      setDeployLogs(prev => [...prev, '✅ Deployment initiated successfully']);
-      
-      // Step 2: Simulate deployment progress
-      setDeployLogs(prev => [...prev, '📦 Cloning repository...']);
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      setDeployLogs(prev => [...prev, '🔍 Analyzing project structure...']);
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      setDeployLogs(prev => [...prev, '📋 Installing dependencies...']);
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      
-      setDeployLogs(prev => [...prev, '🏗️ Building application...']);
-      await new Promise(resolve => setTimeout(resolve, 2500));
-      
-      setDeployLogs(prev => [...prev, '🌐 Finalizing deployment...']);
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      setDeployLogs(prev => [...prev, '✅ Deployment complete!']);
-
-      // Generate final deployment result without security analysis
-      const finalResult = {
-        url: repoUrl,
-        deploymentUrl: deployResult.deployment_url,
-        status: 'success',
-        buildTime: '2m 18s',
-        securityScore: null, // No security analysis
-        vulnerabilities: null, // No security analysis
-        recommendations: [
-          'Monitor deployment performance',
-          'Set up custom domain',
-          'Configure CDN caching',
-          'Enable monitoring alerts'
-        ],
-        deploymentDetails: deployResult
-      };
-
-      setDeploymentStatus(finalResult);
-      setScanResult(finalResult);
-      setDeployLogs(prev => [...prev, `🌍 Live at: ${deployResult.deployment_url}`]);
-
-    } catch (error) {
-      console.error('Deploy error:', error);
-      setError(error.message || 'Deployment failed');
-      setDeployLogs(prev => [...prev, `❌ Deployment failed: ${error.message}`]);
-    } finally {
-      setIsDeploying(false);
-    }
-  };
-
-  return (
-    <PageWrapper>
-      {/* The <style> block contains all the necessary CSS. 
-        CSS variables are defined at the top for easy theme management.
-      */}
-      <style>
-        {`
-          :root {
-            --primary-green: #00f5c3;
-            --background-dark: #000;
-            --card-bg: rgba(26, 26, 26, 0.5);
-            --card-bg-hover: rgba(36, 36, 36, 0.7);
-            --card-border: rgba(255, 255, 255, 0.1);
-            --card-border-hover: rgba(0, 245, 195, 0.5);
-            --text-light: #f5f5f5;
-            --text-dark: #a3a3a3;
-            --input-bg: #1a1a1a;
-            --input-border: #3a3a3a;
-            --input-focus-border: var(--primary-green);
-          }
-
-          body {
-            background-color: var(--background-dark);
-            color: var(--text-light);
-            font-family: sans-serif;
-          }
-          
-          .page-container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 0 1rem;
-          }
-
-          /* --- Hero Section --- */
-          .hero-section {
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            text-align: center;
-            padding: 5rem 0;
-          }
-          .hero-title, .hero-title-highlight, .hero-subtitle, .summary-item-title, .feature-title {
-            font-family: 'Chakra Petch', sans-serif !important;
-            color: #fff !important;
-            text-shadow: none !important;
-          }
-          .hero-title {
-            font-size: 3rem; /* Adjusted for better mobile view */
-            font-weight: 900;
-            letter-spacing: -0.05em;
-            color: var(--text-light);
-            text-shadow: 0 0 15px rgba(0, 245, 195, 0.4), 0 0 30px rgba(0, 245, 195, 0.2);
-          }
-          .hero-title-highlight {
-            color: var(--primary-green);
-          }
-          .hero-subtitle {
-            margin-top: 1.5rem;
-            max-width: 42rem;
-            font-size: 1.125rem;
-            line-height: 1.75rem;
-            color: var(--text-dark);
-          }
-          
-          /* --- Main Deployment Card --- */
-          .deploy-card {
-            background-color: transparent;
-            border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 1rem;
-            padding: 2rem;
-            margin-top: 2.5rem;
-            width: 100%;
-            max-width: 500px;
-            backdrop-filter: blur(1px);
-            box-shadow: none;
-          }
-          .deploy-card h3 {
-            font-size: 1.5rem;
-            font-weight: 700;
-            margin-bottom: 1.5rem;
-            color: var(--text-light);
-            text-align: left;
-          }
-          
-          /* --- Input & Button Styles --- */
-          .input {
-            width: 100%;
-            background-color: var(--input-bg);
-            border: 1px solid var(--input-border);
-            color: var(--text-light);
-            padding: 0.75rem 1rem;
-            border-radius: 0.5rem;
-            font-size: 1rem;
-            transition: border-color 0.3s ease;
-            box-sizing: border-box;
-          }
-          .input:focus {
-            outline: none;
-            border-color: var(--input-focus-border);
-          }
-          .input::placeholder {
-            color: var(--text-dark);
-          }
-          
-          .btn {
-            padding: 0.75rem 1.5rem;
-            border-radius: 0.5rem;
-            font-weight: 600;
-            font-size: 1rem;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            border: none;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-          }
-          .btn-primary {
-            background-color: var(--primary-green);
-            color: #000;
-          }
-          .btn-primary:hover:not(:disabled) {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 15px rgba(0, 245, 195, 0.3);
-          }
-          .btn-secondary {
-            background-color: transparent;
-            color: var(--text-light);
-            border: 1px solid var(--card-border);
-            padding: 0.5rem 1rem;
-          }
-          .btn-secondary:hover:not(:disabled) {
-            background-color: var(--card-bg-hover);
-            border-color: var(--card-border-hover);
-          }
-          .btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-          }
-
-          /* --- Loading Dots Animation --- */
-          .loading-dots {
-            display: inline-flex;
-            align-items: center;
-            margin-left: 8px;
-          }
-          .loading-dots span {
-            display: inline-block;
-            width: 6px;
-            height: 6px;
-            background-color: #000;
-            border-radius: 50%;
-            margin: 0 2px;
-            animation: dot-pulse 1.4s infinite ease-in-out both;
-          }
-          .loading-dots span:nth-child(1) { animation-delay: -0.32s; }
-          .loading-dots span:nth-child(2) { animation-delay: -0.16s; }
-          @keyframes dot-pulse {
-            0%, 80%, 100% { transform: scale(0); }
-            40% { transform: scale(1.0); }
-          }
-          
-          /* --- Terminal Styles --- */
-          .terminal {
-            background-color: #000;
-            border: 1px solid var(--input-border);
-            border-radius: 0.5rem;
-            padding: 1rem;
-            height: 250px;
-            overflow-y: auto;
-            font-family: 'Courier New', Courier, monospace;
-            font-size: 0.875rem;
-            text-align: left;
-          }
-          .terminal-line {
-            white-space: pre-wrap;
-            line-height: 1.5;
-          }
-          
-          /* --- Deployment Summary --- */
-          .summary-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 1rem;
-          }
-          .summary-item {
-            border-radius: 8px;
-            padding: 1rem;
-            text-align: center;
-          }
-          .summary-item-title {
-            font-weight: 600;
-            margin-bottom: 0.5rem;
-          }
-          .summary-item-value {
-            font-size: 1.25rem;
-            font-weight: 700;
-          }
-          .status-success {
-            background: rgba(34, 197, 94, 0.1); 
-            border: 1px solid rgba(34, 197, 94, 0.2);
-            color: #22c55e;
-          }
-          .build-time {
-            background: rgba(0, 212, 255, 0.1); 
-            border: 1px solid rgba(0, 212, 255, 0.2);
-            color: #00d4ff;
-          }
-          .security-score {
-            background: rgba(147, 51, 234, 0.1); 
-            border: 1px solid rgba(147, 51, 234, 0.2);
-            color: #9333ea;
-          }
-
-          /* --- Features Section --- */
-          .feature-card {
-            background-color: transparent;
-            border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 1rem;
-            padding: 1.5rem;
-            display: flex;
-            flex-direction: column;
-            min-height: 220px;
-            box-shadow: none;
-            transition: box-shadow 0.3s ease, transform 0.3s ease;
-            margin-bottom: 1.5rem;
-            position: relative;
-            overflow: hidden;
-          }
-            align-items: flex-start;
-            gap: 1rem;
-            transition: all 0.3s ease;
-            text-align: left;
-          }
-          .feature-card:hover {
-            border-color: var(--card-border-hover);
-            background-color: var(--card-bg-hover);
-            transform: translateY(-0.5rem);
-          }
-          .feature-title {
-            font-size: 1.25rem;
-            font-weight: 700;
-            color: var(--text-light);
-          }
-          .feature-content {
-            color: var(--text-dark);
-            line-height: 1.6;
-            flex-grow: 1;
-          }
-          .feature-learn-more {
-            margin-top: auto;
-            padding-top: 1rem;
-          }
-          .learn-more-group {
-            color: var(--primary-green);
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            cursor: pointer;
-          }
-          .learn-more-arrow {
-            width: 1rem;
-            height: 1rem;
-            transition: transform 0.3s ease;
-          }
-          .feature-card:hover .learn-more-arrow {
-            transform: translateX(0.25rem);
-          }
-          
-          /* --- Responsive Design --- */
-          @media (min-width: 640px) {
-            .hero-title {
-              font-size: 4.5rem;
+            for (const step of steps) {
+                await new Promise(resolve => setTimeout(resolve, 1500 + Math.random() * 500));
+                currentLogs = [...currentLogs, step];
+                setDeployLogs(currentLogs);
             }
-            .hero-subtitle {
-              font-size: 1.25rem;
-            }
-            .features-grid {
-              grid-template-columns: repeat(2, 1fr);
-            }
-          }
 
-          @media (min-width: 1024px) {
-            .features-grid {
-              grid-template-columns: repeat(4, 1fr);
+            const response = await fetch('http://localhost:8000/api/deploy', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ repo_url: repoUrl.trim() }),
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.detail || `Deployment failed: ${response.statusText}`);
             }
-            .hero-title {
-              font-size: 5rem;
-            }
-          }
-        `}
-      </style>
-      <div className="page-container">
-        <div className="hero-section">
-          <h1 className="hero-title">
-            Deploy with Confidence
-          </h1>
-          <p className="hero-subtitle">
-            Deploy your GitHub repository with automatic security analysis and continuous monitoring. One click is all it takes.
-          </p>
 
-          <div className="deploy-card">
-            <h3>Repository Deployment</h3>
-            <div style={{ marginBottom: '24px' }}>
-              <input
-                type="url"
-                className="input"
-                placeholder="https://github.com/username/repository"
-                value={repoUrl}
-                onChange={(e) => setRepoUrl(e.target.value)}
-                disabled={isDeploying}
-                style={{ marginBottom: '16px' }}
-              />
-              
-              {error && (
-                <div style={{ 
-                  backgroundColor: 'rgba(239, 68, 68, 0.1)', 
-                  border: '1px solid rgba(239, 68, 68, 0.2)', 
-                  color: '#ef4444', 
-                  padding: '0.75rem', 
-                  borderRadius: '0.5rem', 
-                  marginBottom: '16px',
-                  fontSize: '0.875rem'
-                }}>
-                  ❌ {error}
-                </div>
-              )}
-              
-              <button 
-                className="btn btn-secondary" 
-                onClick={handleDeploy}
-                disabled={isDeploying || !repoUrl}
-                style={{ width: '100%' }}
-              >
-                {isDeploying ? (
-                  <>
-                    Deploying
-                    <div className="loading-dots">
-                      <span></span>
-                      <span></span>
-                      <span></span>
-                    </div>
-                  </>
-                ) : (
-                  'Deploy Now'
-                )}
-              </button>
-            </div>
+            const deployResult = await response.json();
+            const finalResult = {
+                url: repoUrl,
+                deploymentUrl: deployResult.deployment_url,
+                status: 'Success',
+                buildTime: '2m 18s', // Example data
+            };
 
-            {deployLogs.length > 1 && (
-              <div>
-                <h4 style={{ marginBottom: '16px', textAlign: 'left', fontWeight: '600' }}>Deployment Progress</h4>
-                <div className="terminal">
-                  {deployLogs.map((log, index) => (
-                    <div key={index} className="terminal-line">
-                      {log}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+            setDeploymentStatus(finalResult);
+            setScanResult(finalResult); // Pass result to parent
+            setDeployLogs(prev => [...prev, `[OK] Deployment complete! Live at: ${deployResult.deployment_url}`]);
 
-            {deploymentStatus && (
-              <div style={{ marginTop: '32px' }}>
-                <h4 style={{ marginBottom: '16px', textAlign: 'left', fontWeight: '600' }}>Deployment Summary</h4>
-                <div className="summary-grid">
-                  <div className="summary-item status-success">
-                    <div className="summary-item-title">Status</div>
-                    <div className="summary-item-value">✅ Success</div>
-                  </div>
-                  <div className="summary-item build-time">
-                    <div className="summary-item-title">Build Time</div>
-                    <div className="summary-item-value">{deploymentStatus.buildTime}</div>
-                  </div>
-                  <div className="summary-item security-score">
-                    <div className="summary-item-title">Type</div>
-                    <div className="summary-item-value">🚀 Deploy</div>
-                  </div>
-                </div>
+        } catch (error) {
+            setError(error.message || 'An unknown error occurred during deployment.');
+            setDeployLogs(prev => [...prev, `[ERROR] Deployment failed: ${error.message}`]);
+        } finally {
+            setIsDeploying(false);
+        }
+    };
+
+    return (
+        <PageWrapper>
+            <style>{`
+                :root {
+                    --bg-black: #000000; --card-bg: rgba(10, 10, 10, 0.5); --card-border: rgba(255, 255, 255, 0.1);
+                    --card-border-hover: rgba(255, 255, 255, 0.3); --text-primary: #f5f5f5; --text-secondary: #bbbbbb;
+                }
+                .deploy-page { background: transparent; color: var(--text-primary); min-height: 100vh; font-family: sans-serif; }
+                .layout-container { max-width: 900px; margin: 0 auto; padding: 0 2rem 4rem 2rem; }
+
+                .hero-section { text-align: center; padding: 4rem 1rem 3rem 1rem; }
+                .hero-title { font-size: 3.5rem; font-weight: 700; margin: 0; letter-spacing: -2px; color: var(--text-primary); }
+                .hero-subtitle { color: var(--text-secondary); margin: 1rem auto 0 auto; font-size: 1.1rem; max-width: 650px; line-height: 1.6; }
+
+                .card { width: 100%; box-sizing: border-box; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 1rem; padding: 2rem; margin-bottom: 2rem; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); transition: all 0.3s ease; }
+                .card:hover { border-color: var(--card-border-hover); box-shadow: 0 0 25px rgba(255, 255, 255, 0.08); }
+                .card h3 { font-size: 1rem; font-weight: 500; color: var(--text-secondary); margin: 0 0 1.5rem 0; text-transform: uppercase; letter-spacing: 1px; }
+
+                .input-group { display: flex; gap: 1rem; }
+                .input { flex-grow: 1; background: rgba(0,0,0,0.2); border: 1px solid var(--card-border); color: var(--text-primary); border-radius: 0.5rem; padding: 0.75rem 1rem; font-size: 1rem; }
+                .btn { background: var(--text-primary); border: 1px solid var(--text-primary); color: var(--bg-black); padding: 0.75rem 1.5rem; border-radius: 0.5rem; font-weight: 600; cursor: pointer; transition: all 0.3s; }
+                .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+                .btn:hover:not(:disabled) { box-shadow: 0 0 20px rgba(255, 255, 255, 0.2); transform: translateY(-2px); }
+                .btn-secondary { background: transparent; color: var(--text-secondary); border: 1px solid var(--card-border); }
+                .btn-secondary:hover:not(:disabled) { border-color: var(--text-primary); color: var(--text-primary); }
+
+                .error-message { color: var(--text-secondary); background: rgba(255, 77, 77, 0.1); border-left: 3px solid #ff4d4d; padding: 1rem; margin-top: 1rem; }
                 
-                {/* Remove vulnerability summary since no security analysis */}
+                .terminal { background: #000; border: 1px solid var(--card-border); border-radius: 0.5rem; padding: 1.5rem; height: 250px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 0.9rem; }
+                .terminal-line { line-height: 1.6; color: var(--text-secondary); }
+                .terminal-line .log-prefix { display: inline-block; margin-right: 0.75rem; color: var(--text-primary); font-weight: 600; }
                 
-                <div style={{ marginTop: '24px', display: 'flex', gap: '12px' }}>
-                  <a 
-                    href={deploymentStatus.deploymentUrl} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="btn btn-primary"
-                    style={{ flex: 1 }}
-                  >
-                    Visit Site
-                  </a>
-                  <button 
-                    className="btn btn-secondary" 
-                    onClick={() => {
-                      // Navigate to analytics or monitoring page
-                      console.log('Navigate to deployment analytics');
-                    }}
-                    style={{ flex: 1 }}
-                  >
-                    View Analytics
-                  </button>
-                </div>
+                .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; }
+                .summary-item { text-align: center; }
+                .summary-item .label { font-size: 0.8rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.5rem; }
+                .summary-item .value { font-size: 1.5rem; font-weight: 600; color: var(--text-primary); }
                 
-                {/* Additional deployment info */}
-                <div style={{ marginTop: '16px', padding: '12px', backgroundColor: 'rgba(26, 26, 26, 0.3)', borderRadius: '6px', fontSize: '0.875rem' }}>
-                  <div style={{ color: '#a3a3a3', marginBottom: '4px' }}>Repository: {deploymentStatus.url}</div>
-                  <div style={{ color: '#a3a3a3' }}>Deployed via: GitHub Webhook Integration</div>
-                </div>
-              </div>
-            )}
-          </div>
-          
-          <div className="features-grid">
-            <div className="feature-card">
-              <h3 className="feature-title">Automatic Builds</h3>
-              <p className="feature-content">Smart build detection with optimized bundling and compression for any framework.</p>
-               <div className="feature-learn-more">
-                    <div className="learn-more-group">
-                        <span>Learn More</span>
-                        <div className="learn-more-arrow"><ArrowRight size={16} /></div>
+                .action-button { background: rgba(255,255,255,0.1); color: var(--text-primary); border: 1px solid transparent; padding: 0.75rem 1.5rem; border-radius: 0.5rem; font-size: 0.9rem; font-weight: 500; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 0.5rem; transition: all 0.2s; }
+                .action-button:hover { background: var(--text-primary); color: var(--bg-black); }
+            `}</style>
+            
+            <div className="deploy-page">
+                <div className="layout-container">
+                    <div className="hero-section">
+                        <h1 className="hero-title">Deploy with Confidence</h1>
+                        <p className="hero-subtitle">Deploy your GitHub repository with automatic security analysis and continuous monitoring. One click is all it takes.</p>
                     </div>
+
+                    <div className="card">
+                        <h3>Repository Deployment</h3>
+                        <div className="input-group">
+                            <input
+                                type="url"
+                                className="input"
+                                placeholder="https://github.com/username/repository"
+                                value={repoUrl}
+                                onChange={(e) => setRepoUrl(e.target.value)}
+                                disabled={isDeploying}
+                            />
+                            <button className="btn" onClick={handleDeploy} disabled={isDeploying || !repoUrl}>
+                                {isDeploying ? 'Deploying...' : 'Deploy'}
+                            </button>
+                        </div>
+                        {error && <p className="error-message">{error}</p>}
+                    </div>
+
+                    {deployLogs.length > 0 && (
+                        <div className="card">
+                            <h3>Live Deployment Log</h3>
+                            <div className="terminal">
+                                {deployLogs.map((log, index) => (
+                                    <div key={index} className="terminal-line">
+                                        <span className="log-prefix">[{log.match(/^\[(.*?)\]/)?.[1] || 'INFO'}]</span>
+                                        {log.replace(/^\[.*?\]\s/, '')}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {deploymentStatus && (
+                        <div className="card">
+                            <h3>Deployment Complete</h3>
+                            <div className="summary-grid">
+                                <div className="summary-item">
+                                    <div className="label">Status</div>
+                                    <div className="value">{deploymentStatus.status}</div>
+                                </div>
+                                <div className="summary-item">
+                                    <div className="label">Build Time</div>
+                                    <div className="value">{deploymentStatus.buildTime}</div>
+                                </div>
+                                <div className="summary-item">
+                                    <div className="label">Live URL</div>
+                                    <div className="value" style={{ fontSize: '1.1rem', wordBreak: 'break-all' }}>{deploymentStatus.deploymentUrl}</div>
+                                </div>
+                            </div>
+                            <div style={{ marginTop: '2rem', display: 'flex', justifyContent: 'center', gap: '1rem' }}>
+                                <a href={deploymentStatus.deploymentUrl} target="_blank" rel="noopener noreferrer" className="action-button">
+                                    Visit Site <ArrowRight size={16} />
+                                </a>
+                                <button className="btn-secondary" onClick={() => { setDeploymentStatus(null); setRepoUrl(''); setDeployLogs([]); }}>Deploy Another</button>
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
-            <div className="feature-card">
-              <h3 className="feature-title">Edge Deployment</h3>
-              <p className="feature-content">Global CDN distribution ensures maximum performance and reliability for your users.</p>
-               <div className="feature-learn-more">
-                    <div className="learn-more-group">
-                        <span>Learn More</span>
-                        <div className="learn-more-arrow"><ArrowRight size={16} /></div>
-                    </div>
-                </div>
-            </div>
-            <div className="feature-card">
-              <h3 className="feature-title">Security Scanning</h3>
-              <p className="feature-content">Real-time vulnerability detection and dependency analysis on every single deploy.</p>
-               <div className="feature-learn-more">
-                    <div className="learn-more-group">
-                        <span>Learn More</span>
-                        <div className="learn-more-arrow"><ArrowRight size={16} /></div>
-                    </div>
-                </div>
-            </div>
-            <div className="feature-card">
-              <h3 className="feature-title">Continuous Monitoring</h3>
-              <p className="feature-content">24/7 uptime monitoring with instant alerts to keep your application online and healthy.</p>
-               <div className="feature-learn-more">
-                    <div className="learn-more-group">
-                        <span>Learn More</span>
-                        <div className="learn-more-arrow"><ArrowRight size={16} /></div>
-                    </div>
-                </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </PageWrapper>
-  );
+        </PageWrapper>
+    );
 };
 
 export default DeployPage;

@@ -1,156 +1,79 @@
 import React from 'react';
 
-const ChatResponseFormatter = ({ message, type = 'ai' }) => {
-  // Function to format the message with better readability
-  const formatMessage = (text) => {
-    if (!text) return '';
-    
-    // Split into sections based on headers
-    const sections = text.split(/(?=^##?\s)/m);
-    
-    return sections.map((section, index) => {
-      // Check if it's a header
-      const headerMatch = section.match(/^(##?\s*)(.+)$/m);
-      if (headerMatch) {
-        const [, headerPrefix, headerText] = headerMatch;
-        const isMainHeader = headerPrefix.startsWith('##');
-        const isSubHeader = headerPrefix.startsWith('#');
-        
-        return (
-          <div key={index} className={`chat-section ${isMainHeader ? 'main-header' : isSubHeader ? 'sub-header' : 'content'}`}>
-            <h4 className="section-header" style={{ 
-              color: isMainHeader ? '#00d4ff' : '#fafafa',
-              fontSize: isMainHeader ? '18px' : '16px',
-              marginBottom: '12px',
-              marginTop: index > 0 ? '20px' : '0'
-            }}>
-              {headerText.trim()}
-            </h4>
-            {section.replace(/^##?\s*.+$/m, '').trim() && (
-              <div className="section-content">
-                {formatContent(section.replace(/^##?\s*.+$/m, '').trim())}
-              </div>
-            )}
-          </div>
-        );
-      } else {
-        return (
-          <div key={index} className="chat-section content">
-            <div className="section-content">
-              {formatContent(section.trim())}
-            </div>
-          </div>
-        );
-      }
+// A robust function to parse a line of text for markdown (bold, code).
+const parseInlineMarkdown = (line) => {
+    // Regex to find **bold** or `code` segments.
+    const regex = /(\*\*.*?\*\*|\`.*?\`)/g;
+    const parts = line.split(regex);
+
+    return parts.map((part, index) => {
+        // Handle **bold** text
+        if (part.startsWith('**') && part.endsWith('**')) {
+            return <strong key={index}>{part.slice(2, -2)}</strong>;
+        }
+        // Handle `code` text
+        if (part.startsWith('`') && part.endsWith('`')) {
+            // The <code> tag is styled in the parent ReportPage.jsx
+            return <code key={index}>{part.slice(1, -1)}</code>;
+        }
+        // Handle plain text
+        return part;
     });
-  };
-
-  // Function to format content with proper styling
-  const formatContent = (content) => {
-    if (!content) return null;
-    
-    // Split by lines and process each line
-    const lines = content.split('\n');
-    
-    return lines.map((line, index) => {
-      const trimmedLine = line.trim();
-      if (!trimmedLine) return <br key={index} />;
-      
-      // Check for bullet points
-      if (trimmedLine.startsWith('•') || trimmedLine.startsWith('-')) {
-        return (
-          <div key={index} className="bullet-point">
-            <span className="bullet">•</span>
-            <span className="bullet-text">{trimmedLine.substring(1).trim()}</span>
-          </div>
-        );
-      }
-      
-      // Check for numbered lists
-      const numberedMatch = trimmedLine.match(/^(\d+)\.\s(.+)$/);
-      if (numberedMatch) {
-        return (
-          <div key={index} className="numbered-point">
-            <span className="number">{numberedMatch[1]}.</span>
-            <span className="numbered-text">{numberedMatch[2]}</span>
-          </div>
-        );
-      }
-      
-      // Check for bold text
-      if (trimmedLine.includes('**')) {
-        const parts = trimmedLine.split(/(\*\*[^*]+\*\*)/g);
-        return (
-          <div key={index} className="formatted-line">
-            {parts.map((part, partIndex) => {
-              if (part.startsWith('**') && part.endsWith('**')) {
-                return <strong key={partIndex} style={{ color: '#00d4ff' }}>{part.slice(2, -2)}</strong>;
-              }
-              return <span key={partIndex}>{part}</span>;
-            })}
-          </div>
-        );
-      }
-      
-      // Check for emojis and format them
-      const emojiMatch = trimmedLine.match(/^([🚨⚠️✅❌🔒🛡️🔐🌐🎯⚡📂🔍📊💡🔧📝ℹ️]+)\s(.+)$/);
-      if (emojiMatch) {
-        return (
-          <div key={index} className="emoji-line">
-            <span className="emoji">{emojiMatch[1]}</span>
-            <span className="emoji-text">{emojiMatch[2]}</span>
-          </div>
-        );
-      }
-      
-      // Regular text
-      return (
-        <div key={index} className="regular-line">
-          {trimmedLine}
-        </div>
-      );
-    });
-  };
-
-  // Function to detect message type and apply appropriate styling
-  const getMessageStyle = () => {
-    if (type === 'user') {
-      return {
-        background: 'rgba(0, 212, 255, 0.1)',
-        border: '1px solid rgba(0, 212, 255, 0.2)',
-        padding: '16px',
-        borderRadius: '12px',
-        marginBottom: '16px'
-      };
-    } else {
-      return {
-        background: 'rgba(255, 255, 255, 0.05)',
-        border: '1px solid rgba(255, 255, 255, 0.1)',
-        padding: '20px',
-        borderRadius: '12px',
-        marginBottom: '16px',
-        fontSize: '14px',
-        lineHeight: '1.6'
-      };
-    }
-  };
-
-  return (
-    <div className="chat-message" style={getMessageStyle()}>
-      <div className="message-header" style={{ 
-        color: type === 'user' ? '#00d4ff' : '#fafafa',
-        fontWeight: '600',
-        marginBottom: '12px',
-        fontSize: '14px'
-      }}>
-        {type === 'user' ? '👤 You' : '🤖 AI Security Advisor'}
-      </div>
-      
-      <div className="message-content">
-        {formatMessage(message)}
-      </div>
-    </div>
-  );
 };
 
-export default ChatResponseFormatter; 
+const ChatResponseFormatter = ({ message }) => {
+    if (!message) return null;
+
+    // A more structured approach to render markdown content.
+    const renderFormattedMessage = () => {
+        const blocks = [];
+        const lines = message.split('\n');
+        let currentList = [];
+
+        lines.forEach((line, index) => {
+            const trimmedLine = line.trim();
+
+            // Check for bullet points (starting with '-' or '•')
+            if (trimmedLine.startsWith('- ') || trimmedLine.startsWith('• ')) {
+                // Add the content of the list item, parsing it for bold/code.
+                currentList.push(
+                    <li key={index}>
+                        {parseInlineMarkdown(trimmedLine.substring(2))}
+                    </li>
+                );
+            } else {
+                // If we were building a list, push it to blocks and reset.
+                if (currentList.length > 0) {
+                    blocks.push(<ul key={`ul-${index}`}>{currentList}</ul>);
+                    currentList = [];
+                }
+                // Handle regular paragraphs (non-empty lines).
+                if (trimmedLine) {
+                    blocks.push(
+                        <p key={index}>
+                            {parseInlineMarkdown(trimmedLine)}
+                        </p>
+                    );
+                }
+            }
+        });
+
+        // If the message ends with a list, make sure to add it.
+        if (currentList.length > 0) {
+            blocks.push(<ul key={`ul-final`}>{currentList}</ul>);
+        }
+
+        return blocks;
+    };
+
+    // The main container div's className should be set by the parent
+    // (e.g., className="chat-message ai-message").
+    // All styling is now inherited from the parent's stylesheet.
+    return (
+        <div className="formatted-content">
+            {renderFormattedMessage()}
+        </div>
+    );
+};
+
+export default ChatResponseFormatter;

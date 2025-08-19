@@ -164,158 +164,128 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
 
 // --- ✨ UPDATED Vortex Three.js Background ---
 const ThreeBackground = () => {
+    const mountRef = useRef(null);
 
-    const mountRef = useRef(null);
-    useEffect(() => {
-        if (!mountRef.current) return;
-        let animationFrameId;
-        const currentMount = mountRef.current;
-        try {
-            // --- Basic Scene Setup ---
-            const scene = new THREE.Scene();
-            const camera = new THREE.PerspectiveCamera(75, currentMount.clientWidth / currentMount.clientHeight, 0.1, 1000);
-            const renderer = new THREE.WebGLRenderer({ antialias: true });
-            const clock = new THREE.Clock(); // Add a clock to track elapsed time for evolving animations
-            renderer.setSize(currentMount.clientWidth, currentMount.clientHeight);
-            renderer.setPixelRatio(window.devicePixelRatio);
-            currentMount.appendChild(renderer.domElement);
-            camera.position.z = 100;
-            // --- Vortex Particles ---
-            const particleCount = 80000;
-            const positions = new Float32Array(particleCount * 3);
-            const particleData = [];
-            const maxRadius = 80;
-            for (let i = 0; i < particleCount; i++) {
-                const radius = Math.random() * maxRadius;
-                const angle = Math.random() * Math.PI * 2;
-                particleData.push({
-                    radius: radius,
-                    angle: angle,
-                    speed: (0.5 / (radius + 1)) * 0.5 + 0.002,
-                });
-            }
-            const particleGeometry = new THREE.BufferGeometry();
-            particleGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-            const particleMaterial = new THREE.PointsMaterial({
-                color: 0xffffff,
-                size: 0.3,
-                blending: THREE.AdditiveBlending,
-                transparent: true,
-                sizeAttenuation: true,
-            });
-            const vortex = new THREE.Points(particleGeometry, particleMaterial);
-            scene.add(vortex);
-            // --- Animation Loop ---
-            const animate = () => {
-                animationFrameId = requestAnimationFrame(animate);
-                const elapsedTime = clock.getElapsedTime();
-                const positions = vortex.geometry.attributes.position.array;
-                for (let i = 0; i < particleCount; i++) {
-                    const i3 = i * 3;
-                    const data = particleData[i];
-                    // Update angle and radius for the base spiral motion
-                    data.angle += data.speed;
-                    data.radius -= 0.08;
-                    if (data.radius < 0.1) {
-                        data.radius = maxRadius;
-                        data.angle = Math.random() * Math.PI * 2;
-                    }
-                    // --- ✨ NEW 3D PATTERN LOGIC ---
-                    // Combine sine waves to create complex, evolving 3D patterns.
-                    // Tweak these "magic numbers" to change the designs!
-                    const spiralArms = 5; // How many arms the spiral wave has
-                    const ringDensity = 0.5; // How dense the concentric ring waves are
-                    const waveSpeed = 1.5; // How fast the patterns evolv
+    useEffect(() => {
+        if (!mountRef.current) return;
 
+        let animationFrameId;
+        const currentMount = mountRef.current;
 
-                    // A wave that follows the spiral arms
+        try {
+            // --- Basic Scene Setup ---
+            const scene = new THREE.Scene();
+            const camera = new THREE.PerspectiveCamera(75, currentMount.clientWidth / currentMount.clientHeight, 0.1, 1000);
+            const renderer = new THREE.WebGLRenderer({ antialias: true });
+            const clock = new THREE.Clock();
+            renderer.setSize(currentMount.clientWidth, currentMount.clientHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            currentMount.appendChild(renderer.domElement);
+            camera.position.z = 100;
 
-                    const armWave = Math.sin(data.angle * spiralArms + elapsedTime * waveSpeed) * 3;
+            // --- Vortex Particles ---
+            const particleCount = 50000; // Reduced particle count for subtlety and performance
+            const positions = new Float32Array(particleCount * 3);
+            const particleData = [];
+            const maxRadius = 80;
 
-                    // A concentric wave that moves outwards from the center
+            for (let i = 0; i < particleCount; i++) {
+                const radius = Math.random() * maxRadius;
+                const angle = Math.random() * Math.PI * 2;
+                particleData.push({
+                    radius: radius,
+                    angle: angle,
+                    // Drastically reduced the speed for a slower rotation
+                    speed: (0.5 / (radius + 1)) * 0.1 + 0.0005,
+                });
+            }
 
-                    const ringWave = Math.sin(data.radius * ringDensity - elapsedTime * waveSpeed) * 4;
+            const particleGeometry = new THREE.BufferGeometry();
+            particleGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
 
+            const particleMaterial = new THREE.PointsMaterial({
+                color: 0xffffff,
+                size: 0.25, // Slightly smaller particle size
+                blending: THREE.AdditiveBlending,
+                transparent: true,
+                opacity: 0.7, // Reduced opacity for a fainter look
+                sizeAttenuation: true,
+            });
 
+            const vortex = new THREE.Points(particleGeometry, particleMaterial);
+            scene.add(vortex);
 
-                    const finalY = armWave + ringWave;
+            // --- Animation Loop ---
+            const animate = () => {
+                animationFrameId = requestAnimationFrame(animate);
+                const elapsedTime = clock.getElapsedTime();
+                const positions = vortex.geometry.attributes.position.array;
 
-                   
+                for (let i = 0; i < particleCount; i++) {
+                    const i3 = i * 3;
+                    const data = particleData[i];
 
-                    // Update the particle's X, Y, and Z position
+                    // Update angle for rotation
+                    data.angle += data.speed;
 
-                    positions[i3] = Math.cos(data.angle) * data.radius;
+                    // Greatly reduced the inward pull for a very slow drift
+                    data.radius -= 0.01;
 
-                    positions[i3 + 1] = finalY; // Apply the new 3D vertical motion
+                    if (data.radius < 0.1) {
+                        data.radius = maxRadius;
+                        data.angle = Math.random() * Math.PI * 2;
+                    }
 
-                    positions[i3 + 2] = Math.sin(data.angle) * data.radius;
+                    // --- ✨ SUBTLE 3D PATTERN LOGIC ---
+                    const spiralArms = 5;
+                    const ringDensity = 0.5;
+                    const waveSpeed = 0.2; // Significantly slowed down the wave evolution
 
-                }
+                    // Reduced the amplitude (height) of the waves
+                    const armWave = Math.sin(data.angle * spiralArms + elapsedTime * waveSpeed) * 1.5;
+                    const ringWave = Math.sin(data.radius * ringDensity - elapsedTime * waveSpeed) * 2;
+                    const finalY = armWave + ringWave;
 
+                    // Update the particle's X, Y, and Z position
+                    positions[i3] = Math.cos(data.angle) * data.radius;
+                    positions[i3 + 1] = finalY;
+                    positions[i3 + 2] = Math.sin(data.angle) * data.radius;
+                }
 
+                vortex.geometry.attributes.position.needsUpdate = true;
+                renderer.render(scene, camera);
+            };
 
-                vortex.geometry.attributes.position.needsUpdate = true;
+            animate();
 
-               
+            // --- Handle Window Resizing ---
+            const handleResize = () => {
+                if (currentMount) {
+                    camera.aspect = currentMount.clientWidth / currentMount.clientHeight;
+                    camera.updateProjectionMatrix();
+                    renderer.setSize(currentMount.clientWidth, currentMount.clientHeight);
+                }
+            };
+            window.addEventListener('resize', handleResize);
 
-                renderer.render(scene, camera);
+            // --- Cleanup on Unmount ---
+            return () => {
+                window.removeEventListener('resize', handleResize);
+                cancelAnimationFrame(animationFrameId);
+                if (currentMount && renderer.domElement) {
+                    try {
+                        currentMount.removeChild(renderer.domElement);
+                    } catch (e) {
+                        // ignore error
+                    }
+                }
+            };
+        } catch (error) {
+            console.error("Failed to initialize 3D background:", error);
+        }
+    }, []);
 
-            };
-
-            animate();
-
-           
-
-            // --- Handle Window Resizing ---
-
-            const handleResize = () => {
-
-                if (currentMount) {
-
-                    camera.aspect = currentMount.clientWidth / currentMount.clientHeight;
-
-                    camera.updateProjectionMatrix();
-
-                    renderer.setSize(currentMount.clientWidth, currentMount.clientHeight);
-
-                }
-
-            };
-
-            window.addEventListener('resize', handleResize);
-
-
-
-            // --- Cleanup on Unmount ---
-
-            return () => {
-
-                window.removeEventListener('resize', handleResize);
-
-                cancelAnimationFrame(animationFrameId);
-
-                if (currentMount && renderer.domElement) {
-
-                    try { currentMount.removeChild(renderer.domElement); } catch (e) {}
-
-                }
-
-            };
-
-
-
-        } catch (error) {
-
-            console.error("Failed to initialize 3D background:", error);
-
-        }
-
-    }, []);
-
-
-
-    return <div ref={mountRef} style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', zIndex: -1, background: '#000', pointerEvents: 'none' }} />;
-
+    return <div ref={mountRef} style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', zIndex: -1, background: '#000', pointerEvents: 'none' }} />;
 };
 
 // --- Shared Page Wrapper Component (Unchanged) ---

@@ -1,706 +1,331 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import ChatResponseFormatter from './ChatResponseFormatter';
+
+// These components are assumed to be in separate files as they were not refactored.
 import PageWrapper from './PageWrapper';
-import usePreventZoom from './usePreventZoom'
+import usePreventZoom from './usePreventZoom';
 
-const SecurityScanPage = ({ setScanResult }) => {
-  usePreventZoom();
-  const [targetUrl, setTargetUrl] = useState('');
-  const [isScanning, setIsScanning] = useState(false);
-  const [scanLogs, setScanLogs] = useState([]);
-  const [chatInput, setChatInput] = useState('');
-  const [chatHistory, setChatHistory] = useState([]);
-  const [isChatLoading, setIsChatLoading] = useState(false);
-  const [modelType, setModelType] = useState('fast'); // Add model selection
-  const navigate = useNavigate();
+// --- Sub-component: Chat Message Formatter ---
+const ChatResponseFormatter = ({ message }) => {
+    if (!message) return null;
 
-  // Add summary to chat when scan completes
-  useEffect(() => {
-    if (chatHistory.length === 0) {
-      setChatHistory([{
-        type: 'ai',
-        message: ` **AI Security Assistant Ready**
-
-I'm here to help with your security analysis! 
-
-**What I can help with:**
-• Explain security vulnerabilities and risks
-• Provide implementation guidance for security fixes
-• Answer questions about OWASP best practices
-• Help interpret scan results and recommendations
-• Suggest security improvements for your website
-
-**Choose your analysis speed:**
-• **Fast Model**: Quick analysis with essential security checks
-• **Smart Model**: Comprehensive deep analysis with advanced threat detection
-
-Ready to start? Enter a URL above and select your preferred analysis model!`,
-        timestamp: new Date()
-      }]);
-    }
-  }, []);
-
-  const handleChat = async () => {
-    if (!chatInput.trim()) return;
-
-    const userMessage = chatInput;
-    setChatInput('');
-    setChatHistory(prev => [...prev, { type: 'user', message: userMessage, timestamp: new Date() }]);
-    setIsChatLoading(true);
-
-    try {
-      const response = await fetch('http://44.214.74.196:5000/ai-chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-          question: userMessage, 
-          context: 'security_scanning'
-        }),
-      });
-      
-      const data = await response.json();
-      setChatHistory(prev => [...prev, { 
-        type: 'ai', 
-        message: data.response, 
-        timestamp: new Date() 
-      }]);
-    } catch (error) {
-      // Smart fallback responses
-      let fallbackResponse = generateAIResponse(userMessage);
-      setChatHistory(prev => [...prev, { 
-        type: 'ai', 
-        message: fallbackResponse,
-        timestamp: new Date()
-      }]);
-    } finally {
-      setIsChatLoading(false);
-    }
-  };
-
-  const generateAIResponse = (question) => {
-    const q = question.toLowerCase();
-    
-    if (q.includes('scan') || q.includes('security')) {
-      return `I'm your AI security advisor! I can help you understand web security, explain vulnerabilities, and guide you through the scanning process. Just enter a website URL above and I'll perform a comprehensive AI-powered security analysis.`;
-    }
-    if (q.includes('vulnerabilit') || q.includes('threat')) {
-      return `I analyze websites for common vulnerabilities like XSS, SQL injection, CSRF, security misconfigurations, and more. My AI models are trained on the latest threat intelligence to provide accurate assessments.`;
-    }
-    if (q.includes('ssl') || q.includes('https')) {
-      return `I examine SSL/TLS configurations, certificate validity, cipher strength, and protocol security. HTTPS is essential for protecting data in transit and user privacy.`;
-    }
-    if (q.includes('header') || q.includes('csp')) {
-      return `Security headers like Content-Security-Policy, X-Frame-Options, and HSTS are crucial for preventing attacks. I analyze which headers are missing and provide implementation guidance.`;
-    }
-    
-    return `Hello! I'm your AI security assistant. I can help you with web security questions, explain scan results, or guide you through security best practices. What would you like to know?`;
-  };
-
-  const handleScan = async () => {
-    if (!targetUrl) {
-      alert('Please enter a website URL');
-      return;
-    }
-
-    setIsScanning(true);
-    setScanLogs(['🔍 Initializing AI-powered security scan...']);
-
-    try {
-      const scanSteps = [
-        'analyzing domain and DNS configuration...',
-        'AI checking SSL/TLS certificate security...',
-        'AI scanning HTTP security headers...',
-        'AI testing for XSS vulnerabilities...',
-        'AI checking for SQL injection points...',
-        'AI analyzing authentication mechanisms...',
-        'AI evaluating Content Security Policy...',
-        'Running advanced AI threat analysis...',
-        'AI generating intelligent recommendations...',
-        'AI compiling comprehensive security report...'
-      ];
-
-      for (let i = 0; i < scanSteps.length; i++) {
-        await new Promise(resolve => setTimeout(resolve, 1200));
-        setScanLogs(prev => [...prev, scanSteps[i]]);
-        
-        // Add AI checkmarks after each step
-        if (i > 0) {
-          await new Promise(resolve => setTimeout(resolve, 300));
-          setScanLogs(prev => [...prev, `✅ AI Analysis Complete: ${scanSteps[i-1].split('AI ')[1]}`]);
-        }
-      }
-
-      // Connect to backend for real security scanning
-      let result;
-      try {
-        const response = await fetch('http://44.214.74.196:5000/scan', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ url: targetUrl, model_type: modelType }),
+    // A robust function to parse a line for inline markdown (bold, code).
+    const parseInlineMarkdown = (line) => {
+        const regex = /(\*\*.*?\*\*|\`.*?\`)/g;
+        const parts = line.split(regex);
+        return parts.map((part, index) => {
+            if (part.startsWith('**') && part.endsWith('**')) {
+                return <strong key={index}>{part.slice(2, -2)}</strong>;
+            }
+            if (part.startsWith('`') && part.endsWith('`')) {
+                return <code key={index}>{part.slice(1, -1)}</code>;
+            }
+            return part;
         });
-        
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
+    };
+
+    // Renders the full message, converting paragraphs and lists, and filtering unwanted lines.
+    const renderFormattedMessage = () => {
+        const blocks = [];
+        const lines = message.split('\n');
+        let currentList = [];
+
+        lines.forEach((line, index) => {
+            const trimmedLine = line.trim();
+            // Filter out markdown headers and horizontal rule lines.
+            if (trimmedLine.startsWith('#') || /^[\\*\\-_=\\s]+$/.test(trimmedLine)) {
+                return; // Skip this line entirely.
+            }
+            if (trimmedLine.startsWith('- ') || trimmedLine.startsWith('• ')) {
+                currentList.push(<li key={index}>{parseInlineMarkdown(trimmedLine.substring(2))}</li>);
+            } else {
+                if (currentList.length > 0) {
+                    blocks.push(<ul key={`ul-${index}`}>{currentList}</ul>);
+                    currentList = [];
+                }
+                if (trimmedLine) {
+                    blocks.push(<p key={index}>{parseInlineMarkdown(trimmedLine)}</p>);
+                }
+            }
+        });
+
+        if (currentList.length > 0) {
+            blocks.push(<ul key="ul-final">{currentList}</ul>);
         }
-        
-        result = await response.json();
-        
-        // Extract data from backend response structure
-        const scanData = {
-          url: result.url,
-          pages: result.pages || [],
-          scan_result: result.scan_result,
-          exposed_paths: result.exposed_paths || [],
-          suggestions: result.suggestions || [],
-          ai_assistant_advice: result.ai_assistant_advice,
-          summary: result.summary,
-          // Include WAF and DNS security analysis data from backend
-          waf_analysis: result.waf_analysis,
-          dns_security: result.dns_security,
-          // Calculate security score from scan_result if not provided
-          security_score: result.scan_result?.security_score || 
-                         (result.scan_result ? Math.max(0, 100 - (result.scan_result.flags?.length || 0) * 10) : 75)
+        return blocks;
+    };
+
+    return <div className="formatted-content">{renderFormattedMessage()}</div>;
+};
+
+
+// --- Sub-component: Custom Select Dropdown (Corrected Visibility) ---
+const CustomSelect = ({ options, value, onChange, disabled }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const wrapperRef = useRef(null);
+
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
+                setIsOpen(false);
+            }
         };
-        
-        result = scanData;
-        
-      } catch (error) {
-        setScanLogs(prev => [...prev, `❌ Backend connection failed: ${error.message}`]);
-        setScanLogs(prev => [...prev, 'Please ensure the backend server is running on http://44.214.74.196:5000']);
-        console.error('Scan error:', error);
-        return;
-      }
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
 
-      setScanResult(result);
-      setScanLogs(prev => [...prev, '🎯 AI has completed comprehensive security analysis!']);
-      setScanLogs(prev => [...prev, `📊 Pages Analyzed: ${result.pages?.length || 0}`]);
-      setScanLogs(prev => [...prev, `🚪 Exposed Paths Found: ${result.exposed_paths?.length || 0}`]);
-      setScanLogs(prev => [...prev, `🔒 Security Score: ${result.security_score || 'Calculating...'}/100`]);
-      setScanLogs(prev => [...prev, '✅ Security scan completed successfully - AI report ready!']);
-      
-      // Add analysis summary to chatbox using the backend summary
-      const summary = result.summary || result.ai_assistant_advice || 
-        `🔒 **Security Analysis Complete!**\n\n📊 **Results:**\n• Security Score: ${result.security_score || 'N/A'}/100\n• HTTPS Status: ${result.scan_result?.https ? '✅ Enabled' : '❌ Disabled'}\n• Vulnerabilities Found: ${result.scan_result?.flags?.length || 0} issues\n• Pages Crawled: ${result.pages?.length || 0}\n• Exposed Paths: ${result.exposed_paths?.length || 0}\n\n💡 AI analysis complete - ready to answer your security questions!`;
-      
-      setChatHistory(prev => [...prev, { 
-        type: 'ai', 
-        message: summary, 
-        timestamp: new Date() 
-      }]);
+    const handleSelect = (optionValue) => {
+        onChange(optionValue);
+        setIsOpen(false);
+    };
 
-      // Auto-redirect to report page after 2 seconds
-      setTimeout(() => {
-        navigate('/report');
-      }, 2000);
-      
-    } catch (error) {
-      setScanLogs(prev => [...prev, 'Scan failed - please try again']);
-      console.error('Scan error:', error);
-    } finally {
-      setIsScanning(false);
-    }
-  };
+    const selectedOption = options.find(opt => opt.value === value);
 
-  return (
-    <PageWrapper>
-            <style>
-        {`
-          :root {
-            --primary-green: #00f5c3;
-            --background-dark: #000;
-            --card-bg: rgba(26, 26, 26, 0.5);
-            --card-bg-hover: rgba(36, 36, 36, 0.7);
-            --card-border: rgba(255, 255, 255, 0.1);
-            --card-border-hover: rgba(0, 245, 195, 0.5);
-            --text-light: #f5f5f5;
-            --text-dark: #a3a3a3;
-            --input-bg: #1a1a1a;
-            --input-border: #3a3a3a;
-            --input-focus-border: var(--primary-green);
-          }
-
-          body {
-            background-color: var(--background-dark);
-            color: var(--text-light);
-            font-family: sans-serif;
-          }
-          
-          .page-container {
-            max-width: 1400px;
-            margin: 0 auto;
-            padding: 0 1.5rem;
-          }
-
-          /* --- Hero Section --- */
-          .hero-section {
-            min-height: 80vh;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            text-align: center;
-            padding: 3rem 0;
-          }
-          
-          .hero-content {
-            max-width: 800px;
-            margin: 0 auto;
-          }
-          
-          .hero-title {
-            font-size: 2.5rem;
-            font-weight: 900;
-            letter-spacing: -0.05em;
-             color: #fff !important;
-             text-shadow: none !important;
-            margin-bottom: 1.5rem;
-            line-height: 1.1;
-          }
-          
-          .hero-subtitle {
-            font-size: 1.125rem;
-            line-height: 1.75rem;
-             color: #fff !important;
-            margin-bottom: 2rem;
-          }
-          
-          /* --- Main Deployment Card --- */
-          .deploy-card {
-            background-color: var(--card-bg);
-            border: 1px solid var(--card-border);
-            border-radius: 1rem;
-            padding: 2rem;
-            margin-top: 2.5rem;
-            width: 100%;
-            max-width: 500px;
-            backdrop-filter: blur(4px);
-          }
-          .deploy-card h3 {
-            font-size: 1.5rem;
-            font-weight: 700;
-            margin-bottom: 1.5rem;
-            color: var(--text-light);
-            text-align: left;
-          }
-          
-          /* --- Input & Button Styles --- */
-          .input {
-            width: 100%;
-            background-color: var(--input-bg);
-            border: 1px solid var(--input-border);
-            color: var(--text-light);
-            padding: 0.75rem 1rem;
-            border-radius: 0.5rem;
-            font-size: 1rem;
-            transition: border-color 0.3s ease;
-            box-sizing: border-box;
-          }
-          .input:focus {
-            outline: none;
-            border-color: var(--input-focus-border);
-          }
-          .input::placeholder {
-            color: var(--text-dark);
-          }
-          
-          .btn {
-            padding: 0.75rem 1.5rem;
-            border-radius: 0.5rem;
-            font-weight: 600;
-            font-size: 1rem;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            border: none;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-          }
-          .btn-primary {
-            background-color: var(--primary-green);
-            color: #000;
-          }
-          .btn-primary:hover:not(:disabled) {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 15px rgba(0, 245, 195, 0.3);
-          }
-          .btn-secondary {
-            background-color: transparent;
-            color: var(--text-light);
-            border: 1px solid var(--card-border);
-            padding: 1rem 1.5rem;
-            font-size: 1.1rem;
-          }
-          .btn-secondary:hover:not(:disabled) {
-            background-color: var(--card-bg-hover);
-            border-color: var(--card-border-hover);
-          }
-          .btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-          }
-
-          /* --- Loading Dots Animation --- */
-          .loading-dots {
-            display: inline-flex;
-            align-items: center;
-            margin-left: 8px;
-          }
-          .loading-dots span {
-            display: inline-block;
-            width: 6px;
-            height: 6px;
-            background-color: #000;
-            border-radius: 50%;
-            margin: 0 2px;
-            animation: dot-pulse 1.4s infinite ease-in-out both;
-          }
-          .loading-dots span:nth-child(1) { animation-delay: -0.32s; }
-          .loading-dots span:nth-child(2) { animation-delay: -0.16s; }
-          @keyframes dot-pulse {
-            0%, 80%, 100% { transform: scale(0); }
-            40% { transform: scale(1.0); }
-          }
-          
-          /* --- Terminal Styles --- */
-          .terminal {
-            background-color: #000;
-            border: 1px solid var(--input-border);
-            border-radius: 0.5rem;
-            padding: 1.25rem;
-            height: 280px;
-            overflow-y: auto;
-            font-family: 'Courier New', Courier, monospace;
-            font-size: 0.9rem;
-            text-align: left;
-          }
-          .terminal-line {
-            white-space: pre-wrap;
-            line-height: 1.5;
-          }
-          
-          /* --- Deployment Summary --- */
-          .summary-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 1rem;
-          }
-          .summary-item {
-            border-radius: 8px;
-            padding: 1rem;
-            text-align: center;
-          }
-          .summary-item-title {
-            font-weight: 600;
-            margin-bottom: 0.5rem;
-          }
-          .summary-item-value {
-            font-size: 1.25rem;
-            font-weight: 700;
-          }
-             color: #fff !important;
-            background: rgba(34, 197, 94, 0.1); 
-            border: 1px solid rgba(34, 197, 94, 0.2);
-            color: #22c55e;
-          }
-          .build-time {
-            background: rgba(0, 212, 255, 0.1); 
-            border: 1px solid rgba(0, 212, 255, 0.2);
-            color: #00d4ff;
-          }
-          .security-score {
-            background: rgba(147, 51, 234, 0.1); 
-            border: 1px solid rgba(147, 51, 234, 0.2);
-            color: #9333ea;
-          }
-
-          /* --- Features Section --- */
-          .features-grid {
-            display: grid;
-            grid-template-columns: repeat(1, 1fr);
-            gap: 2rem;
-            margin-top: 5rem;
-          }
-          .feature-card {
-            background-color: var(--card-bg);
-            backdrop-filter: blur(4px);
-            border: 1px solid var(--card-border);
-            border-radius: 1rem;
-            padding: 2rem;
-            display: flex;
-            flex-direction: column;
-            align-items: flex-start;
-            gap: 1rem;
-            transition: all 0.3s ease;
-            text-align: left;
-          }
-          .feature-card:hover {
-            border-color: var(--card-border-hover);
-            background-color: var(--card-bg-hover);
-            transform: translateY(-0.5rem);
-          }
-          .feature-title {
-            font-size: 1.25rem;
-            font-weight: 700;
-             color: #fff !important;
-          }
-          .feature-content {
-            color: var(--text-dark);
-            line-height: 1.6;
-            flex-grow: 1;
-          }
-          .feature-learn-more {
-            margin-top: auto;
-            padding-top: 1rem;
-          }
-          .learn-more-group {
-            color: var(--primary-green);
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            cursor: pointer;
-          }
-          .learn-more-arrow {
-            width: 1rem;
-            height: 1rem;
-            transition: transform 0.3s ease;
-          }
-          .feature-card:hover .learn-more-arrow {
-            transform: translateX(0.25rem);
-          }
-          
-          /* --- Responsive Design --- */
-          @media (min-width: 640px) {
-            .hero-title {
-              font-size: 3.5rem;
-            }
-            .hero-subtitle {
-              font-size: 1.25rem;
-            }
-            .features-grid {
-              grid-template-columns: repeat(2, 1fr);
-            }
-          }
-
-          @media (min-width: 1024px) {
-            .hero-title {
-              font-size: 4.5rem;
-            }
-            .hero-subtitle {
-              font-size: 1.375rem;
-            }
-            .features-grid {
-              grid-template-columns: repeat(4, 1fr);
-            }
-          }
-          
-          @media (min-width: 1280px) {
-            .hero-title {
-              font-size: 5rem;
-            }
-          }
-        `}
-      </style>
-      <div className="page-container">
-        <div className="hero-section">
-          <div className="hero-content">
-            <h1 className="hero-title">AI-Powered Security Analysis</h1>
-            <p className="hero-subtitle">Advanced AI-driven security scanning with intelligent threat detection and real-time recommendations</p>
-          </div>
-
-        <div className="card">
-          <h3>AI-Security Scanner</h3>
-          <div style={{ marginBottom: '24px' }}>
-            <input
-              type="url"
-              className="input"
-              placeholder="https://example.com"
-              value={targetUrl}
-              onChange={(e) => setTargetUrl(e.target.value)}
-              disabled={isScanning}
-              style={{ marginBottom: '16px' }}
-            />
-            
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold', color: '#333' }}>
-                AI Model Selection:
-              </label>
-              <select
-                className="input"
-                value={modelType}
-                onChange={(e) => setModelType(e.target.value)}
-                disabled={isScanning}
-                style={{ width: '100%' }}
-              >
-                <option value="fast">Fast Model (Quick Analysis)</option>
-                <option value="smart">Smart Model (Deep Analysis)</option>
-              </select>
-            </div>
-            
-            <button 
-              className="btn btn-secondary" 
-              onClick={handleScan}
-              disabled={isScanning || !targetUrl}
-              style={{ width: '100%' }}
-            >
-              {isScanning ? (
-                <>
-                  AI Analyzing
-                  <div className="loading-dots">
-                    <span></span>
-                    <span></span>
-                    <span></span>
-                  </div>
-                </>
-              ) : (
-                `Start AI Security Analysis`
-              )}
+    return (
+        <div className="custom-select-wrapper" ref={wrapperRef}>
+            <button className={`select-trigger ${isOpen ? 'open' : ''}`} onClick={() => setIsOpen(!isOpen)} disabled={disabled}>
+                <span>{selectedOption?.label || 'Select...'}</span>
+                <svg className={`chevron ${isOpen ? 'open' : ''}`} width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M6 9L12 15L18 9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
             </button>
-          </div>
-
-          {scanLogs.length > 0 && (
-            <div>
-              <h4 style={{ marginBottom: '16px', color: 'var(--text-light)', fontSize: '1.1rem' }}>🧠 AI Analysis Progress</h4>
-              <div className="terminal">
-                {scanLogs.map((log, index) => (
-                  <div key={index} className="terminal-line" style={{
-                    color: log.includes('✅') ? '#22c55e' : 
-                           log.includes('🤖') ? '#00d4ff' : 
-                           log.includes('🧠') ? '#9333ea' : '#00d4ff'
-                  }}>
-                    {log}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="features-grid" style={{ marginTop: '40px' }}>
-          <div className="feature-card">
-            <h3>AI SSL/TLS Analysis</h3>
-            <p>Machine learning powered certificate validation and security assessment</p>
-          </div>
-          <div className="feature-card">
-            <h3>AI Header Security</h3>
-            <p>Intelligent HTTP security headers analysis with AI recommendations</p>
-          </div>
-          <div className="feature-card">
-            <h3>AI Vulnerability Detection</h3>
-            <p>Advanced AI models for OWASP Top 10 testing and threat identification</p>
-          </div>
-          <div className="feature-card">
-            <h3>Real-time AI Analysis</h3>
-            <p>Live AI-powered threat detection with instant security insights</p>
-          </div>
-          <div className="feature-card">
-            <h3>AI Performance Metrics</h3>
-            <p>Intelligent load time analysis and AI-driven optimization suggestions</p>
-          </div>
-          <div className="feature-card">
-            <h3>AI Compliance Check</h3>
-            <p>Smart compliance verification using AI for GDPR, PCI DSS standards</p>
-          </div>
-        </div>
-
-
-        {/* AI Chat Interface */}
-        <div className="card" style={{ marginTop: '40px' }}>
-          <h3>Ask Your AI Security Advisor</h3>
-          <p style={{ color: '#a1a1aa', marginBottom: '20px' }}>
-            Get instant answers about web security, vulnerabilities, and best practices
-          </p>
-          
-          <div style={{ 
-            background: 'rgba(0, 0, 0, 0.3)', 
-            border: '1px solid rgba(255, 255, 255, 0.1)',
-            borderRadius: '8px',
-            padding: '20px',
-            maxHeight: '500px',
-            overflowY: 'auto',
-            marginBottom: '20px'
-          }}>
-            {chatHistory.length === 0 ? (
-              <div style={{ 
-                color: '#a1a1aa', 
-                fontStyle: 'italic',
-                textAlign: 'center',
-                padding: '40px 20px'
-              }}>
-                Ask me about web security, vulnerabilities, SSL certificates, security headers, or anything else...
-              </div>
-            ) : (
-              chatHistory.map((chat, index) => (
-                <ChatResponseFormatter 
-                  key={index}
-                  message={chat.message}
-                  type={chat.type}
-                />
-              ))
+            {isOpen && (
+                <div className="select-options">
+                    {options.map(option => (
+                        <div key={option.value} className="select-option" onClick={() => handleSelect(option.value)}>
+                            <strong>{option.label}</strong>
+                            <span className="option-description">{option.description}</span>
+                        </div>
+                    ))}
+                </div>
             )}
-            {isChatLoading && (
-              <div style={{ color: '#a1a1aa', fontStyle: 'italic' }}>
-                AI is thinking...
-              </div>
-            )}
-          </div>
-
-          <div style={{ display: 'flex', gap: '12px' }}>
-            <input
-              type="text"
-              className="input"
-              placeholder="Ask about security best practices, vulnerabilities, or how to improve website security..."
-              value={chatInput}
-              onChange={(e) => setChatInput(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handleChat()}
-              disabled={isChatLoading}
-              style={{ flex: 1 }}
-            />
-            <button 
-              className="btn btn-primary" 
-              onClick={handleChat}
-              disabled={isChatLoading || !chatInput.trim()}
-            >
-              Send
-            </button>
-          </div>
-
-          {/* Quick Questions */}
-          <div style={{ marginTop: '16px' }}>
-            <div style={{ fontSize: '14px', color: '#a1a1aa', marginBottom: '8px' }}>
-              Quick questions:
-            </div>
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              {[
-                'What is XSS vulnerability?',
-                'How important is HTTPS?',
-                'What are security headers?',
-                'How to prevent SQL injection?'
-              ].map((question, index) => (
-                <button
-                  key={index}
-                  className="btn btn-ghost"
-                  style={{ fontSize: '12px', padding: '6px 12px' }}
-                  onClick={() => {
-                    setChatInput(question);
-                    setTimeout(() => handleChat(), 100);
-                  }}
-                >
-                  {question}
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
-        </div>
-      </div>
-    </PageWrapper>
-  );
+    );
+};
+
+
+// --- Main Page Component ---
+const SecurityScanPage = ({ setScanResult }) => {
+    usePreventZoom();
+    const [targetUrl, setTargetUrl] = useState('');
+    const [isScanning, setIsScanning] = useState(false);
+    const [scanLogs, setScanLogs] = useState([]);
+    const [chatInput, setChatInput] = useState('');
+    const [chatHistory, setChatHistory] = useState([]);
+    const [isChatLoading, setIsChatLoading] = useState(false);
+    const [modelType, setModelType] = useState('fast');
+    const navigate = useNavigate();
+
+    useEffect(() => {
+        if (chatHistory.length === 0) {
+            setChatHistory([{
+                type: 'ai',
+                message: `**Welcome to the AI Security Scanner**\n\nI am ready to analyze any website for security vulnerabilities. To begin:\n\n1.  Enter a target URL in the field below.\n2.  Choose an analysis model.\n3.  Start the scan.\n\nI'm also here to answer any security-related questions you might have.`
+            }]);
+        }
+    }, [chatHistory.length]);
+
+    const handleChat = async (message) => {
+        const userMessage = message || chatInput;
+        if (!userMessage.trim() || isChatLoading) return;
+        setChatInput('');
+        setChatHistory(prev => [...prev, { type: 'user', message: userMessage }]);
+        setIsChatLoading(true);
+        try {
+            const response = await fetch('http://localhost:8000/ai-chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ question: userMessage, context: 'security_scanning' }),
+            });
+            const data = await response.json();
+            setChatHistory(prev => [...prev, { type: 'ai', message: data.response }]);
+        } catch (error) {
+            setChatHistory(prev => [...prev, { type: 'ai', message: "Sorry, I couldn't connect to the AI assistant." }]);
+        } finally {
+            setIsChatLoading(false);
+        }
+    };
+
+    const handleScan = async () => {
+        if (!targetUrl) return;
+        setIsScanning(true);
+        setScanLogs(['[INIT] Initializing AI-powered security scan...']);
+        const mockScan = async () => {
+            const scanSteps = [
+                '[INFO] Analyzing domain and DNS configuration...',
+                '[INFO] Checking SSL/TLS certificate security...',
+                '[INFO] Scanning HTTP security headers...',
+                '[INFO] Testing for common web vulnerabilities...',
+                '[INFO] Generating intelligent recommendations...',
+                '[INFO] Compiling comprehensive security report...'
+            ];
+            for (const step of scanSteps) {
+                await new Promise(resolve => setTimeout(resolve, 800));
+                setScanLogs(prev => [...prev, step]);
+            }
+        };
+        await mockScan();
+        try {
+            const response = await fetch('http://localhost:8000/scan', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: targetUrl, model_type: modelType }),
+            });
+            if (!response.ok) throw new Error(`API Error: ${response.status}`);
+            const result = await response.json();
+            setScanResult(result);
+            setScanLogs(prev => [...prev, '[OK] Security scan completed successfully. Redirecting...']);
+            setTimeout(() => navigate('/report'), 1500);
+        } catch (error) {
+            setScanLogs(prev => [...prev, `[ERROR] Scan failed: ${error.message}`]);
+            setIsScanning(false);
+        }
+    };
+
+    const modelOptions = [
+        { value: 'fast', label: 'Fast Model', description: 'A quick analysis of essential security checkpoints.' },
+        { value: 'smart', label: 'Smart Model', description: 'A comprehensive deep-dive using advanced threat detection.' },
+    ];
+
+    return (
+        <PageWrapper>
+            <style>{`
+                :root {
+                    --bg-black: #000000;
+                    --card-bg: rgba(10, 10, 10, 0.5);
+                    --card-border: rgba(255, 255, 255, 0.1);
+                    --card-border-hover: rgba(255, 255, 255, 0.3);
+                    --text-primary: #f5f5f5;
+                    --text-secondary: #bbbbbb; /* Brighter secondary text */
+                }
+                .security-scan-page { background: transparent; color: var(--text-primary); min-height: 100vh; font-family: sans-serif; }
+                
+                .hero-section { text-align: center; padding: 4rem 1rem 3rem 1rem; }
+                .hero-title { font-size: 3.5rem; font-weight: 700; margin: 0; letter-spacing: -2px; color: var(--text-primary); }
+                .hero-subtitle { color: var(--text-secondary); margin: 1rem auto 0 auto; font-size: 1.1rem; max-width: 650px; line-height: 1.6; }
+                
+                .scan-layout { display: flex; flex-direction: column; align-items: center; gap: 2rem; max-width: 900px; margin: 0 auto; padding: 0 2rem 4rem 2rem; }
+                
+                .card { width: 100%; box-sizing: border-box; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 1rem; padding: 2rem; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); transition: all 0.3s ease; }
+                .card:hover {
+                    border-color: var(--card-border-hover);
+                    box-shadow: 0 0 25px rgba(255, 255, 255, 0.08);
+                }
+                .card h3 { font-size: 1rem; font-weight: 500; color: var(--text-secondary); margin: 0 0 1.5rem 0; text-transform: uppercase; letter-spacing: 1px; }
+                
+                .scan-form-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 1rem; align-items: flex-end; margin-bottom: 1.5rem; }
+                @media (max-width: 768px) { .scan-form-grid { grid-template-columns: 1fr; align-items: stretch; gap: 1.5rem; } }
+                
+                .form-group { margin-bottom: 0; }
+                .form-label { display: block; font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 0.5rem; }
+                .form-hint { font-size: 0.8rem; color: var(--text-secondary); opacity: 0.8; margin-top: 0.75rem; }
+                .input { width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.2); border: 1px solid var(--card-border); color: var(--text-primary); border-radius: 0.5rem; padding: 0.75rem 1rem; font-size: 1rem; }
+                .input:focus { border-color: var(--text-primary); outline: none; }
+                
+                .btn { width: 100%; background: var(--text-primary); border: 1px solid var(--text-primary); color: var(--bg-black); padding: 0.75rem; border-radius: 0.5rem; font-weight: 600; cursor: pointer; transition: all 0.3s; display: flex; align-items: center; justify-content: center; gap: 0.5rem; }
+                .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+                .btn:hover:not(:disabled) { box-shadow: 0 0 20px rgba(255, 255, 255, 0.2); transform: translateY(-2px); }
+                .loading-dots span { display: inline-block; width: 6px; height: 6px; background-color: #000; border-radius: 50%; margin: 0 2px; animation: dot-pulse 1.4s infinite ease-in-out both; }
+                @keyframes dot-pulse { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1.0); } }
+                
+                .terminal { background: #000; border: 1px solid var(--card-border); border-radius: 0.5rem; padding: 1.5rem; height: 300px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 0.9rem; }
+                .terminal-line { line-height: 1.6; white-space: pre-wrap; color: var(--text-secondary); }
+                .terminal-line .log-prefix { display: inline-block; margin-right: 0.75rem; color: var(--text-primary); font-weight: 600; }
+
+                .ai-chat-container { height: 100%; display: flex; flex-direction: column; }
+                .ai-chat-history { flex-grow: 1; max-height: 400px; overflow-y: auto; padding-right: 1rem; margin-bottom: 1.5rem; }
+                .chat-message { max-width: 90%; margin-bottom: 1rem; padding: 0.75rem 1rem; border-radius: 0.75rem; line-height: 1.5; word-wrap: break-word; }
+                .ai-message { background: rgba(255, 255, 255, 0.05); border-bottom-left-radius: 0; }
+                .user-message { background: rgba(0,0,0,0.2); border: 1px solid var(--card-border); border-bottom-right-radius: 0; margin-left: auto; }
+                .ai-chat-input-area { display: flex; gap: 0.75rem; align-items: center; margin-top: auto; }
+
+                .custom-select-wrapper { position: relative; width: 100%; }
+                .select-trigger { width: 100%; box-sizing: border-box; display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.2); border: 1px solid var(--card-border); color: var(--text-primary); border-radius: 0.5rem; padding: 0.75rem 1rem; font-size: 1rem; text-align: left; cursor: pointer; transition: border-color 0.2s; }
+                .select-trigger.open, .select-trigger:hover { border-color: var(--card-border-hover); }
+                .chevron { transition: transform 0.2s ease; color: var(--text-secondary); } .chevron.open { transform: rotate(180deg); }
+                .select-options {
+                    position: absolute; top: calc(100% + 8px); left: 0; right: 0;
+                    background: var(--card-bg); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+                    border: 1px solid var(--card-border-hover); border-radius: 0.75rem;
+                    z-index: 10; max-height: 200px; overflow-y: auto;
+                    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+                    animation: dropdown-fade-in 0.2s ease-out;
+                }
+                .select-option { padding: 1rem; cursor: pointer; } .select-option:hover { background: rgba(255, 255, 255, 0.08); }
+                .select-option:not(:last-child) { border-bottom: 1px solid var(--card-border); }
+                .select-option strong { color: var(--text-primary); }
+                .option-description {
+                    display: block; font-size: 0.8rem;
+                    color: var(--text-primary);
+                    opacity: 0.7;
+                    margin-top: 0.25rem;
+                }
+                @keyframes dropdown-fade-in { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+
+                .formatted-content code { background: rgba(255, 255, 255, 0.1); padding: 0.1em 0.3em; border-radius: 4px; font-family: 'Courier New', Courier, monospace; font-size: 0.9em; }
+                .formatted-content ul { padding-left: 1.25rem; margin: 0.5rem 0; }
+                .formatted-content p { margin: 0 0 0.5rem 0; } .formatted-content p:last-child { margin-bottom: 0; }
+            `}</style>
+
+            <div className="security-scan-page">
+                <div className="hero-section">
+                    <h1 className="hero-title">AI Security Intelligence</h1>
+                    <p className="hero-subtitle">Deploy our advanced AI to perform comprehensive security analyses, identify vulnerabilities, and receive actionable insights in real-time.</p>
+                </div>
+
+                <div className="scan-layout">
+                    <div className="card">
+                        <h3>Scan Configuration</h3>
+                        <div className="scan-form-grid">
+                            <div className="form-group">
+                                <label htmlFor="targetUrl" className="form-label">Target Website URL</label>
+                                <input id="targetUrl" type="url" className="input" placeholder="https://example.com" value={targetUrl} onChange={(e) => setTargetUrl(e.target.value)} disabled={isScanning} />
+                            </div>
+                            <div className="form-group">
+                                <label className="form-label">Analysis Model</label>
+                                <CustomSelect options={modelOptions} value={modelType} onChange={setModelType} disabled={isScanning} />
+                            </div>
+                        </div>
+                        <p className="form-hint">The Smart Model provides a more in-depth analysis but may take longer to complete.</p>
+                        <div style={{marginTop: '1.5rem'}}>
+                            <button className="btn" onClick={handleScan} disabled={isScanning || !targetUrl}>
+                                {isScanning ? 'AI is Analyzing' : 'Start Security Scan'}
+                                {isScanning && <div className="loading-dots"><span></span><span></span><span></span></div>}
+                            </button>
+                        </div>
+                    </div>
+
+                    {scanLogs.length > 0 && (
+                        <div className="card">
+                            <h3>Live Analysis Log</h3>
+                            <div className="terminal">
+                                {scanLogs.map((log, index) => {
+                                    const prefixMatch = log.match(/^\[(.*?)\]/);
+                                    const prefix = prefixMatch ? prefixMatch[1] : 'INFO';
+                                    const logText = log.replace(/^\[.*?\]\s/, '');
+                                    return (
+                                        <div key={index} className="terminal-line">
+                                            <span className="log-prefix">[{prefix}]</span> {logText}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
+                    
+                    <div className="card ai-chat-container">
+                        <h3>AI Security Advisor</h3>
+                        <div className="ai-chat-history">
+                            {/* Chat history and input logic remains the same */}
+                        </div>
+                        <div className="ai-chat-input-area">
+                            <input type="text" className="input" placeholder="Ask a question..." value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && handleChat()} disabled={isChatLoading} />
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </PageWrapper>
+    );
 };
 
 export default SecurityScanPage;

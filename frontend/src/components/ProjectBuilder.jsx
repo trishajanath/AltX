@@ -2,717 +2,304 @@ import React, { useState, useRef, useEffect } from 'react';
 import PageWrapper from './PageWrapper';
 import usePreventZoom from './usePreventZoom';
 
-// Add CSS animations
-const spinKeyframes = `
-  @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-  }
-  
-  @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-  
-  @keyframes typing {
-    from { width: 0; }
-    to { width: 100%; }
-  }
-`;
+// --- Sub-component: Custom Select Dropdown ---
+const CustomSelect = ({ options, value, onChange, disabled }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const wrapperRef = useRef(null);
 
-// Inject the keyframes into the document head
-if (typeof document !== 'undefined') {
-  const style = document.createElement('style');
-  style.innerHTML = spinKeyframes;
-  document.head.appendChild(style);
-}
-
-const ProjectBuilder = () => {
-  usePreventZoom();
-  const [projectIdea, setProjectIdea] = useState('');
-  const [isBuilding, setIsBuilding] = useState(false);
-  const [buildProgress, setBuildProgress] = useState([]);
-  const [generatedProject, setGeneratedProject] = useState(null);
-  const [techStack, setTechStack] = useState('auto');
-  const [projectType, setProjectType] = useState('web-app');
-  const [complexity, setComplexity] = useState('medium');
-  const [fileTree, setFileTree] = useState([]);
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [fileContent, setFileContent] = useState('');
-  const [previewUrl, setPreviewUrl] = useState('');
-  const textareaRef = useRef(null);
-
-  // Auto-resize textarea
-  useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
-    }
-  }, [projectIdea]);
-
-  const buildProject = async () => {
-    if (!projectIdea.trim()) return;
-
-    setIsBuilding(true);
-    setBuildProgress(['🚀 Starting project generation...']);
-    setGeneratedProject(null);
-
-    try {
-      // Simulate building process with realistic steps
-      const steps = [
-        '🚀 Starting project generation...',
-        '🧠 Analyzing project requirements...',
-        '🏗️ Selecting optimal tech stack...',
-        '📁 Creating project structure...',
-        '⚙️ Generating core components...',
-        '🎨 Setting up UI framework...',
-        '🔧 Configuring build tools...',
-        '📦 Installing dependencies...',
-        '🔗 Setting up API endpoints...',
-        '✅ Project generation complete!'
-      ];
-
-      // Show progress steps
-      for (let i = 1; i < steps.length - 1; i++) {
-        setBuildProgress(prev => [...prev, steps[i]]);
-        await new Promise(resolve => setTimeout(resolve, 800 + Math.random() * 400));
-      }
-
-      // Call the actual backend API
-      const response = await fetch('http://localhost:8000/generate-project', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          idea: projectIdea,
-          project_type: projectType,
-          tech_stack: techStack,
-          complexity: complexity
-        }),
-      });
-
-      const data = await response.json();
-      
-      if (data.success) {
-        setBuildProgress(prev => [...prev, steps[steps.length - 1]]);
-        setGeneratedProject(data.project);
-
-        // Fetch file tree
-        const treeRes = await fetch(`http://localhost:8000/project-file-tree?project_name=${encodeURIComponent(data.project.name)}`);
-        const treeData = await treeRes.json();
-        if (treeData.success) {
-          setFileTree(treeData.tree || []);
-        }
-
-        // Fetch preview URL
-        const previewRes = await fetch(`http://localhost:8000/project-preview-url?project_name=${encodeURIComponent(data.project.name)}`);
-        const previewData = await previewRes.json();
-        if (previewData.success) {
-          setPreviewUrl(previewData.url);
-        }
-      } else {
-        throw new Error(data.error || 'Project generation failed');
-      }
-
-    } catch (error) {
-      console.error('Project generation error:', error);
-      setBuildProgress(prev => [...prev, `❌ ${error.message || 'Project generation failed. Please try again.'}`]);
-    } finally {
-      setIsBuilding(false);
-    }
-  };
-
-  const resetBuilder = () => {
-  setProjectIdea('');
-  setBuildProgress([]);
-  setGeneratedProject(null);
-  setFileTree([]);
-  setSelectedFile(null);
-  setFileContent('');
-  setPreviewUrl('');
-  setIsBuilding(false);
-  };
-
-  return (
-    <PageWrapper>
-      <style>
-        {`
-          :root {
-            --primary-green: #00f5c3;
-            --primary-blue: #00d4ff;
-            --background-dark: #0a0a0a;
-            --card-bg: rgba(26, 26, 26, 0.8);
-            --card-bg-hover: rgba(36, 36, 36, 0.9);
-            --card-border: rgba(255, 255, 255, 0.1);
-            --text-light: #f5f5f5;
-            --text-dark: #a3a3a3;
-            --success: #22c55e;
-            --warning: #f59e0b;
-            --error: #ef4444;
-          }
-
-          body {
-            background: linear-gradient(135deg, var(--background-dark) 0%, #1a1a1a 100%);
-            color: var(--text-light);
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-          }
-          
-          .builder-container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 2rem;
-            min-height: 100vh;
-          }
-          
-          .hero-section {
-            text-align: center;
-            margin-bottom: 3rem;
-          }
-          
-          .hero-title {
-            font-size: 3.5rem;
-            font-weight: 900;
-            background: linear-gradient(135deg, var(--primary-green), var(--primary-blue));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            margin-bottom: 1rem;
-            line-height: 1.1;
-            font-family: 'Chakra Petch', sans-serif !important;
-            color: #ffffffff !important;
-            text-shadow: none !important;
-          }
-          
-          .hero-subtitle {
-            font-size: 1.25rem;
-            color: var(--text-dark);
-            max-width: 600px;
-            margin: 0 auto 2rem;
-            line-height: 1.6;
-            font-family: 'Chakra Petch', sans-serif !important;
-            color: #fff !important;
-            text-shadow: none !important;
-          }
-          
-          .build-card {
-            background: var(--card-bg);
-            backdrop-filter: blur(20px);
-            border: 1px solid var(--card-border);
-            border-radius: 1rem;
-            padding: 2rem;
-            margin-bottom: 2rem;
-            transition: all 0.3s ease;
-          }
-          
-          .build-card:hover {
-            background: var(--card-bg-hover);
-            border-color: rgba(0, 245, 195, 0.3);
-            transform: translateY(-2px);
-          }
-          
-          .idea-input {
-            width: 100%;
-            background: rgba(0, 0, 0, 0.3);
-            border: 2px solid rgba(255, 255, 255, 0.1);
-            border-radius: 12px;
-            padding: 1.5rem;
-            color: var(--text-light);
-            font-size: 1.1rem;
-            line-height: 1.6;
-            resize: none;
-            min-height: 120px;
-            transition: all 0.3s ease;
-            font-family: inherit;
-          }
-          
-          .idea-input:focus {
-            outline: none;
-            border-color: var(--primary-green);
-            box-shadow: 0 0 0 3px rgba(0, 245, 195, 0.1);
-            background: rgba(0, 0, 0, 0.5);
-          }
-          
-          .idea-input::placeholder {
-            color: var(--text-dark);
-          }
-          
-          .options-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 1rem;
-            margin: 1.5rem 0;
-          }
-          
-          .option-group {
-            display: flex;
-            flex-direction: column;
-            gap: 0.5rem;
-          }
-          
-          .option-label {
-            font-weight: 600;
-            color: var(--text-light);
-            font-size: 0.9rem;
-          }
-          
-          .option-select {
-            background: rgba(0, 0, 0, 0.3);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 8px;
-            padding: 0.75rem;
-            color: var(--text-light);
-            font-size: 0.9rem;
-            transition: all 0.3s ease;
-          }
-          
-          .option-select:focus {
-            outline: none;
-            border-color: var(--primary-green);
-            box-shadow: 0 0 0 2px rgba(0, 245, 195, 0.1);
-          }
-          
-          .build-button {
-            width: 100%;
-            background: linear-gradient(135deg, var(--primary-green) 0%, var(--primary-blue) 100%);
-            color: #000;
-            border: none;
-            border-radius: 12px;
-            padding: 1rem 2rem;
-            font-size: 1.1rem;
-            font-weight: 700;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 0.5rem;
-            margin-top: 1.5rem;
-          }
-          
-          .build-button:hover:not(:disabled) {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 25px rgba(0, 245, 195, 0.3);
-          }
-          
-          .build-button:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-            transform: none;
-          }
-          
-          .progress-container {
-            background: rgba(0, 0, 0, 0.3);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 12px;
-            padding: 1.5rem;
-            margin-top: 1.5rem;
-            max-height: 300px;
-            overflow-y: auto;
-          }
-          
-          .progress-item {
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-            margin-bottom: 0.75rem;
-            animation: fadeIn 0.5s ease;
-            font-family: 'SF Mono', Monaco, monospace;
-            font-size: 0.9rem;
-          }
-          
-          .progress-item:last-child {
-            margin-bottom: 0;
-          }
-          
-          .spinner {
-            width: 16px;
-            height: 16px;
-            border: 2px solid rgba(0, 245, 195, 0.2);
-            border-top: 2px solid var(--primary-green);
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-          }
-          
-          .project-result {
-            background: linear-gradient(135deg, rgba(0, 245, 195, 0.1) 0%, rgba(0, 212, 255, 0.1) 100%);
-            border: 1px solid rgba(0, 245, 195, 0.3);
-            border-radius: 16px;
-            padding: 2rem;
-            margin-top: 2rem;
-            animation: fadeIn 0.8s ease;
-          }
-          
-          .project-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            margin-bottom: 1.5rem;
-          }
-          
-          .project-title {
-            font-size: 1.8rem;
-            font-weight: 800;
-            color: var(--primary-green);
-            margin-bottom: 0.5rem;
-            font-family: 'Chakra Petch', sans-serif !important;
-            color: #fff !important;
-            text-shadow: none !important;
-          }
-          
-          .project-description {
-            color: var(--text-dark);
-            font-size: 1rem;
-            line-height: 1.5;
-            font-family: 'Chakra Petch', sans-serif !important;
-            color: #fff !important;
-            text-shadow: none !important;
-          }
-          
-          .project-actions {
-            display: flex;
-            gap: 1rem;
-            flex-wrap: wrap;
-          }
-          
-          .action-button {
-            background: rgba(0, 0, 0, 0.3);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            border-radius: 8px;
-            padding: 0.5rem 1rem;
-            color: var(--text-light);
-            text-decoration: none;
-            font-size: 0.9rem;
-            font-weight: 600;
-            transition: all 0.3s ease;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-          }
-          
-          .action-button:hover {
-            background: rgba(0, 245, 195, 0.1);
-            border-color: var(--primary-green);
-            transform: translateY(-1px);
-          }
-          
-          .project-details {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 1.5rem;
-          }
-          
-          .detail-section {
-            background: rgba(0, 0, 0, 0.2);
-            border-radius: 12px;
-            padding: 1.5rem;
-          }
-          
-          .detail-title {
-            font-size: 1.1rem;
-            font-weight: 700;
-            color: var(--text-light);
-            margin-bottom: 1rem;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            font-family: 'Chakra Petch', sans-serif !important;
-            color: #fff !important;
-            text-shadow: none !important;
-          }
-          
-          .tech-stack {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.5rem;
-          }
-          
-          .tech-item {
-            background: rgba(0, 245, 195, 0.1);
-            border: 1px solid rgba(0, 245, 195, 0.3);
-            border-radius: 20px;
-            padding: 0.3rem 0.8rem;
-            font-size: 0.8rem;
-            font-weight: 600;
-            color: var(--primary-green);
-          }
-          
-          .feature-list, .structure-list {
-            list-style: none;
-            padding: 0;
-            margin: 0;
-          }
-          
-          .feature-item, .structure-item {
-            padding: 0.5rem 0;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-            color: var(--text-dark);
-            font-size: 0.9rem;
-          }
-          
-          .feature-item:last-child, .structure-item:last-child {
-            border-bottom: none;
-          }
-          
-          .structure-item {
-            font-family: 'SF Mono', Monaco, monospace;
-          }
-          
-          .reset-button {
-            background: transparent;
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            border-radius: 8px;
-            padding: 0.75rem 1.5rem;
-            color: var(--text-light);
-            font-size: 0.9rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            margin-top: 1rem;
-          }
-          
-          .reset-button:hover {
-            background: rgba(255, 255, 255, 0.05);
-            border-color: rgba(255, 255, 255, 0.3);
-          }
-          
-          @media (max-width: 768px) {
-            .builder-container {
-              padding: 1rem;
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
+                setIsOpen(false);
             }
-            
-            .hero-title {
-              font-size: 2.5rem;
-            }
-            
-            .options-grid {
-              grid-template-columns: 1fr;
-            }
-            
-            .project-actions {
-              flex-direction: column;
-            }
-            
-            .project-details {
-              grid-template-columns: 1fr;
-            }
-          }
-        `}
-      </style>
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
 
-      <div className="builder-container">
-        <div className="hero-section">
-          <h1 className="hero-title">Let's build something new</h1>
-          <p className="hero-subtitle">
-            Describe the application you want to build, or start from a template. 
-            Our AI will generate a complete project structure with code, dependencies, and deployment ready.
-          </p>
-        </div>
+    const handleSelect = (optionValue) => {
+        onChange(optionValue);
+        setIsOpen(false);
+    };
 
-        {!generatedProject && (
-          <div className="build-card">
-            <textarea
-              ref={textareaRef}
-              value={projectIdea}
-              onChange={(e) => setProjectIdea(e.target.value)}
-              placeholder="e.g., 'A Python Flask app with a Postgres database for tracking user habits'"
-              className="idea-input"
-              disabled={isBuilding}
-            />
+    const selectedOption = options.find(opt => opt.value === value);
 
-            <div className="options-grid">
-              <div className="option-group">
-                <label className="option-label">Project Type</label>
-                <select 
-                  value={projectType} 
-                  onChange={(e) => setProjectType(e.target.value)}
-                  className="option-select"
-                  disabled={isBuilding}
-                >
-                  <option value="web-app">Web Application</option>
-                  <option value="mobile-app">Mobile App</option>
-                  <option value="api">API Service</option>
-                  <option value="desktop-app">Desktop App</option>
-                  <option value="ai-ml">AI/ML Project</option>
-                  <option value="blockchain">Blockchain App</option>
-                </select>
-              </div>
-
-              <div className="option-group">
-                <label className="option-label">Tech Stack</label>
-                <select 
-                  value={techStack} 
-                  onChange={(e) => setTechStack(e.target.value)}
-                  className="option-select"
-                  disabled={isBuilding}
-                >
-                  <option value="auto">Auto-select</option>
-                  <option value="react-node">React + Node.js</option>
-                  <option value="python-fastapi">Python + FastAPI</option>
-                  <option value="nextjs">Next.js Full-stack</option>
-                  <option value="vue-express">Vue + Express</option>
-                  <option value="django">Django</option>
-                  <option value="rails">Ruby on Rails</option>
-                </select>
-              </div>
-
-              <div className="option-group">
-                <label className="option-label">Complexity</label>
-                <select 
-                  value={complexity} 
-                  onChange={(e) => setComplexity(e.target.value)}
-                  className="option-select"
-                  disabled={isBuilding}
-                >
-                  <option value="simple">Simple (MVP)</option>
-                  <option value="medium">Medium (Full-featured)</option>
-                  <option value="complex">Complex (Enterprise)</option>
-                </select>
-              </div>
-            </div>
-
-            <button 
-              onClick={buildProject}
-              disabled={isBuilding || !projectIdea.trim()}
-              className="build-button"
-            >
-              {isBuilding ? (
-                <>
-                  <div className="spinner"></div>
-                  Building Project...
-                </>
-              ) : (
-                <>
-                  ✨ Build Project
-                </>
-              )}
+    return (
+        <div className="custom-select-wrapper" ref={wrapperRef}>
+            <button className={`select-trigger ${isOpen ? 'open' : ''}`} onClick={() => setIsOpen(!isOpen)} disabled={disabled}>
+                <span>{selectedOption?.label || 'Select...'}</span>
+                <svg className={`chevron ${isOpen ? 'open' : ''}`} width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M6 9L12 15L18 9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
             </button>
-
-            {buildProgress.length > 0 && (
-              <div className="progress-container">
-                {buildProgress.map((step, index) => (
-                  <div key={index} className="progress-item">
-                    {index === buildProgress.length - 1 && isBuilding ? (
-                      <div className="spinner"></div>
-                    ) : (
-                      <span>✓</span>
-                    )}
-                    <span>{step}</span>
-                  </div>
-                ))}
-              </div>
+            {isOpen && (
+                <div className="select-options">
+                    {options.map(option => (
+                        <div key={option.value} className="select-option" onClick={() => handleSelect(option.value)}>
+                            <strong>{option.label}</strong>
+                            {option.description && <span className="option-description">{option.description}</span>}
+                        </div>
+                    ))}
+                </div>
             )}
-          </div>
-        )}
+        </div>
+    );
+};
 
-        {generatedProject && (
-          <div className="project-result">
-            <div className="project-header">
-              <div>
-                <h2 className="project-title">{generatedProject.name}</h2>
-                <p className="project-description">{generatedProject.description}</p>
-              </div>
-              <div className="project-actions">
-                <a href={generatedProject.github_repo} className="action-button" target="_blank" rel="noopener noreferrer">
-                  📁 View Code
-                </a>
-                <a href={generatedProject.deployment_url} className="action-button" target="_blank" rel="noopener noreferrer">
-                  🚀 Live Demo
-                </a>
-                <button onClick={() => navigator.clipboard.writeText(generatedProject.github_repo)} className="action-button">
-                  📋 Copy Repo
-                </button>
-              </div>
-            </div>
 
-            <div style={{ display: 'flex', gap: '2rem', flexWrap: 'wrap' }}>
-              {/* File Tree Sidebar */}
-              <div style={{ minWidth: 220, maxWidth: 320 }}>
-                <h3 className="detail-title">📂 File Tree</h3>
-                <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                  {fileTree.length === 0 && <li style={{ color: 'var(--text-dark)' }}>No files found.</li>}
-                  {fileTree.map((file, idx) => (
-                    <li key={idx} style={{ padding: '0.5rem 0', cursor: 'pointer', color: selectedFile === file.path ? 'var(--primary-green)' : 'var(--text-light)' }}
-                      onClick={async () => {
-                        setSelectedFile(file.path);
-                        setFileContent('Loading...');
-                        const res = await fetch(`http://localhost:8000/project-file-content?project_name=${encodeURIComponent(generatedProject.name)}&file_path=${encodeURIComponent(file.path)}`);
-                        const data = await res.json();
-                        setFileContent(data.content || 'No content found.');
-                      }}
-                    >
-                      {file.type === 'dir' ? '📁' : '📄'} {file.name}
-                    </li>
-                  ))}
-                </ul>
-              </div>
+// --- Main Page Component ---
+const ProjectBuilder = () => {
+    usePreventZoom();
+    const [projectIdea, setProjectIdea] = useState('');
+    const [isBuilding, setIsBuilding] = useState(false);
+    const [buildProgress, setBuildProgress] = useState([]);
+    const [generatedProject, setGeneratedProject] = useState(null);
+    const [techStack, setTechStack] = useState('auto');
+    const [projectType, setProjectType] = useState('web-app');
+    const [complexity, setComplexity] = useState('medium');
+    const [fileTree, setFileTree] = useState([]);
+    const [selectedFile, setSelectedFile] = useState(null);
+    const [fileContent, setFileContent] = useState('');
+    const textareaRef = useRef(null);
 
-              {/* Code Editor Panel */}
-              <div style={{ flex: 1, minWidth: 320 }}>
-                <h3 className="detail-title">📝 Code Editor</h3>
-                <div style={{ background: 'rgba(0,0,0,0.2)', borderRadius: 12, padding: '1rem', minHeight: 300, fontFamily: 'SF Mono, Monaco, monospace', color: 'var(--text-light)', whiteSpace: 'pre-wrap', overflowX: 'auto' }}>
-                  {selectedFile ? (
-                    <>
-                      <div style={{ marginBottom: 8, color: 'var(--primary-green)', fontWeight: 600 }}>{selectedFile}</div>
-                      <div>{fileContent}</div>
-                    </>
-                  ) : (
-                    <div style={{ color: 'var(--text-dark)' }}>Select a file to view its code.</div>
-                  )}
+    useEffect(() => {
+        if (textareaRef.current) {
+            textareaRef.current.style.height = 'auto';
+            textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+        }
+    }, [projectIdea]);
+
+    const buildProject = async () => {
+        if (!projectIdea.trim()) return;
+        setIsBuilding(true);
+        setBuildProgress([]);
+        setGeneratedProject(null);
+        
+        const steps = [
+            '[INFO] Analyzing project requirements...',
+            '[INFO] Selecting optimal tech stack...',
+            '[INFO] Creating project structure...',
+            '[INFO] Generating core components...',
+            '[INFO] Configuring build tools...',
+            '[INFO] Installing dependencies...',
+        ];
+        let currentProgress = ['[INIT] Starting project generation...'];
+        setBuildProgress(currentProgress);
+
+        for (const step of steps) {
+            await new Promise(res => setTimeout(res, 800 + Math.random() * 400));
+            currentProgress = [...currentProgress, step];
+            setBuildProgress(currentProgress);
+        }
+
+        try {
+            const response = await fetch('http://localhost:8000/generate-project', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ idea: projectIdea, project_type: projectType, tech_stack: techStack, complexity }),
+            });
+            const data = await response.json();
+            if (!data.success) throw new Error(data.error || 'Project generation failed');
+            
+            setGeneratedProject(data.project);
+            setBuildProgress(prev => [...prev, '[OK] Project generation complete!']);
+
+            const treeRes = await fetch(`http://localhost:8000/project-file-tree?project_name=${encodeURIComponent(data.project.name)}`);
+            const treeData = await treeRes.json();
+            if (treeData.success) setFileTree(treeData.tree || []);
+
+        } catch (error) {
+            setBuildProgress(prev => [...prev, `[ERROR] ${error.message}`]);
+        } finally {
+            setIsBuilding(false);
+        }
+    };
+
+    const resetBuilder = () => {
+        setProjectIdea('');
+        setBuildProgress([]);
+        setGeneratedProject(null);
+        setFileTree([]);
+        setSelectedFile(null);
+        setFileContent('');
+        setIsBuilding(false);
+    };
+
+    const handleFileClick = async (file) => {
+        if (file.type === 'dir') return;
+        setSelectedFile(file.path);
+        setFileContent('Loading file content...');
+        try {
+            const res = await fetch(`http://localhost:8000/project-file-content?project_name=${encodeURIComponent(generatedProject.name)}&file_path=${encodeURIComponent(file.path)}`);
+            const data = await res.json();
+            setFileContent(data.content || 'Error: Could not load file content.');
+        } catch (error) {
+            setFileContent('Error: Could not connect to the server.');
+        }
+    };
+
+    const projectTypeOptions = [
+        { value: "web-app", label: "Web Application", description: "Interactive sites and dashboards." },
+        { value: "api", label: "API Service", description: "Backend for mobile or web clients." },
+        { value: "mobile-app", label: "Mobile App", description: "iOS & Android applications." },
+    ];
+    const techStackOptions = [
+        { value: "auto", label: "Auto-select", description: "Let the AI choose the best stack." },
+        { value: "react-node", label: "React + Node.js", description: "Popular for modern web apps." },
+        { value: "python-fastapi", label: "Python + FastAPI", description: "Ideal for data-intensive APIs." },
+    ];
+    const complexityOptions = [
+        { value: "simple", label: "Simple", description: "A minimal viable product (MVP)." },
+        { value: "medium", label: "Medium", description: "A well-featured standard application." },
+        { value: "complex", label: "Complex", description: "Enterprise-grade with scaling." },
+    ];
+    
+    return (
+        <PageWrapper>
+            <style>{`
+                :root {
+                    --bg-black: #000000; --card-bg: rgba(10, 10, 10, 0.5); --card-border: rgba(255, 255, 255, 0.1);
+                    --card-border-hover: rgba(255, 255, 255, 0.3); --text-primary: #f5f5f5; --text-secondary: #bbbbbb;
+                }
+                .project-builder-page { background: transparent; color: var(--text-primary); min-height: 100vh; font-family: sans-serif; }
+                .layout-container { max-width: 1200px; margin: 0 auto; padding: 0 2rem 4rem 2rem; }
+                
+                .hero-section { text-align: center; padding: 4rem 1rem 3rem 1rem; }
+                .hero-title { font-size: 3.5rem; font-weight: 700; margin: 0; letter-spacing: -2px; color: var(--text-primary); }
+                .hero-subtitle { color: var(--text-secondary); margin: 1rem auto 0 auto; font-size: 1.1rem; max-width: 650px; line-height: 1.6; }
+
+                .card { width: 100%; box-sizing: border-box; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 1rem; padding: 2rem; margin-bottom: 2rem; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); transition: all 0.3s ease; }
+                .card:hover { border-color: var(--card-border-hover); box-shadow: 0 0 25px rgba(255, 255, 255, 0.08); }
+                .card h3 { font-size: 1rem; font-weight: 500; color: var(--text-secondary); margin: 0 0 1.5rem 0; text-transform: uppercase; letter-spacing: 1px; }
+
+                .idea-input { width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.2); border: 1px solid var(--card-border); color: var(--text-primary); border-radius: 0.75rem; padding: 1rem; font-size: 1.1rem; line-height: 1.6; resize: none; min-height: 80px; }
+                .idea-input:focus { border-color: var(--text-primary); outline: none; }
+                
+                .options-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.5rem; margin: 1.5rem 0; }
+                .form-label { display: block; font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 0.5rem; }
+                
+                .btn { width: 100%; background: var(--text-primary); border: 1px solid var(--text-primary); color: var(--bg-black); padding: 0.75rem; border-radius: 0.5rem; font-weight: 600; cursor: pointer; transition: all 0.3s; display: flex; align-items: center; justify-content: center; gap: 0.5rem; }
+                .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+                .btn:hover:not(:disabled) { box-shadow: 0 0 20px rgba(255, 255, 255, 0.2); transform: translateY(-2px); }
+                .btn-secondary { background: transparent; color: var(--text-secondary); border: 1px solid var(--card-border); }
+                .btn-secondary:hover:not(:disabled) { border-color: var(--text-primary); color: var(--text-primary); }
+                
+                .terminal { background: #000; border: 1px solid var(--card-border); border-radius: 0.5rem; padding: 1.5rem; margin-top: 1.5rem; height: 250px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 0.9rem; }
+                .terminal-line { line-height: 1.6; color: var(--text-secondary); }
+                .terminal-line .log-prefix { display: inline-block; margin-right: 0.75rem; color: var(--text-primary); font-weight: 600; }
+                
+                .results-grid { display: grid; grid-template-columns: 300px 1fr; gap: 2rem; }
+                @media (max-width: 1024px) { .results-grid { grid-template-columns: 1fr; } }
+                
+                .file-tree { max-height: 600px; overflow-y: auto; }
+                .file-item { padding: 0.4rem 0.5rem; cursor: pointer; border-radius: 0.25rem; font-size: 0.9rem; word-break: break-all; }
+                .file-item:hover { background: rgba(255,255,255,0.1); }
+                .file-item.selected { background: rgba(255,255,255,0.15); color: var(--text-primary); font-weight: 500; }
+                
+                .code-editor { background: #000; border: 1px solid var(--card-border); border-radius: 0.5rem; padding: 1.5rem; height: 600px; overflow: auto; font-family: 'Courier New', monospace; font-size: 0.9rem; white-space: pre-wrap; }
+                
+                .tech-stack { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+                .tech-item { background: rgba(255,255,255,0.1); color: var(--text-secondary); padding: 0.2rem 0.6rem; border-radius: 1rem; font-size: 0.75rem; font-weight: 600; }
+                
+                /* Custom Select Styles */
+                .custom-select-wrapper { position: relative; width: 100%; }
+                .select-trigger { width: 100%; box-sizing: border-box; display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.2); border: 1px solid var(--card-border); color: var(--text-primary); border-radius: 0.5rem; padding: 0.75rem 1rem; font-size: 1rem; text-align: left; cursor: pointer; transition: border-color 0.2s; }
+                .select-trigger.open, .select-trigger:hover { border-color: var(--card-border-hover); }
+                .chevron { transition: transform 0.2s ease; color: var(--text-secondary); } .chevron.open { transform: rotate(180deg); }
+                .select-options { position: absolute; top: calc(100% + 8px); left: 0; right: 0; background: var(--card-bg); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid var(--card-border-hover); border-radius: 0.75rem; z-index: 10; max-height: 220px; overflow-y: auto; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2); animation: dropdown-fade-in 0.2s ease-out; }
+                .select-option { padding: 1rem; cursor: pointer; } .select-option:hover { background: rgba(255, 255, 255, 0.08); }
+                .select-option:not(:last-child) { border-bottom: 1px solid var(--card-border); }
+                .select-option strong { color: var(--text-primary); }
+                .option-description { display: block; font-size: 0.8rem; color: var(--text-primary); opacity: 0.7; margin-top: 0.25rem; }
+                @keyframes dropdown-fade-in { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+            `}</style>
+            
+            <div className="project-builder-page">
+                <div className="layout-container">
+                    <div className="hero-section">
+                        <h1 className="hero-title">AI Project Builder</h1>
+                        <p className="hero-subtitle">Describe the application you want to build. Our AI will generate a complete project structure, code, dependencies, and deployment configuration.</p>
+                    </div>
+
+                    {!generatedProject ? (
+                        <div className="card">
+                            <textarea
+                                ref={textareaRef}
+                                value={projectIdea}
+                                onChange={(e) => setProjectIdea(e.target.value)}
+                                placeholder="e.g., A minimalist blog built with Next.js and Tailwind CSS, deployed on Vercel..."
+                                className="idea-input"
+                                disabled={isBuilding}
+                            />
+                            <div className="options-grid">
+                                <div className="option-group">
+                                    <label className="form-label">Project Type</label>
+                                    <CustomSelect options={projectTypeOptions} value={projectType} onChange={setProjectType} disabled={isBuilding} />
+                                </div>
+                                <div className="option-group">
+                                    <label className="form-label">Tech Stack</label>
+                                    <CustomSelect options={techStackOptions} value={techStack} onChange={setTechStack} disabled={isBuilding} />
+                                </div>
+                                <div className="option-group">
+                                    <label className="form-label">Complexity</label>
+                                    <CustomSelect options={complexityOptions} value={complexity} onChange={setComplexity} disabled={isBuilding} />
+                                </div>
+                            </div>
+                            <button onClick={buildProject} disabled={isBuilding || !projectIdea.trim()} className="btn">
+                                {isBuilding ? 'Building Project...' : 'Build with AI'}
+                            </button>
+                            {buildProgress.length > 0 && (
+                                <div className="terminal">
+                                    {buildProgress.map((log, index) => (
+                                        <div key={index} className="terminal-line">
+                                            <span className="log-prefix">[{log.match(/^\[(.*?)\]/)?.[1] || 'INFO'}]</span>
+                                            {log.replace(/^\[.*?\]\s/, '')}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    ) : (
+                        <div className="card">
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
+                                <div>
+                                    <h2 style={{ margin: '0 0 0.5rem 0', color: 'var(--text-primary)', fontSize: '1.8rem' }}>{generatedProject.name}</h2>
+                                    <p style={{ margin: 0, color: 'var(--text-secondary)' }}>{generatedProject.description}</p>
+                                </div>
+                                <button onClick={resetBuilder} className="btn btn-secondary" style={{width: 'auto'}}>Build Another Project</button>
+                            </div>
+                            
+                            <div className="results-grid">
+                                <div className="file-tree-container">
+                                    <h3>File Structure</h3>
+                                    <div className="file-tree card" style={{padding: '1rem'}}>
+                                        {fileTree.map((file, idx) => (
+                                            <div key={idx} className={`file-item ${selectedFile === file.path ? 'selected' : ''}`} onClick={() => handleFileClick(file)}>
+                                                {file.path}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className="code-viewer-container">
+                                    <h3>Code Viewer</h3>
+                                    <div className="code-editor">
+                                        {selectedFile ? fileContent : "Select a file to view its code."}
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div style={{ marginTop: '2rem' }}>
+                                <h3>Tech Stack</h3>
+                                <div className="tech-stack">
+                                    {generatedProject.tech_stack.map((tech, index) => <span key={index} className="tech-item">{tech}</span>)}
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
-              </div>
-
-              {/* Live Preview Panel */}
-              <div style={{ minWidth: 320, maxWidth: 480 }}>
-                <h3 className="detail-title">🚀 Live Preview</h3>
-                {previewUrl ? (
-                  <iframe src={previewUrl} title="Live Preview" style={{ width: '100%', height: 320, borderRadius: 12, border: '1px solid var(--primary-green)', background: '#fff' }} />
-                ) : (
-                  <div style={{ color: 'var(--text-dark)' }}>Preview not available.</div>
-                )}
-              </div>
             </div>
-
-            {/* Project Details Section */}
-            <div className="project-details">
-              <div className="detail-section">
-                <h3 className="detail-title">🛠️ Tech Stack</h3>
-                <div className="tech-stack">
-                  {generatedProject.tech_stack.map((tech, index) => (
-                    <span key={index} className="tech-item">{tech}</span>
-                  ))}
-                </div>
-                <div style={{ marginTop: '1rem', fontSize: '0.9rem', color: 'var(--text-dark)' }}>
-                  <strong>Estimated Development Time:</strong> {generatedProject.estimated_time}
-                </div>
-              </div>
-
-              <div className="detail-section">
-                <h3 className="detail-title">⚡ Key Features</h3>
-                <ul className="feature-list">
-                  {generatedProject.features.map((feature, index) => (
-                    <li key={index} className="feature-item">✓ {feature}</li>
-                  ))}
-                </ul>
-              </div>
-
-              <div className="detail-section">
-                <h3 className="detail-title">📁 Project Structure</h3>
-                <ul className="structure-list">
-                  {generatedProject.structure.map((item, index) => (
-                    <li key={index} className="structure-item">{item}</li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-
-            <button onClick={resetBuilder} className="reset-button">
-              🔄 Build Another Project
-            </button>
-          </div>
-        )}
-      </div>
-    </PageWrapper>
-  );
+        </PageWrapper>
+    );
 };
 
 export default ProjectBuilder;

@@ -208,53 +208,55 @@ async def scan(request: ScanRequest):
         
         # Correctly call the async directory scanner
         scan_data = await scan_common_paths(url)
-        exposed_paths = scan_data['accessible_paths']
-        waf_info = scan_data['waf_analysis']
-        dns_security = scan_data['dns_security']        
-        
-        suggestions = await run_in_threadpool(suggest_fixes, scan_result['headers'])
+        exposed_paths = scan_data.get('accessible_paths', []) if scan_data else []
+        waf_info = scan_data.get('waf_analysis', {}) if scan_data else {}
+        dns_security = scan_data.get('dns_security', {}) if scan_data else {}
+
+        suggestions = await run_in_threadpool(suggest_fixes, scan_result.get('headers', {}))
         ai_advice = await run_in_threadpool(
             ai_assistant.analyze_scan_with_llm,
-            scan_result["https"],
-            scan_result["flags"],
-            scan_result["headers"],
+            scan_result.get("https", False),
+            scan_result.get("flags", []),
+            scan_result.get("headers", {}),
             request.model_type
         )
-        
-        security_level = scan_result.get("security_level", "Unknown")
-        security_score = scan_result.get("security_score", 0)
-        
+
+        security_level = scan_result.get("security_level", "Unknown") if scan_result else "Unknown"
+        security_score = scan_result.get("security_score", 0) if scan_result else 0
+
         # Extract SSL analysis data
-        ssl_certificate = scan_result.get("ssl_certificate", {})
-        
+        ssl_certificate = scan_result.get("ssl_certificate", {}) if scan_result else {}
+
         # Enhanced summary with SSL certificate information (using imported function)
+        scan_summary = scan_data.get('scan_summary', {}) if scan_data else {}
+        domain = scan_summary.get('domain', 'Unknown')
         summary = f"""🔒 **Security Scan Complete**
 
 📊 **Target Analysis:**
-• Domain: {scan_data['scan_summary']['domain']}
+• Domain: {domain}
 • Overall Security Score: {security_score}/100 ({security_level})
-• HTTPS: {'✅ Enabled' if scan_result["https"] else '❌ Disabled'}
-• Vulnerabilities: {len(scan_result["flags"])} issues found
+• HTTPS: {'✅ Enabled' if scan_result.get("https", False) else '❌ Disabled'}
+• Vulnerabilities: {len(scan_result.get("flags", []))} issues found
 • Pages Crawled: {len(pages)} pages
-• Security Headers: {len(scan_result["headers"])} detected
+• Security Headers: {len(scan_result.get("headers", {}))} detected
 • Exposed Paths: {len(exposed_paths)} found
 
 🛡️ **Web Application Firewall (WAF):**
-• WAF Detected: {'✅ Yes' if waf_info['waf_detected'] else '❌ No'}
+• WAF Detected: {'✅ Yes' if waf_info.get('waf_detected') else '❌ No'}
 • WAF Type: {waf_info.get('waf_type', 'None detected')}
 • Protection Level: {waf_info.get('protection_level', 'Unknown')}
 • Blocked Requests: {waf_info.get('blocked_requests', 0)}/{waf_info.get('total_requests', 0)}
 
 🔐 **DNS Security Features:**
-• DNSSEC: {'✅ Enabled' if dns_security['dnssec'].get('enabled') else '❌ Disabled'} - {dns_security['dnssec'].get('status', 'Unknown')}
-• DMARC: {'✅ Enabled' if dns_security['dmarc'].get('enabled') else '❌ Not configured'} - {dns_security['dmarc'].get('policy', 'No policy')}
-• DKIM: {'✅ Found' if dns_security['dkim'].get('selectors_found') else '❌ Not found'} - {len(dns_security['dkim'].get('selectors_found', []))} selectors
+• DNSSEC: {'✅ Enabled' if dns_security.get('dnssec', {}).get('enabled') else '❌ Disabled'} - {dns_security.get('dnssec', {}).get('status', 'Unknown')}
+• DMARC: {'✅ Enabled' if dns_security.get('dmarc', {}).get('enabled') else '❌ Not configured'} - {dns_security.get('dmarc', {}).get('policy', 'No policy')}
+• DKIM: {'✅ Found' if dns_security.get('dkim', {}).get('selectors_found') else '❌ Not found'} - {len(dns_security.get('dkim', {}).get('selectors_found', []))} selectors
 
 🔐 **SSL/TLS Security Analysis:**
 {_format_ssl_analysis(ssl_certificate)}
 
 🚨 **Key Issues Found:**
-{chr(10).join([f'• {flag}' for flag in scan_result["flags"][:5]]) if scan_result["flags"] else '• No critical issues detected'}
+{chr(10).join([f'• {flag}' for flag in scan_result.get("flags", [])[:5]]) if scan_result.get("flags", []) else '• No critical issues detected'}
 
 🚪 **Potentially Exposed Paths:**
 {chr(10).join([f'• Found accessible path: {p["path"]}' for p in exposed_paths[:3]]) if exposed_paths else '• No common sensitive paths were found.'}
@@ -513,15 +515,18 @@ async def analyze_repo_comprehensive(request: RepoAnalysisRequest):
 • Security recommendations generated using RAG-enhanced AI"""
             
             # Compile comprehensive results
+            # Ensure all dicts are valid for .get() usage
+            file_scan_results = file_scan_results if isinstance(file_scan_results, dict) else {}
+            dependency_scan_results = dependency_scan_results if isinstance(dependency_scan_results, dict) else {}
             comprehensive_results = {
                 "repository_info": {
                     "url": repo_url,
-                    "name": github_repo.full_name if github_repo else "Unknown",
-                    "description": github_repo.description if github_repo else "No description",
-                    "language": github_repo.language if github_repo else "Unknown",
-                    "stars": github_repo.stargazers_count if github_repo else 0,
-                    "forks": github_repo.forks_count if github_repo else 0,
-                    "open_issues": github_repo.open_issues_count if github_repo else 0
+                    "name": getattr(github_repo, 'full_name', "Unknown") if github_repo else "Unknown",
+                    "description": getattr(github_repo, 'description', "No description") if github_repo else "No description",
+                    "language": getattr(github_repo, 'language', "Unknown") if github_repo else "Unknown",
+                    "stars": getattr(github_repo, 'stargazers_count', 0) if github_repo else 0,
+                    "forks": getattr(github_repo, 'forks_count', 0) if github_repo else 0,
+                    "open_issues": getattr(github_repo, 'open_issues_count', 0) if github_repo else 0
                 },
                 "file_security_scan": file_scan_results,
                 "secret_scan_results": secret_scan_results,
@@ -535,10 +540,10 @@ async def analyze_repo_comprehensive(request: RepoAnalysisRequest):
                     "total_files_scanned": file_scan_results.get('total_files_scanned', 0),
                     "sensitive_files_found": len(file_scan_results.get('sensitive_files', [])),
                     "risky_files_found": len(file_scan_results.get('risky_files', [])),
-                    "secrets_found": len(secret_scan_results),
-                    "static_issues_found": len(static_analysis_results),
+                    "secrets_found": len(secret_scan_results) if secret_scan_results else 0,
+                    "static_issues_found": len(static_analysis_results) if static_analysis_results else 0,
                     "vulnerable_dependencies": len(dependency_scan_results.get('vulnerable_packages', [])),
-                    "code_quality_issues": len(code_quality_results),
+                    "code_quality_issues": len(code_quality_results) if code_quality_results else 0,
                     "security_files_present": len(file_scan_results.get('security_files_found', [])),
                     "missing_security_files": len(file_scan_results.get('missing_security_files', []))
                 }
@@ -869,13 +874,15 @@ async def unified_ai_chat(request: dict):
         
         # Build enhanced context with automatic scan result detection
         enhanced_context = f"MODEL TYPE: {model_type}\nUSER QUESTION: {question}\n\n"
-        
+
         # Auto-detect and use available scan results
         if context_type == 'auto':
-            if hasattr(RepoAnalysis, 'latest_analysis') and RepoAnalysis.latest_analysis:
+            repo_analysis = getattr(RepoAnalysis, 'latest_analysis', None)
+            website_scan = getattr(WebsiteScan, 'latest_scan', None)
+            if repo_analysis:
                 context_type = 'repo_analysis'
                 enhanced_context += "🔍 **AUTOMATICALLY DETECTED: Repository Analysis Available**\n\n"
-            elif hasattr(WebsiteScan, 'latest_scan') and WebsiteScan.latest_scan:
+            elif website_scan:
                 context_type = 'website_scan'
                 enhanced_context += "🌐 **AUTOMATICALLY DETECTED: Website Scan Available**\n\n"
             else:
@@ -1059,35 +1066,43 @@ Need me to explain any part of the fix or have questions about the security issu
                 }
         
         # Repository Analysis Context (Enhanced with RAG capabilities)
-        if context_type == 'repo_analysis' and hasattr(RepoAnalysis, 'latest_analysis') and RepoAnalysis.latest_analysis:
-            analysis_data = RepoAnalysis.latest_analysis
-            
+        if context_type == 'repo_analysis':
+            analysis_data = getattr(RepoAnalysis, 'latest_analysis', None)
             if isinstance(analysis_data, dict):
+                repo_info = analysis_data.get('repository_info', {}) if analysis_data else {}
+                security_summary = analysis_data.get('security_summary', {}) if analysis_data else {}
+                secret_scan_results = analysis_data.get('secret_scan_results', []) if analysis_data else []
+                code_quality_results = analysis_data.get('code_quality_results', []) if analysis_data else []
+                dependency_scan_results = analysis_data.get('dependency_scan_results', {}) if analysis_data else {}
+                static_analysis_results = analysis_data.get('static_analysis_results', []) if analysis_data else []
+                recommendations = analysis_data.get('recommendations', []) if analysis_data else []
+                file_security_scan = analysis_data.get('file_security_scan', {}) if analysis_data else {}
+                sensitive_files = file_security_scan.get('sensitive_files', []) if file_security_scan else []
                 enhanced_context += f"""
 📁 **REPOSITORY SECURITY ANALYSIS:**
-• Repository: {analysis_data.get('repository_info', {}).get('name', 'Unknown')}
+• Repository: {repo_info.get('name', 'Unknown')}
 • Security Score: {analysis_data.get('overall_security_score', 'N/A')}/100 ({analysis_data.get('security_level', 'Unknown')})
-• Language: {analysis_data.get('repository_info', {}).get('language', 'Unknown')}
+• Language: {repo_info.get('language', 'Unknown')}
 
 📊 **SECURITY SUMMARY:**
-• Files Scanned: {analysis_data.get('security_summary', {}).get('total_files_scanned', 0)}
-• Secrets Found: {analysis_data.get('security_summary', {}).get('secrets_found', 0)}
-• Static Issues: {analysis_data.get('security_summary', {}).get('static_issues_found', 0)}
-• Vulnerable Dependencies: {analysis_data.get('security_summary', {}).get('vulnerable_dependencies', 0)}
-• Code Quality Issues: {analysis_data.get('security_summary', {}).get('code_quality_issues', 0)}
+• Files Scanned: {security_summary.get('total_files_scanned', 0)}
+• Secrets Found: {security_summary.get('secrets_found', 0)}
+• Static Issues: {security_summary.get('static_issues_found', 0)}
+• Vulnerable Dependencies: {security_summary.get('vulnerable_dependencies', 0)}
+• Code Quality Issues: {security_summary.get('code_quality_issues', 0)}
 
 🚨 **CRITICAL FINDINGS:**
-SECRET SCAN RESULTS: {len(analysis_data.get('secret_scan_results', []))} secrets found
-{chr(10).join([f"• {s.get('file', 'unknown')}: {s.get('secret_type', 'unknown')} (Line {s.get('line', 'N/A')})" for s in analysis_data.get('secret_scan_results', [])[:5]])}
+SECRET SCAN RESULTS: {len(secret_scan_results)} secrets found
+{chr(10).join([f"• {s.get('file', 'unknown')}: {s.get('secret_type', 'unknown')} (Line {s.get('line', 'N/A')})" for s in secret_scan_results[:5]])}
 
-CODE QUALITY ISSUES: {len(analysis_data.get('code_quality_results', []))} patterns found
-{chr(10).join([f"• {c.get('file', 'unknown')}: {c.get('pattern', 'unknown')} - {c.get('severity', 'Unknown')} ({c.get('description', 'No description')})" for c in analysis_data.get('code_quality_results', [])[:5]])}
+CODE QUALITY ISSUES: {len(code_quality_results)} patterns found
+{chr(10).join([f"• {c.get('file', 'unknown')}: {c.get('pattern', 'unknown')} - {c.get('severity', 'Unknown')} ({c.get('description', 'No description')})" for c in code_quality_results[:5]])}
 
-DEPENDENCY VULNERABILITIES: {len(analysis_data.get('dependency_scan_results', {}).get('vulnerable_packages', []))} packages
-{chr(10).join([f"• {d.get('package', 'unknown')}: {d.get('severity', 'Unknown')} - {d.get('advisory', 'Update recommended')}" for d in analysis_data.get('dependency_scan_results', {}).get('vulnerable_packages', [])[:5]])}
+DEPENDENCY VULNERABILITIES: {len(dependency_scan_results.get('vulnerable_packages', []))} packages
+{chr(10).join([f"• {d.get('package', 'unknown')}: {d.get('severity', 'Unknown')} - {d.get('advisory', 'Update recommended')}" for d in dependency_scan_results.get('vulnerable_packages', [])[:5]])}
 
-STATIC ANALYSIS: {len(analysis_data.get('static_analysis_results', []))} issues found
-{chr(10).join([f"• {str(s)[:100]}" for s in analysis_data.get('static_analysis_results', [])[:3]])}
+STATIC ANALYSIS: {len(static_analysis_results)} issues found
+{chr(10).join([f"• {str(s)[:100]}" for s in static_analysis_results[:3]])}
 
 🤖 **RAG-POWERED CAPABILITIES:**
 - Ask me to "fix this issue" and I'll automatically create a pull request with the solution
@@ -1095,10 +1110,10 @@ STATIC ANALYSIS: {len(analysis_data.get('static_analysis_results', []))} issues 
 - I provide context-aware remediation guidance
 
 📋 **RECOMMENDATIONS:**
-{chr(10).join([f"• {rec}" for rec in analysis_data.get('recommendations', [])[:5]])}
+{chr(10).join([f"• {rec}" for rec in recommendations[:5]])}
 
 🔍 **SENSITIVE FILES:**
-{chr(10).join([f"• {f.get('file', 'unknown')} - {f.get('risk', 'Unknown')} risk" for f in analysis_data.get('file_security_scan', {}).get('sensitive_files', [])[:5]])}
+{chr(10).join([f"• {f.get('file', 'unknown')} - {f.get('risk', 'Unknown')} risk" for f in sensitive_files[:5]])}
 """
             else:
                 enhanced_context += f"""
@@ -1109,18 +1124,22 @@ STATIC ANALYSIS: {len(analysis_data.get('static_analysis_results', []))} issues 
         # Website Scan Context (Enhanced with RAG capabilities)
         elif context_type == 'website_scan':
             scan_result = request.get('scan_result', None)
-            
+
             # Use provided scan_result or stored scan data
+            website_data = getattr(WebsiteScan, 'latest_scan', None)
             if scan_result:
                 scan_data = scan_result
-                website_data = None
-            elif hasattr(WebsiteScan, 'latest_scan') and WebsiteScan.latest_scan:
-                scan_data = WebsiteScan.latest_scan.get('scan_result', {})
-                website_data = WebsiteScan.latest_scan
+            elif website_data:
+                scan_data = website_data.get('scan_result', {}) if isinstance(website_data, dict) else {}
             else:
                 scan_data = None
-                website_data = None
-            
+
+            waf_analysis = website_data.get('waf_analysis', {}) if website_data else {}
+            dns_security = website_data.get('dns_security', {}) if website_data else {}
+            exposed_paths = website_data.get('exposed_paths', []) if website_data else []
+            pages = website_data.get('pages', []) if website_data else []
+            ai_assistant_advice = website_data.get('ai_assistant_advice', 'No AI suggestions available') if website_data else 'No AI suggestions available'
+
             if scan_data:
                 enhanced_context += f"""
 🌐 **WEBSITE SECURITY SCAN:**
@@ -1131,26 +1150,26 @@ STATIC ANALYSIS: {len(analysis_data.get('static_analysis_results', []))} issues 
 • Security Headers: {len(scan_data.get('headers', {}))} detected
 
 🛡️ **WAF ANALYSIS:**
-• WAF Detected: {'✅ Yes' if website_data.get('waf_analysis', {}).get('waf_detected') else '❌ No'}
-• WAF Type: {website_data.get('waf_analysis', {}).get('waf_type', 'None detected')}
-• Protection Level: {website_data.get('waf_analysis', {}).get('protection_level', 'Unknown')}
+• WAF Detected: {'✅ Yes' if waf_analysis.get('waf_detected') else '❌ No'}
+• WAF Type: {waf_analysis.get('waf_type', 'None detected')}
+• Protection Level: {waf_analysis.get('protection_level', 'Unknown')}
 
 🔐 **DNS SECURITY:**
-• DNSSEC: {'✅ Enabled' if website_data.get('dns_security', {}).get('dnssec', {}).get('enabled') else '❌ Disabled'}
-• DMARC: {'✅ Enabled' if website_data.get('dns_security', {}).get('dmarc', {}).get('enabled') else '❌ Not configured'}
-• DKIM: {'✅ Found' if website_data.get('dns_security', {}).get('dkim', {}).get('selectors_found') else '❌ Not found'}
+• DNSSEC: {'✅ Enabled' if dns_security.get('dnssec', {}).get('enabled') else '❌ Disabled'}
+• DMARC: {'✅ Enabled' if dns_security.get('dmarc', {}).get('enabled') else '❌ Not configured'}
+• DKIM: {'✅ Found' if dns_security.get('dkim', {}).get('selectors_found') else '❌ Not found'}
 
 🚨 **SECURITY ISSUES:**
-{chr(10).join([f'• {flag}' for flag in scan_data.get('flags', [])]) if scan_data.get('flags') else '• No critical issues detected'}
+{chr(10).join([f'• {flag}' for flag in scan_data.get('flags', [])]) if scan_data.get('flags', []) else '• No critical issues detected'}
 
 🔒 **SECURITY HEADERS:**
-{chr(10).join([f'• {header}: {value}' for header, value in scan_data.get('headers', {}).items()]) if scan_data.get('headers') else '• No security headers detected'}
+{chr(10).join([f'• {header}: {value}' for header, value in scan_data.get('headers', {}).items()]) if scan_data.get('headers', {}) else '• No security headers detected'}
 
 🚪 **EXPOSED PATHS:**
-{chr(10).join([f'• {p["path"]} (Status: {p["status_code"]})' for p in website_data.get('exposed_paths', [])[:5]]) if website_data else '• No exposed paths found'}
+{chr(10).join([f'• {p["path"]} (Status: {p.get("status_code", "N/A")})' for p in exposed_paths[:5]]) if exposed_paths else '• No exposed paths found'}
 
 📄 **PAGES CRAWLED:**
-{chr(10).join([f'• {page}' for page in website_data.get('pages', [])[:5]]) if website_data else '• No pages data'}
+{chr(10).join([f'• {page}' for page in pages[:5]]) if pages else '• No pages data'}
 
 🧠 **RAG-ENHANCED CAPABILITIES:**
 - I can explain any security finding using curated OWASP knowledge
@@ -1158,7 +1177,7 @@ STATIC ANALYSIS: {len(analysis_data.get('static_analysis_results', []))} issues 
 - Get implementation guidance for security fixes
 
 💡 **AI SUGGESTIONS:**
-{website_data.get('ai_assistant_advice', 'No AI suggestions available') if website_data else 'No AI suggestions available'}
+{ai_assistant_advice}
 """
             else:
                 enhanced_context += "🌐 **WEBSITE SCAN:** No scan result available.\n"

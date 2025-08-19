@@ -325,11 +325,14 @@ const VexelLandingPage = () => {
                     color: #a3a3a3;
                     text-decoration: none;
                     font-weight: 500;
-                    transition: color 0.3s ease;
+                    transition: color 0.3s ease, border-bottom 0.3s ease;
                     font-size: 0.9rem;
+                    border-bottom: 2px solid transparent;
+                    padding-bottom: 2px;
                 }
                 .nav-link:hover {
-                    color: #fff;
+                    color: #fff !important;
+                    border-bottom: 2px solid #fff;
                 }
                 .auth-buttons {
                     display: flex;
@@ -472,7 +475,7 @@ const VexelLandingPage = () => {
             
             <header className="header">
 
-                    <div className="logo">xVerta</div>
+                    <div className="logo">XVERTA</div>
                     <nav className="nav">
                         <a href="#about" className="nav-link">ABOUT</a>
                         <a href="#features" className="nav-link">FEATURES</a>
@@ -486,7 +489,7 @@ const VexelLandingPage = () => {
             
             <main className="main-content">
                 <div className="hero-text">
-                    <div className="hero-subtitle">xVerta</div>
+
                     <h1 className="hero-title">Build safely with AI.</h1>
                 </div>
             </main>

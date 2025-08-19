@@ -1,6 +1,6 @@
 SonarSource Security Rules Database - Live Data
 ==================================================
-Last Updated: 2025-08-14 23:02:18
+Last Updated: 2025-08-20 00:29:03
 Languages Processed: 20
 Successful Fetches: 20
 Source: https://rules.sonarsource.com
@@ -139,34 +139,34 @@ Language: TYPESCRIPT
 
 PYTHON SECURITY RULES:
 ==================================================
-Found 383 individual rules for PYTHON:
+Found 397 individual rules for PYTHON:
 
-Rule 1: Functions and methods should only return expected values
+Rule 1: AWS waiters should be used instead of custom polling loops
+URL: https://rules.sonarsource.com/python/RSPEC-S7621/
+Description: Why is this an issue?How can I fix it?More Info...
+Language: PYTHON
+------------------------------
+
+Rule 2: Functions and methods should only return expected values
 URL: https://rules.sonarsource.com/python/RSPEC-935/
 Description: Why is this an issue?How can I fix it?More Info...
 Language: PYTHON
 ------------------------------
 
-Rule 2: The number and name of arguments passed to a function should match its parameters
+Rule 3: The number and name of arguments passed to a function should match its parameters
 URL: https://rules.sonarsource.com/python/RSPEC-930/
 Description: Why is this an issue?More Info...
 Language: PYTHON
 ------------------------------
 
-Rule 3: Non-empty statements should change control flow or have at least one side-effect
+Rule 4: Non-empty statements should change control flow or have at least one side-effect
 URL: https://rules.sonarsource.com/python/RSPEC-905/
 Description: Why is this an issue?How can I fix it?More Info...
 Language: PYTHON
 ------------------------------
 
-Rule 4: Issue suppression comment should have the correct format
+Rule 5: Issue suppression comment should have the correct format
 URL: https://rules.sonarsource.com/python/RSPEC-7632/
-Description: Why is this an issue?How can I fix it?More Info...
-Language: PYTHON
-------------------------------
-
-Rule 5: Populating a dictionary with a constant value should be done with dict.fromkeys() method call
-URL: https://rules.sonarsource.com/python/RSPEC-7519/
 Description: Why is this an issue?How can I fix it?More Info...
 Language: PYTHON
 ------------------------------
@@ -643,7 +643,7 @@ Language: TERRAFORM
 
 KUBERNETES SECURITY RULES:
 ==================================================
-Found 24 individual rules for KUBERNETES:
+Found 26 individual rules for KUBERNETES:
 
 Rule 1: Environment variables for a container should not be duplicated
 URL: https://rules.sonarsource.com/kubernetes/RSPEC-6907/
