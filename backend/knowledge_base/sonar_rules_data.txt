@@ -1,6 +1,6 @@
 SonarSource Security Rules Database - Live Data
 ==================================================
-Last Updated: 2025-08-20 00:29:03
+Last Updated: 2025-08-20 22:14:55
 Languages Processed: 20
 Successful Fetches: 20
 Source: https://rules.sonarsource.com
@@ -142,7 +142,7 @@ PYTHON SECURITY RULES:
 Found 397 individual rules for PYTHON:
 
 Rule 1: AWS waiters should be used instead of custom polling loops
-URL: https://rules.sonarsource.com/python/RSPEC-S7621/
+URL: https://rules.sonarsource.com/python/RSPEC-7621/
 Description: Why is this an issue?How can I fix it?More Info...
 Language: PYTHON
 ------------------------------

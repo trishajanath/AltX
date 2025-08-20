@@ -132,10 +132,18 @@ const SecurityScanPage = ({ setScanResult }) => {
         setChatHistory(prev => [...prev, { type: 'user', message: userMessage }]);
         setIsChatLoading(true);
         try {
+            // Transform chatHistory to backend-compatible format
+            const history = [
+                ...chatHistory.map(msg => ({
+                    type: msg.type === 'ai' ? 'assistant' : 'user',
+                    parts: [typeof msg.message === 'string' ? msg.message : JSON.stringify(msg.message)]
+                })),
+                { type: 'user', parts: [userMessage] }
+            ];
             const response = await fetch('http://localhost:8000/ai-chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ question: userMessage, context: 'security_scanning' }),
+                body: JSON.stringify({ question: userMessage, context: 'security_scanning', history }),
             });
             const data = await response.json();
             setChatHistory(prev => [...prev, { type: 'ai', message: data.response }]);
@@ -316,7 +324,12 @@ const SecurityScanPage = ({ setScanResult }) => {
                     <div className="card ai-chat-container">
                         <h3>AI Security Advisor</h3>
                         <div className="ai-chat-history">
-                            {/* Chat history and input logic remains the same */}
+                                {chatHistory.map((chat, index) => (
+                                    <div key={index} className={`chat-message ${chat.type}-message`}>
+                                        <ChatResponseFormatter message={chat.message} />
+                                    </div>
+                                ))}
+                                {isChatLoading && <div className="info-text">Analyzing...</div>}
                         </div>
                         <div className="ai-chat-input-area">
                             <input type="text" className="input" placeholder="Ask a question..." value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && handleChat()} disabled={isChatLoading} />
