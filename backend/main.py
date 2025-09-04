@@ -338,22 +338,6 @@ async def analyze_repo_comprehensive(request: RepoAnalysisRequest):
         if model_type not in ['fast', 'smart']:
             model_type = 'smart'  # Default fallback
         
-        # ENHANCEMENT: Update knowledge base with latest security rules before analysis
-        print("🌐 Updating security knowledge base with latest rules...")
-        try:
-            from web_scraper import update_knowledge_base_with_web_data
-            web_update_success = await run_in_threadpool(update_knowledge_base_with_web_data)
-            if web_update_success:
-                print("✅ Knowledge base updated with latest SonarSource rules")
-                # Rebuild RAG database to include new data
-                from build_rag_db import build_database
-                await run_in_threadpool(build_database, False, False)  # Incremental update
-                print("✅ RAG database updated with new security rules")
-            else:
-                print("⚠️ Knowledge base update failed, using existing data")
-        except Exception as e:
-            print(f"⚠️ Knowledge base update error: {e} - continuing with existing data")
-        
         # Create temporary directory for cloning
         temp_dir = tempfile.mkdtemp()
         
@@ -382,9 +366,9 @@ async def analyze_repo_comprehensive(request: RepoAnalysisRequest):
             from git import Repo, GitCommandError
             
             try:
-                # Simple clone first - ensure we use the temp_dir we created
-                repo = git.Repo.clone_from(clone_url, temp_dir)
-                print(f"✅ Repository cloned successfully to {temp_dir}")
+                # Use shallow clone for better performance - we only need current files
+                repo = git.Repo.clone_from(clone_url, temp_dir, depth=1)
+                print(f"✅ Repository cloned successfully to {temp_dir} (shallow clone)")
                 
                 # Configure the cloned repo for Windows compatibility
                 try:
@@ -396,12 +380,11 @@ async def analyze_repo_comprehensive(request: RepoAnalysisRequest):
                     print(f"⚠️ Could not configure Git settings: {config_error}")
                 
             except GitCommandError as git_error:
-                # Try with different clone options
-                print(f"⚠️ Initial clone failed, trying with depth limit: {git_error}")
+                # Fallback to full clone if shallow fails
+                print(f"⚠️ Shallow clone failed, trying full clone: {git_error}")
                 try:
-                    # Try shallow clone to reduce potential file permission issues
-                    repo = git.Repo.clone_from(clone_url, temp_dir, depth=1)
-                    print(f"✅ Repository cloned using shallow clone to {temp_dir}")
+                    repo = git.Repo.clone_from(clone_url, temp_dir)
+                    print(f"✅ Repository cloned successfully to {temp_dir} (full clone)")
                     
                     # Configure the cloned repo
                     try:
@@ -434,13 +417,55 @@ async def analyze_repo_comprehensive(request: RepoAnalysisRequest):
                     elif "403" in str(e):
                         print(f"💡 API rate limit reached or authentication required")
             
-            # 1. Comprehensive file security scan
-            print("🔍 Performing comprehensive file security scan...")
-            file_scan_results = await run_in_threadpool(scan_for_sensitive_files, temp_dir)
+            # Parallel scanning for better performance
+            print("🔍 Starting parallel security scans...")
             
-            # 2. Deep content scanning for secrets (with proper directory filtering)
+            # Create tasks for parallel execution
+            scan_tasks = []
+            
+            # 1. File security scan
+            file_scan_task = run_in_threadpool(scan_for_sensitive_files, temp_dir)
+            scan_tasks.append(("file_scan", file_scan_task))
+            
+            # 2. Static analysis (if deep_scan enabled)
+            if deep_scan:
+                static_analysis_task = run_in_threadpool(run_bandit, temp_dir)
+                scan_tasks.append(("static_analysis", static_analysis_task))
+            
+            # 3. Dependency scan
+            dependency_scan_task = run_in_threadpool(scan_dependencies, temp_dir)
+            scan_tasks.append(("dependency_scan", dependency_scan_task))
+            
+            # 4. Code quality scan
+            code_quality_task = run_in_threadpool(scan_code_quality_patterns, temp_dir)
+            scan_tasks.append(("code_quality", code_quality_task))
+            
+            # Execute parallel scans
+            scan_results = {}
+            for scan_name, task in scan_tasks:
+                try:
+                    print(f"🔄 Running {scan_name}...")
+                    scan_results[scan_name] = await task
+                    print(f"✅ {scan_name} completed")
+                except Exception as e:
+                    print(f"⚠️ {scan_name} failed: {e}")
+                    scan_results[scan_name] = []
+            
+            # Extract results
+            file_scan_results = scan_results.get("file_scan", {})
+            static_analysis_results = scan_results.get("static_analysis", [])
+            dependency_scan_results = scan_results.get("dependency_scan", {})
+            code_quality_results = scan_results.get("code_quality", [])
+            
+            # Ensure static_analysis_results is properly formatted
+            if not isinstance(static_analysis_results, list):
+                static_analysis_results = []
+            
+            # 5. Deep secret scanning (if enabled)
             secret_scan_results = []
             if deep_scan:
+                print("🕵️ Performing deep content scanning for secrets...")
+                scanned_files = 0
                 print("🕵️ Performing deep content scanning for secrets...")
                 scanned_files = 0
                 skip_dirs = {
@@ -476,25 +501,6 @@ async def analyze_repo_comprehensive(request: RepoAnalysisRequest):
                             secret_scan_results.extend(filtered_secrets)
                             scanned_files += 1
             
-            # 3. Static Code Analysis with Bandit
-            print("🔬 Running static code analysis...")
-            static_analysis_results = []
-            if deep_scan:
-                try:
-                    bandit_results = await run_in_threadpool(run_bandit, temp_dir)
-                    static_analysis_results = bandit_results if isinstance(bandit_results, list) else []
-                except Exception as e:
-                    print(f"Static analysis failed: {e}")
-                    static_analysis_results = []
-            
-            # 4. Dependency Vulnerability Scanning
-            print("📦 Scanning dependencies for vulnerabilities...")
-            dependency_scan_results = await run_in_threadpool(scan_dependencies, temp_dir)
-            
-            # 5. Code Quality Pattern Detection
-            print("🎯 Detecting insecure coding patterns...")
-            code_quality_results = await run_in_threadpool(scan_code_quality_patterns, temp_dir)
-            
             # Initialize analysis tracking arrays
             analysis_warnings = []
             analysis_errors = []
@@ -514,7 +520,8 @@ async def analyze_repo_comprehensive(request: RepoAnalysisRequest):
                     github_analysis = await run_in_threadpool(
                         ai_assistant.analyze_github_repo, 
                         repo_url, 
-                        model_type
+                        model_type,
+                        temp_dir  # Pass existing clone directory
                     )
                 else:
                     # Fallback when GitHub API fails
@@ -605,6 +612,58 @@ async def analyze_repo_comprehensive(request: RepoAnalysisRequest):
                 "Medium" if overall_score >= 60 else 
                 "Low"
             )
+            
+            # Add detailed findings for AI chat context
+            comprehensive_results["detailed_findings"] = {
+                "secrets": [
+                    {
+                        "file": s.get('file', 'unknown'),
+                        "line": s.get('line', 'N/A'),
+                        "secret_type": s.get('secret_type', 'unknown'),
+                        "description": s.get('description', 'No description available'),
+                        "severity": s.get('severity', 'High')
+                    } for s in secret_scan_results[:10]
+                ] if secret_scan_results else [],
+                "static_issues": [
+                    {
+                        "file": s.get('filename', 'unknown'),
+                        "line": s.get('line', 'N/A'), 
+                        "issue": s.get('issue', 'Security issue'),
+                        "severity": s.get('severity', 'Unknown'),
+                        "description": s.get('description', 'No description available'),
+                        "fix_suggestion": s.get('fix_suggestion', 'No fix suggestion available')
+                    } for s in static_analysis_results[:10]
+                ] if static_analysis_results else [],
+                "vulnerable_dependencies": [
+                    {
+                        "package": d.get('package', 'unknown'),
+                        "version": d.get('version', 'unknown'),
+                        "severity": d.get('severity', 'Unknown'),
+                        "advisory": d.get('advisory', 'Update recommended'),
+                        "cve": d.get('cve', 'N/A'),
+                        "affected_versions": d.get('affected_versions', 'Unknown'),
+                        "fixed_version": d.get('fixed_version', 'Latest')
+                    } for d in dependency_scan_results.get('vulnerable_packages', [])[:10]
+                ],
+                "code_quality": [
+                    {
+                        "file": c.get('file', 'unknown'),
+                        "line": c.get('line', 'N/A'),
+                        "pattern": c.get('pattern', 'unknown'),
+                        "severity": c.get('severity', 'Unknown'),
+                        "description": c.get('description', 'No description'),
+                        "fix_suggestion": c.get('fix_suggestion', 'Review and apply secure coding practices')
+                    } for c in code_quality_results[:10]
+                ] if code_quality_results else [],
+                "sensitive_files": [
+                    {
+                        "file": f.get('file', 'unknown'),
+                        "risk": f.get('risk', 'Unknown'),
+                        "reason": f.get('reason', 'Sensitive file detected'),
+                        "recommended_action": f.get('recommended_action', 'Review and secure or remove')
+                    } for f in file_scan_results.get('sensitive_files', [])[:10]
+                ]
+            }
             
             # Enhanced recommendations with RAG-powered security intelligence
             recommendations = []
@@ -701,6 +760,13 @@ async def analyze_repo_comprehensive(request: RepoAnalysisRequest):
                 })
             
             comprehensive_results["recommendations"] = recommendations[:10]  # Limit to top 10 recommendations
+            
+            # Add user-friendly display summary
+            comprehensive_results["display_summary"] = {
+                "basic_info": f"Repository: {comprehensive_results['repository_info'].get('name', 'Unknown')}\nSecurity Score: {overall_score}/100 ({comprehensive_results['security_level']})\nLanguage: {comprehensive_results['repository_info'].get('language', 'Unknown')}",
+                "scan_results": f"Secrets Found: {len(secret_scan_results) if secret_scan_results else 0}\nStatic Issues: {len(static_analysis_results) if static_analysis_results else 0}\nVulnerable Dependencies: {len(dependency_scan_results.get('vulnerable_packages', []))}\nCode Quality Issues: {len(code_quality_results) if code_quality_results else 0}",
+                "ready_message": "I am ready to answer specific questions about these findings and provide detailed explanations with exact file locations and fix suggestions."
+            }
             
             # Store results for AI chat context
             RepoAnalysis.latest_analysis = comprehensive_results
@@ -1099,19 +1165,15 @@ Need me to explain any part of the fix or have questions about the security issu
                     "action_taken": None
                 }
         
-        # Repository Analysis Context (Enhanced with RAG capabilities)
+        # Repository Analysis Context (Enhanced with RAG capabilities and detailed findings)
         if context_type == 'repo_analysis':
             analysis_data = getattr(RepoAnalysis, 'latest_analysis', None)
             if isinstance(analysis_data, dict):
                 repo_info = analysis_data.get('repository_info', {}) if analysis_data else {}
                 security_summary = analysis_data.get('security_summary', {}) if analysis_data else {}
-                secret_scan_results = analysis_data.get('secret_scan_results', []) if analysis_data else []
-                code_quality_results = analysis_data.get('code_quality_results', []) if analysis_data else []
-                dependency_scan_results = analysis_data.get('dependency_scan_results', {}) if analysis_data else {}
-                static_analysis_results = analysis_data.get('static_analysis_results', []) if analysis_data else []
+                detailed_findings = analysis_data.get('detailed_findings', {}) if analysis_data else {}
                 recommendations = analysis_data.get('recommendations', []) if analysis_data else []
-                file_security_scan = analysis_data.get('file_security_scan', {}) if analysis_data else {}
-                sensitive_files = file_security_scan.get('sensitive_files', []) if file_security_scan else []
+                
                 enhanced_context += f"""
 📁 **REPOSITORY SECURITY ANALYSIS:**
 • Repository: {repo_info.get('name', 'Unknown')}
@@ -1125,29 +1187,31 @@ Need me to explain any part of the fix or have questions about the security issu
 • Vulnerable Dependencies: {security_summary.get('vulnerable_dependencies', 0)}
 • Code Quality Issues: {security_summary.get('code_quality_issues', 0)}
 
-🚨 **CRITICAL FINDINGS:**
-SECRET SCAN RESULTS: {len(secret_scan_results)} secrets found
-{chr(10).join([f"• {str(s.get('file', 'unknown'))}: {str(s.get('secret_type', 'unknown'))} (Line {str(s.get('line', 'N/A'))})" for s in secret_scan_results[:5]] if secret_scan_results else ['• No secrets detected'])}
+🚨 **DETAILED SECURITY FINDINGS:**
 
-CODE QUALITY ISSUES: {len(code_quality_results)} patterns found
-{chr(10).join([f"• {str(c.get('file', 'unknown'))}: {str(c.get('pattern', 'unknown'))} - {str(c.get('severity', 'Unknown'))} ({str(c.get('description', 'No description'))})" for c in code_quality_results[:5]] if code_quality_results else ['• No code quality issues found'])}
+🔐 **SECRETS FOUND:** {len(detailed_findings.get('secrets', []))} critical issues
+{chr(10).join([f"• {s['file']} (Line {s['line']}): {s['secret_type']} - {s['description']}" for s in detailed_findings.get('secrets', [])[:3]] if detailed_findings.get('secrets') else ['• No secrets detected'])}
 
-DEPENDENCY VULNERABILITIES: {len(dependency_scan_results.get('vulnerable_packages', []))} packages
-{chr(10).join([f"• {str(d.get('package', 'unknown'))}: {str(d.get('severity', 'Unknown'))} - {str(d.get('advisory', 'Update recommended'))}" for d in dependency_scan_results.get('vulnerable_packages', [])[:5]] if dependency_scan_results.get('vulnerable_packages', []) else ['• No vulnerable dependencies found'])}
+🛡️ **STATIC ANALYSIS ISSUES:** {len(detailed_findings.get('static_issues', []))} security vulnerabilities
+{chr(10).join([f"• {s['file']} (Line {s['line']}): {s['issue']} ({s['severity']}) - {s['description']}" for s in detailed_findings.get('static_issues', [])[:3]] if detailed_findings.get('static_issues') else ['• No static analysis issues found'])}
 
-STATIC ANALYSIS: {len(static_analysis_results)} issues found
-{chr(10).join([f"• {s.get('filename', 'unknown')}: {s.get('issue', 'Security issue')} ({s.get('severity', 'Unknown')} severity)" for s in static_analysis_results[:3]] if static_analysis_results else ['• No static analysis issues found'])}
+📦 **VULNERABLE DEPENDENCIES:** {len(detailed_findings.get('vulnerable_dependencies', []))} packages need updates
+{chr(10).join([f"• {d['package']} v{d['version']}: {d['severity']} - {d['advisory']} (CVE: {d['cve']})" for d in detailed_findings.get('vulnerable_dependencies', [])[:3]] if detailed_findings.get('vulnerable_dependencies') else ['• No vulnerable dependencies found'])}
 
-🤖 **RAG-POWERED CAPABILITIES:**
-- Ask me to "fix this issue" and I'll automatically create a pull request with the solution
-- I can explain any security finding using curated OWASP knowledge
-- I provide context-aware remediation guidance
+⚡ **CODE QUALITY ISSUES:** {len(detailed_findings.get('code_quality', []))} patterns detected
+{chr(10).join([f"• {c['file']} (Line {c['line']}): {c['pattern']} ({c['severity']}) - {c['description']}" for c in detailed_findings.get('code_quality', [])[:3]] if detailed_findings.get('code_quality') else ['• No code quality issues found'])}
 
-📋 **RECOMMENDATIONS:**
-{chr(10).join([f"• {str(rec)}" for rec in recommendations[:5]] if recommendations else ['• No specific recommendations at this time'])}
+📄 **SENSITIVE FILES:** {len(detailed_findings.get('sensitive_files', []))} files require attention
+{chr(10).join([f"• {f['file']}: {f['risk']} risk - {f['reason']}" for f in detailed_findings.get('sensitive_files', [])[:3]] if detailed_findings.get('sensitive_files') else ['• No sensitive files detected'])}
 
-🔍 **SENSITIVE FILES:**
-{chr(10).join([f"• {str(f.get('file', 'unknown'))} - {str(f.get('risk', 'Unknown'))} risk" for f in sensitive_files[:5]] if sensitive_files else ['• No sensitive files detected'])}
+🎯 **TOP RECOMMENDATIONS:**
+{chr(10).join([f"• {rec.get('fix', rec) if isinstance(rec, dict) else str(rec)}" for rec in recommendations[:3]] if recommendations else ['• No specific recommendations at this time'])}
+
+🤖 **AI CAPABILITIES:**
+- Ask "explain [specific issue]" for detailed OWASP-backed explanations
+- Request "fix [package/file]" for automated pull request generation
+- Get "tell me exact lines" for precise vulnerability locations
+- Use "propose solution for [issue]" for step-by-step remediation guides
 """
             else:
                 enhanced_context += f"""

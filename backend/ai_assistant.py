@@ -350,6 +350,7 @@ def get_chat_response(history: List[Dict], model_type: str = 'fast') -> str:
         
         # Build conversation history with proper error handling
         formatted_history = [{'parts': [{'text': context}], 'role': 'model'}]
+        
         for msg in history:
             try:
                 # Handle different message formats
@@ -373,7 +374,9 @@ def get_chat_response(history: List[Dict], model_type: str = 'fast') -> str:
                     content = msg.get('message', msg.get('content', str(msg.get('parts', ''))))
                 
                 role = 'user' if msg.get('type') == 'user' or msg.get('role') == 'user' else 'model'
-                formatted_history.append({'parts': [{'text': str(content)}], 'role': role})
+                formatted_message = {'parts': [{'text': str(content)}], 'role': role}
+                formatted_history.append(formatted_message)
+                
             except Exception as e:
                 print(f"Warning: Error processing message in history: {e}")
                 # Skip malformed messages
@@ -398,17 +401,23 @@ def get_chat_response(history: List[Dict], model_type: str = 'fast') -> str:
         return f"❌ **Chat Error ({model_type} model):** {str(e)}"
 
 # --- Main Analysis Function ---
-def analyze_github_repo(repo_url: str, model_type: str = 'smart') -> str:
+def analyze_github_repo(repo_url: str, model_type: str = 'smart', existing_clone_path: str = None) -> str:
     """Analyze GitHub repository with model selection"""
     if not github_client:
         return "❌ **GitHub client not available.** Please check your setup."
     
     repo_name_from_url = repo_url.rstrip('/').split('/')[-1].replace('.git', '')
     
-    # Use proper cross-platform temporary directory
-    import tempfile
-    temp_dir = tempfile.mkdtemp(prefix=f"altx_ai_{repo_name_from_url}_")
-    local_repo_path = temp_dir
+    # Use existing clone if provided, otherwise create new temp directory
+    if existing_clone_path and os.path.exists(existing_clone_path):
+        local_repo_path = existing_clone_path
+        temp_dir = None  # Don't create new temp dir
+        print(f"📁 Using existing clone at {existing_clone_path}")
+    else:
+        # Use proper cross-platform temporary directory
+        import tempfile
+        temp_dir = tempfile.mkdtemp(prefix=f"altx_ai_{repo_name_from_url}_")
+        local_repo_path = temp_dir
 
     try:
         repo_url = repo_url.rstrip('/').replace('.git', '')
@@ -419,9 +428,11 @@ def analyze_github_repo(repo_url: str, model_type: str = 'smart') -> str:
         owner, repo_name = parts[-2], parts[-1]
         repo = github_client.get_repo(f"{owner}/{repo_name}")
         
-        print(f"Cloning {repo_url} to {local_repo_path}...")
-        git.Repo.clone_from(repo_url, local_repo_path)
-
+        # Only clone if we don't have an existing clone
+        if not existing_clone_path:
+            print(f"Cloning {repo_url} to {local_repo_path}...")
+            git.Repo.clone_from(repo_url, local_repo_path)
+        
         security_findings = []
         all_files_visited = [str(p.relative_to(local_repo_path)) for p in Path(local_repo_path).rglob("*") if p.is_file()]
         
@@ -557,8 +568,8 @@ Simple recommendations for improving security.
         print(f"Error analyzing repository: {str(e)}")
         return f"❌ **An unexpected error occurred:** {str(e)}"
     finally:
-        # Enhanced Windows-compatible cleanup
-        if os.path.exists(local_repo_path):
+        # Enhanced Windows-compatible cleanup - only if we created a temp directory
+        if temp_dir and os.path.exists(local_repo_path):
             try:
                 import stat
                 import time

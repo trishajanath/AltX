@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import * as THREE from 'three';
-import { BarChart3, Rocket, Shield, Menu, X, ChevronDown } from 'lucide-react';
+import { BarChart3, Rocket, Shield, GitBranch, Menu, X, ChevronDown } from 'lucide-react';
 import Plasma from './Plasma';
 
 // --- Sidebar Component (Updated) ---
@@ -10,12 +10,12 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
     const location = useLocation();
     const currentPath = location.pathname;
     const menuItems = [
-        { icon: <BarChart3 size={20} />, title: 'Dashboard', path: '/home' },
-        { icon: <Rocket size={20} />, title: 'Deploy Project', path: '/deploy' },
-        { icon: <Shield size={20} />, title: 'Security Scan', path: '/security' },
-        { icon: <BarChart3 size={20} />, title: 'Repo Analysis', path: '/repo-analysis' },
-        { icon: <BarChart3 size={20} />, title: 'Reports', path: '/report' },
-        { icon: <Rocket size={20} />, title: 'Build Apps', path: '/build' },
+        { icon: <BarChart3 size={20} />, title: 'Dashboard', view: 'dashboard', path: '/home' },
+        { icon: <Rocket size={20} />, title: 'Deploy Project', view: 'deploy', path: '/deploy' },
+        { icon: <Shield size={20} />, title: 'Security Scan', view: 'security', path: '/security' },
+        { icon: <GitBranch size={20} />, title: 'Repo Analysis', view: 'repo-analysis', path: '/repo-analysis' },
+        { icon: <BarChart3 size={20} />, title: 'Reports', view: 'reports', path: '/report' },
+        { icon: <Rocket size={20} />, title: 'Build Apps', view: 'build', path: '/build' },
     ];
     return (
         <>
@@ -110,53 +110,62 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
                 .user-info { flex-grow: 1; }
                 .user-info span { display: block; font-weight: 600; color: #FFFFFF; }
                 .user-info small { color: #A0A0A0; }
+
+                .menu-button {
+                    position: fixed; top: 20px; left: 20px; z-index: 101;
+                    background: var(--glass-bg);
+                    border: 1px solid var(--border-color);
+                    border-radius: 8px;
+                    padding: 8px;
+                    color: var(--text-primary);
+                    cursor: pointer;
+                    display: flex;
+                    align-items: center;
+                    backdrop-filter: blur(5px);
+                }
             `}</style>
             {isOpen && (
-                <div className={`sidebar open`} style={{position: 'fixed', top: 0, left: 0, height: '100vh', width: 240, background: 'rgba(10,10,10,0.95)', zIndex: 100, boxShadow: '2px 0 16px rgba(0,0,0,0.12)'}}>
-                    <div className="sidebar-header" style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '1rem 1.2rem'}}>
-                        <div className="logo-text">xVERTA</div>
-                        <button className="close-button" onClick={toggleSidebar} style={{background: 'none', border: 'none', color: '#fff', cursor: 'pointer'}}>
-                            <X size={24} />
-                        </button>
-                    </div>
-                    <nav className="sidebar-nav" style={{display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '2rem'}}>
-                        {menuItems.map(item => (
-                            <a 
-                                key={item.path}
-                                href={item.path}
-                                onClick={e => {
-                                    e.preventDefault();
-                                    navigate(item.path);
-                                    toggleSidebar(); // Close sidebar on navigation
-                                }}
-                                style={{
-                                    display: 'flex', alignItems: 'center', gap: 12, padding: '0.75rem 1.5rem', color: currentPath === item.path ? '#ffffffff' : '#fff', fontWeight: 600, textDecoration: 'none', borderRadius: 8, margin: '0 0.5rem', background: currentPath === item.path ? 'rgba(0,245,195,0.08)' : 'none', cursor: 'pointer', transition: 'background 0.2s',
-                                }}
-                            >
-                                {item.icon}
-                                <span>{item.title}</span>
-                            </a>
-                        ))}
-                    </nav>
-                    <div className="sidebar-footer" style={{ padding: '1.5rem', borderTop: '1px solid rgba(255,255,255,0.15)' }}>
-                        <div className="user-profile" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer' }}>
-                            <img src="https://placehold.co/40x40/000000/ffffff?text=A" alt="User Avatar" style={{ borderRadius: '50%', border: '1px solid rgba(255,255,255,0.15)' }} />
-                            <div className="user-info" style={{ flexGrow: 1 }}>
-                                <span style={{ display: 'block', fontWeight: 600, color: '#FFFFFF' }}>Admin User</span>
-                                <small style={{ color: '#A0A0A0' }}>admin@securai.com</small>
-                            </div>
-                            <ChevronDown size={16} />
+                <div className={`sidebar open`}>
+                    <div className="sidebar-header">
+                        <div className="logo">
+                            <span className="logo-text">xVERTA</span>
                         </div>
+                    <button className="close-button" onClick={toggleSidebar}>
+                        <X size={24} />
+                    </button>
+                </div>
+                <nav className="sidebar-nav">
+                    {menuItems.map(item => (
+                        <a 
+                            key={item.view} 
+                            href="#" 
+                            onClick={e => {
+                                e.preventDefault();
+                                navigate(item.path);
+                                if (window.innerWidth < 768) toggleSidebar();
+                            }} 
+                            className={`nav-item ${currentPath === item.path ? 'active' : ''}`}
+                        >
+                            {item.icon}
+                            <span>{item.title}</span>
+                        </a>
+                    ))}
+                </nav>
+                <div className="sidebar-footer">
+                    <div className="user-profile">
+                        <img src="https://placehold.co/40x40/000000/ffffff?text=A" alt="User Avatar" />
+                        <div className="user-info">
+                            <span>Admin User</span>
+                            <small>admin@securai.com</small>
+                        </div>
+                        <ChevronDown size={16} />
                     </div>
+                </div>
                 </div>
             )}
             {!isOpen && (
-                <button
-                    className="menu-button"
-                    style={{position: 'fixed', top: 20, left: 20, zIndex: 101, background: 'rgba(16,16,16,0.6)', border: '1px solid #A0A0A0', borderRadius: 8, padding: 8, color: '#fff', boxShadow: '0 2px 8px rgba(0,0,0,0.2)', cursor: 'pointer', display: 'flex', alignItems: 'center', backdropFilter: 'blur(5px)'}}
-                    onClick={toggleSidebar}
-                >
-                    <Menu size={28} />
+                <button className="menu-button" onClick={toggleSidebar}>
+                    <Menu size={24} />
                 </button>
             )}
         </>
