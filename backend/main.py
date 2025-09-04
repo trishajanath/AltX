@@ -289,6 +289,40 @@ async def scan(request: ScanRequest):
         raise HTTPException(status_code=500, detail=error_detail)
 
 
+@app.post("/update-knowledge-base")
+async def force_update_knowledge_base():
+    """Force update knowledge base from web (ignoring 7-day cache)"""
+    try:
+        from web_scraper import force_update_knowledge_base
+        success = await run_in_threadpool(force_update_knowledge_base)
+        
+        if success:
+            # Rebuild RAG database to include new data
+            from build_rag_db import build_database
+            await run_in_threadpool(build_database, False, False)
+            
+            return {
+                "success": True,
+                "message": "Knowledge base force updated with fresh web data",
+                "cache_bypass": True,
+                "pdf_generated": True,
+                "next_auto_update": "7 days from now"
+            }
+        else:
+            return {
+                "success": False,
+                "message": "Failed to update knowledge base",
+                "error": "Web scraping failed"
+            }
+            
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"Update failed: {str(e)}",
+            "error": str(e)
+        }
+
+
 @app.post("/analyze-repo")
 async def analyze_repo_comprehensive(request: RepoAnalysisRequest):
     """Comprehensive repository security analysis with file scanning and store results for AI chat"""
@@ -1093,16 +1127,16 @@ Need me to explain any part of the fix or have questions about the security issu
 
 🚨 **CRITICAL FINDINGS:**
 SECRET SCAN RESULTS: {len(secret_scan_results)} secrets found
-{chr(10).join([f"• {s.get('file', 'unknown')}: {s.get('secret_type', 'unknown')} (Line {s.get('line', 'N/A')})" for s in secret_scan_results[:5]])}
+{chr(10).join([f"• {str(s.get('file', 'unknown'))}: {str(s.get('secret_type', 'unknown'))} (Line {str(s.get('line', 'N/A'))})" for s in secret_scan_results[:5]] if secret_scan_results else ['• No secrets detected'])}
 
 CODE QUALITY ISSUES: {len(code_quality_results)} patterns found
-{chr(10).join([f"• {c.get('file', 'unknown')}: {c.get('pattern', 'unknown')} - {c.get('severity', 'Unknown')} ({c.get('description', 'No description')})" for c in code_quality_results[:5]])}
+{chr(10).join([f"• {str(c.get('file', 'unknown'))}: {str(c.get('pattern', 'unknown'))} - {str(c.get('severity', 'Unknown'))} ({str(c.get('description', 'No description'))})" for c in code_quality_results[:5]] if code_quality_results else ['• No code quality issues found'])}
 
 DEPENDENCY VULNERABILITIES: {len(dependency_scan_results.get('vulnerable_packages', []))} packages
-{chr(10).join([f"• {d.get('package', 'unknown')}: {d.get('severity', 'Unknown')} - {d.get('advisory', 'Update recommended')}" for d in dependency_scan_results.get('vulnerable_packages', [])[:5]])}
+{chr(10).join([f"• {str(d.get('package', 'unknown'))}: {str(d.get('severity', 'Unknown'))} - {str(d.get('advisory', 'Update recommended'))}" for d in dependency_scan_results.get('vulnerable_packages', [])[:5]] if dependency_scan_results.get('vulnerable_packages', []) else ['• No vulnerable dependencies found'])}
 
 STATIC ANALYSIS: {len(static_analysis_results)} issues found
-{chr(10).join([f"• {str(s)[:100]}" for s in static_analysis_results[:3]])}
+{chr(10).join([f"• {s.get('filename', 'unknown')}: {s.get('issue', 'Security issue')} ({s.get('severity', 'Unknown')} severity)" for s in static_analysis_results[:3]] if static_analysis_results else ['• No static analysis issues found'])}
 
 🤖 **RAG-POWERED CAPABILITIES:**
 - Ask me to "fix this issue" and I'll automatically create a pull request with the solution
@@ -1110,10 +1144,10 @@ STATIC ANALYSIS: {len(static_analysis_results)} issues found
 - I provide context-aware remediation guidance
 
 📋 **RECOMMENDATIONS:**
-{chr(10).join([f"• {rec}" for rec in recommendations[:5]])}
+{chr(10).join([f"• {str(rec)}" for rec in recommendations[:5]] if recommendations else ['• No specific recommendations at this time'])}
 
 🔍 **SENSITIVE FILES:**
-{chr(10).join([f"• {f.get('file', 'unknown')} - {f.get('risk', 'Unknown')} risk" for f in sensitive_files[:5]])}
+{chr(10).join([f"• {str(f.get('file', 'unknown'))} - {str(f.get('risk', 'Unknown'))} risk" for f in sensitive_files[:5]] if sensitive_files else ['• No sensitive files detected'])}
 """
             else:
                 enhanced_context += f"""
@@ -2164,6 +2198,29 @@ Return ONLY a JSON object with this exact structure:
                             "content_length_before": len(original_content),
                             "content_length_after": len(fixed_content),
                             "character_changes": len(fixed_content) - len(original_content)
+                        }
+                    }
+                elif "422" in error_msg and ("collaborator" in error_msg.lower() or "validation failed" in error_msg.lower()):
+                    print(f"🤝 Not a collaborator on repository: {owner}/{repo_name}")
+                    return {
+                        "success": True,
+                        "message": f"🔧 Security fix generated for {issue_file} (Fork required for contribution)",
+                        "fix_type": "collaboration_required",
+                        "access_limitation": "You are not a collaborator on this repository",
+                        "manual_fix_instructions": f"You need to be a collaborator to create pull requests directly. To apply this fix:\n1. Ask the repository owner to add you as a collaborator\n2. Or fork the repository at https://github.com/{owner}/{repo_name}\n3. Apply the fix to your fork and create a PR from there\n4. The security issue was found in: {issue_file}",
+                        "fix_details": fix_data,
+                        "code_comparison": {
+                            "original_content": original_content,
+                            "fixed_content": fixed_content,
+                            "content_length_before": len(original_content),
+                            "content_length_after": len(fixed_content),
+                            "character_changes": len(fixed_content) - len(original_content)
+                        },
+                        "fork_url": f"https://github.com/{owner}/{repo_name}/fork",
+                        "code_preview": {
+                            "original_preview": original_content[:500] + ("..." if len(original_content) > 500 else ""),
+                            "fixed_preview": fixed_content[:500] + ("..." if len(fixed_content) > 500 else ""),
+                            "preview_truncated": len(original_content) > 500 or len(fixed_content) > 500
                         }
                     }
                 else:

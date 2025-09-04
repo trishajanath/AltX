@@ -210,17 +210,82 @@ Total rules database contains 6000+ rules across 30+ languages.
         print(f"❌ Error in fetch_sonar_rules: {e}")
         return False
 
+def force_update_knowledge_base():
+    """
+    Force update knowledge base from web (ignoring cache)
+    Use this to refresh the data manually
+    """
+    print("🔄 Force updating knowledge base from web...")
+    print("⏱️ This may take up to 9 minutes...")
+    
+    success = fetch_sonar_rules()
+    
+    if success:
+        print("✅ Knowledge base force updated with fresh web data")
+        
+        # Auto-generate PDF if conversion script exists
+        import subprocess
+        pdf_script = "convert_rules_to_pdf.py"
+        if os.path.exists(pdf_script):
+            try:
+                print("📄 Auto-generating PDF from fresh data...")
+                result = subprocess.run(["python", pdf_script], capture_output=True, text=True)
+                if result.returncode == 0:
+                    print("✅ PDF regenerated successfully")
+                else:
+                    print(f"⚠️ PDF generation warning: {result.stderr}")
+            except Exception as e:
+                print(f"⚠️ Could not auto-generate PDF: {e}")
+        
+        return True
+    else:
+        print("❌ Failed to force update knowledge base")
+        return False
+
 def update_knowledge_base_with_web_data():
     """
     Update knowledge base with fresh web data
+    Uses local PDF if available to avoid 9-minute web fetching
     """
     print("🔄 Updating knowledge base with web data...")
     
-    # Fetch SonarSource rules
+    # Check if local PDF exists and is recent (less than 7 days old)
+    pdf_path = "knowledge_base/sonar_security_rules.pdf"
+    txt_path = "knowledge_base/sonar_rules_data.txt"
+    
+    import os
+    from datetime import datetime, timedelta
+    
+    if os.path.exists(pdf_path):
+        # Check PDF age
+        pdf_modified = datetime.fromtimestamp(os.path.getmtime(pdf_path))
+        if datetime.now() - pdf_modified < timedelta(days=7):
+            print(f"✅ Using local PDF (created {pdf_modified.strftime('%Y-%m-%d %H:%M')})")
+            print("📄 Skipping web fetch - using cached SonarSource rules PDF")
+            print("⚡ Saved 9 minutes of fetching time!")
+            return True
+        else:
+            print(f"⚠️ Local PDF is older than 7 days (created {pdf_modified.strftime('%Y-%m-%d %H:%M')})")
+    
+    # Check if text file exists and is recent (less than 7 days old)
+    if os.path.exists(txt_path):
+        txt_modified = datetime.fromtimestamp(os.path.getmtime(txt_path))
+        if datetime.now() - txt_modified < timedelta(days=7):
+            print(f"✅ Using cached text data (updated {txt_modified.strftime('%Y-%m-%d %H:%M')})")
+            print("📄 Skipping web fetch - using cached SonarSource rules")
+            print("⚡ Saved 9 minutes of fetching time!")
+            return True
+        else:
+            print(f"⚠️ Cached data is older than 7 days (updated {txt_modified.strftime('%Y-%m-%d %H:%M')})")
+    
+    # Fall back to web fetching if no recent local data
+    print("🌐 No recent local data found, fetching from web...")
+    print("⏱️ This may take up to 9 minutes...")
     success = fetch_sonar_rules()
     
     if success:
         print("✅ Knowledge base updated with web data")
+        print("💡 Tip: The data will be cached for 7 days to speed up future requests")
         return True
     else:
         print("❌ Failed to update knowledge base with web data")

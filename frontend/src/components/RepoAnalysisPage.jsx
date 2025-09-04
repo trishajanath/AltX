@@ -114,13 +114,19 @@ const RepoAnalysisPage = ({ setScanResult }) => { // Assuming setScanResult is p
         const questionToAsk = currentQuestion;
         setCurrentQuestion('');
         try {
+            // Format chat history for backend compatibility
+            const formattedHistory = [...chatMessages, userMessage].map(msg => ({
+                type: msg.type === 'ai' ? 'assistant' : 'user',
+                parts: [typeof msg.message === 'string' ? msg.message : JSON.stringify(msg.message)]
+            }));
+            
             const response = await fetch('http://localhost:8000/ai-chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     question: questionToAsk,
                     context: 'repo_analysis',
-                    history: [...chatMessages, userMessage]
+                    history: formattedHistory
                 }),
             });
             const data = await response.json();

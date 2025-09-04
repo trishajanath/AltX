@@ -1,0 +1,8 @@
+/* File: Plasma.css */
+
+.plasma-container {
+  position: relative; /* NOT absolute */
+  width: 100%;      /* NOT 100vw */
+  height: 100%;     /* NOT 100vh */
+  overflow: hidden;
+}

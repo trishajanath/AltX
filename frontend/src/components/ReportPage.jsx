@@ -181,7 +181,23 @@ const ReportPage = ({ scanResult }) => {
                 .report-page { background: var(--bg-black); color: var(--text-primary); min-height: 100vh; }
 
                 /* Layout & Typography */
-                .hero-section, .report-header { text-align: center; padding: 3rem 1rem; }
+                .hero-section, .report-header { 
+                    text-align: center; 
+                    padding: 3rem 1rem; 
+                    display: flex; 
+                    flex-direction: column; 
+                    align-items: center; 
+                    justify-content: center; 
+                    min-height: 100vh; 
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    bottom: 0;
+                    margin: 0 auto;
+                    width: 100%;
+                    box-sizing: border-box;
+                }
                 .hero-title, .report-header h1 { font-size: 2.5rem; font-weight: 700; margin: 0; letter-spacing: -1px; }
                 .hero-subtitle, .report-header p { color: var(--text-secondary); margin-top: 0.5rem; font-size: 1.1rem; }
 

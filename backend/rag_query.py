@@ -1,5 +1,6 @@
 import os
 from typing import List, Dict
+from functools import lru_cache
 
 # Configuration for RAG performance
 RAG_FAST_MODE = os.getenv('RAG_FAST_MODE', 'true').lower() == 'true'
@@ -457,10 +458,14 @@ if RAG_DISABLE:
 else:
     rag_engine = RAGQueryEngine(fast_mode=RAG_FAST_MODE)
 
+
+# LRU cache for secure coding pattern queries
+@lru_cache(maxsize=128)
 def get_secure_coding_patterns(vulnerability_description: str) -> str:
     """
     Main function to get secure coding patterns for a vulnerability
     Uses lazy loading - RAG system only loads when first called
+    Results are cached in memory for repeated queries.
     """
     if RAG_DISABLE or rag_engine is None:
         print("🚫 RAG disabled - using fallback patterns")
@@ -478,7 +483,6 @@ def get_secure_coding_patterns(vulnerability_description: str) -> str:
 
 This is a fallback response when RAG is disabled.
 """
-    
     return rag_engine.query_secure_patterns(vulnerability_description)
 
 def debug_rag_database():
