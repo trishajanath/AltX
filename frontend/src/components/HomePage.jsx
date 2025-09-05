@@ -135,17 +135,34 @@ const ThreeBackground = React.memo(({
     // This effect runs only once to set up the three.js scene.
     useEffect(() => {
         const currentMount = mountRef.current;
+        if (!currentMount) {
+            console.warn('ThreeBackground: mountRef is null');
+            return;
+        }
+
+        console.log('🎨 ThreeBackground: Initializing Three.js scene...');
 
         // Initialize Three.js objects
         const scene = new Scene();
         const camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
-        const renderer = new WebGLRenderer({ antialias: true, alpha: true });
+        const renderer = new WebGLRenderer({ antialias: true, alpha: false });
         const clock = new Clock();
 
         renderer.setSize(currentMount.clientWidth, currentMount.clientHeight);
-        renderer.setClearColor(0x000000, 0); // Transparent background
+        renderer.setClearColor(0x000000, 1); // Solid black background
+        renderer.setPixelRatio(window.devicePixelRatio || 1);
+        
+        // Style the canvas element
+        renderer.domElement.style.position = 'absolute';
+        renderer.domElement.style.top = '0';
+        renderer.domElement.style.left = '0';
+        renderer.domElement.style.width = '100%';
+        renderer.domElement.style.height = '100%';
+        
         currentMount.appendChild(renderer.domElement);
         camera.position.z = 1;
+
+        console.log('🎨 ThreeBackground: Canvas appended, size:', currentMount.clientWidth, 'x', currentMount.clientHeight);
 
         // Store instances in refs to access them in other effects and callbacks
         sceneRef.current = scene;
@@ -229,11 +246,19 @@ const ThreeBackground = React.memo(({
         // The current implementation is efficient enough for this use case.
     }, [speed]);
 
-    return <div ref={mountRef} style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', zIndex: -1, backgroundColor: '#000' }} />;
+    return <div ref={mountRef} style={{ 
+        position: 'fixed', 
+        top: 0, 
+        left: 0, 
+        width: '100%', 
+        height: '100%', 
+        zIndex: -10,
+        pointerEvents: 'none'
+    }} />;
 });
 
 
-// --- Sidebar Component (Unchanged) ---
+// --- Sidebar Component (Enhanced with backdrop) ---
 const Sidebar = ({ isOpen, toggleSidebar, setView, currentView }) => {
     const navigate = useNavigate();
     const menuItems = [
@@ -245,45 +270,58 @@ const Sidebar = ({ isOpen, toggleSidebar, setView, currentView }) => {
         { icon: <Rocket size={20} />, title: 'Build Apps', view: 'build', path: '/build' },
     ];
 
+    const handleNavigation = (item) => {
+        navigate(item.path);
+        // Add a small delay for smooth transition before closing on mobile
+        if (window.innerWidth < 768) {
+            setTimeout(() => toggleSidebar(), 150);
+        }
+    };
+
     return (
         <>
+            {/* Backdrop for mobile */}
+            <div 
+                className={`sidebar-backdrop ${isOpen ? 'visible' : ''}`}
+                onClick={toggleSidebar}
+            />
+            
             {isOpen && (
                 <div className={`sidebar open`}>
                     <div className="sidebar-header">
                         <div className="logo">
                             <span className="logo-text">xVERTA</span>
                         </div>
-                    <button className="close-button" onClick={toggleSidebar}>
-                        <X size={24} />
-                    </button>
-                </div>
-                <nav className="sidebar-nav">
-                    {menuItems.map(item => (
-                        <a 
-                            key={item.view} 
-                            href="#" 
-                            onClick={e => {
-                                e.preventDefault();
-                                navigate(item.path);
-                                if (window.innerWidth < 768) toggleSidebar();
-                            }} 
-                            className={`nav-item ${currentView === item.view ? 'active' : ''}`}
-                        >
-                            {item.icon}
-                            <span>{item.title}</span>
-                        </a>
-                    ))}
-                </nav>
-                <div className="sidebar-footer">
-                    <div className="user-profile">
-                        <img src="https://placehold.co/40x40/000000/ffffff?text=A" alt="User Avatar" />
-                        <div className="user-info">
-                            <span>Admin User</span>
-                            <small>admin@securai.com</small>
-                        </div>
-                        <ChevronDown size={16} />
+                        <button className="close-button" onClick={toggleSidebar}>
+                            <X size={24} />
+                        </button>
                     </div>
-                </div>
+                    <nav className="sidebar-nav">
+                        {menuItems.map(item => (
+                            <a 
+                                key={item.view} 
+                                href="#" 
+                                onClick={e => {
+                                    e.preventDefault();
+                                    handleNavigation(item);
+                                }} 
+                                className={`nav-item ${currentView === item.view ? 'active' : ''}`}
+                            >
+                                {item.icon}
+                                <span>{item.title}</span>
+                            </a>
+                        ))}
+                    </nav>
+                    <div className="sidebar-footer">
+                        <div className="user-profile">
+                            <img src="https://placehold.co/40x40/000000/ffffff?text=A" alt="User Avatar" />
+                            <div className="user-info">
+                                <span>Admin User</span>
+                                <small>admin@securai.com</small>
+                            </div>
+                            <ChevronDown size={16} />
+                        </div>
+                    </div>
                 </div>
             )}
         </>
@@ -464,7 +502,9 @@ export default function App() {
                     font-family: 'Inter', sans-serif;
                     background-color: var(--bg-color);
                     color: var(--text-primary);
-                    overflow: hidden;
+                    margin: 0;
+                    padding: 0;
+                    overflow-x: hidden;
                 }
 
                 /* Custom Scrollbar */
@@ -473,26 +513,59 @@ export default function App() {
                 ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 4px; }
                 ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.4); }
 
-                .app-container { display: flex; min-height: 100vh; background-color: var(--bg-color); }
+                .app-container { 
+                    display: flex; 
+                    min-height: 100vh; 
+                    background-color: transparent;
+                    position: relative;
+                }
 
                 .main-content {
                     flex-grow: 1;
                     padding: 1.5rem;
-                    transition: margin-left 0.3s ease-in-out;
+                    transition: margin-left 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94), 
+                               transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
                     margin-left: 0;
                     position: relative;
                     z-index: 2;
                     height: 100vh;
                     overflow-y: auto;
+                    will-change: margin-left, transform;
                 }
                 
                 @media (min-width: 768px) {
-                    .main-content { padding: 3rem; }
+                    .main-content { 
+                        padding: 3rem; 
+                        transition: margin-left 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+                    }
                     .app-container.sidebar-open .main-content {
                         margin-left: var(--sidebar-width);
                     }
                 }
                 
+                /* Sidebar backdrop for mobile */
+                .sidebar-backdrop {
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    background-color: rgba(0, 0, 0, 0.5);
+                    backdrop-filter: blur(2px);
+                    z-index: 99;
+                    opacity: 0;
+                    visibility: hidden;
+                    transition: opacity 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+                               visibility 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+                }
+                .sidebar-backdrop.visible {
+                    opacity: 1;
+                    visibility: visible;
+                }
+                @media (min-width: 768px) {
+                    .sidebar-backdrop { display: none; }
+                }
+
                 /* --- Sidebar --- */
                 .sidebar {
                     width: var(--sidebar-width);
@@ -508,13 +581,19 @@ export default function App() {
                     height: 100%;
                     z-index: 100;
                     transform: translateX(-100%);
-                    transition: transform 0.3s ease-in-out;
+                    transition: transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+                    will-change: transform;
                 }
                 
-                .sidebar.open { transform: translateX(0); }
+                .sidebar.open { 
+                    transform: translateX(0); 
+                }
 
                 @media (min-width: 768px) {
-                    .sidebar { transform: translateX(0); }
+                    .sidebar { 
+                        transform: translateX(0); 
+                        transition: transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+                    }
                     .app-container:not(.sidebar-open) .sidebar {
                         transform: translateX(-100%);
                     }
@@ -549,11 +628,21 @@ export default function App() {
                 }
 
                 .close-button {
-                    background: none; border: none; color: var(--text-secondary); cursor: pointer;
-                    display: none;
+                    background: none; 
+                    border: none; 
+                    color: #A0A0A0; 
+                    cursor: pointer;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    padding: 8px;
+                    border-radius: 6px;
+                    transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
                 }
-                 @media (max-width: 767px) {
-                    .close-button { display: block; }
+                .close-button:hover {
+                    color: #FFFFFF;
+                    background-color: rgba(255,255,255,0.05);
+                    transform: rotate(90deg);
                 }
 
                 .sidebar-nav { flex-grow: 1; padding: 1rem 0; }
@@ -566,16 +655,22 @@ export default function App() {
                     color: var(--text-secondary);
                     text-decoration: none;
                     font-weight: 500;
-                    transition: all 0.2s ease;
+                    transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
                     position: relative;
+                    border-radius: 0.5rem;
+                    overflow: hidden;
+                    will-change: background-color, color, transform;
                 }
                 .nav-item:hover {
                     background-color: var(--surface-color);
                     color: var(--text-primary);
+                    transform: translateX(4px);
                 }
                 .nav-item.active {
                     color: var(--text-primary);
                     font-weight: 600;
+                    background-color: var(--surface-color);
+                    transform: translateX(4px);
                 }
                 .nav-item.active::before {
                     content: '';
@@ -586,6 +681,10 @@ export default function App() {
                     width: 3px;
                     background: var(--accent-glow);
                     box-shadow: 0 0 8px var(--accent-glow);
+                    transition: width 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+                }
+                .nav-item.active:hover::before {
+                    width: 4px;
                 }
 
                 .sidebar-footer { padding: 1.5rem; border-top: 1px solid var(--border-color); }
@@ -606,8 +705,21 @@ export default function App() {
                     display: flex;
                     align-items: center;
                     backdrop-filter: blur(5px);
+                    transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+                    opacity: 1;
+                    transform: scale(1);
+                    will-change: opacity, transform;
                 }
-                .app-container.sidebar-open .menu-button { display: none; }
+                .menu-button:hover {
+                    transform: scale(1.05);
+                    background: var(--surface-color);
+                    border-color: var(--text-primary);
+                }
+                .app-container.sidebar-open .menu-button { 
+                    opacity: 0;
+                    transform: scale(0.8);
+                    pointer-events: none;
+                }
                 
                 /* --- Content Styling --- */
                 .page-title {

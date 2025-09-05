@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { BarChart3, Rocket, Shield, GitBranch, Menu, X, ChevronDown } from 'lucide-react';
 import Plasma from './Plasma';
 
-// --- Sidebar Component (Updated) ---
+// --- Sidebar Component (Enhanced) ---
 const Sidebar = ({ isOpen, toggleSidebar }) => {
     const navigate = useNavigate();
     const location = useLocation();
@@ -17,6 +17,15 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
         { icon: <BarChart3 size={20} />, title: 'Reports', view: 'reports', path: '/report' },
         { icon: <Rocket size={20} />, title: 'Build Apps', view: 'build', path: '/build' },
     ];
+
+    const handleNavigation = (item) => {
+        navigate(item.path);
+        // Add a small delay for smooth transition before closing on mobile
+        if (window.innerWidth < 768) {
+            setTimeout(() => toggleSidebar(), 150);
+        }
+    };
+
     return (
         <>
             <style>{`
@@ -40,7 +49,7 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
                     display: none !important;
                 }
                 .sidebar {
-                    width: 260px;
+                    width: var(--sidebar-width);
                     background: rgba(16, 16, 16, 0.6);
                     border-right: 1px solid rgba(255,255,255,0.15);
                     backdrop-filter: blur(10px);
@@ -53,11 +62,20 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
                     height: 100%;
                     z-index: 100;
                     transform: translateX(-100%);
-                    transition: transform 0.3s ease-in-out;
+                    transition: transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+                    will-change: transform;
                 }
-                .sidebar.open { transform: translateX(0); }
+                .sidebar.open { 
+                    transform: translateX(0); 
+                }
                 @media (min-width: 768px) {
-                    .sidebar { transform: translateX(0); }
+                    .sidebar { 
+                        transform: translateX(0); 
+                        transition: transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+                    }
+                    .app-container:not(.sidebar-open) .sidebar {
+                        transform: translateX(-100%);
+                    }
                 }
                 .sidebar-header {
                     display: flex;
@@ -67,11 +85,21 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
                     border-bottom: 1px solid rgba(255,255,255,0.15);
                 }
                 .close-button {
-                    background: none; border: none; color: #A0A0A0; cursor: pointer;
-                    display: none;
+                    background: none; 
+                    border: none; 
+                    color: #A0A0A0; 
+                    cursor: pointer;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    padding: 8px;
+                    border-radius: 6px;
+                    transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
                 }
-                @media (max-width: 767px) {
-                    .close-button { display: block; }
+                .close-button:hover {
+                    color: #FFFFFF;
+                    background-color: rgba(255,255,255,0.05);
+                    transform: rotate(90deg);
                 }
                 .sidebar-nav { flex-grow: 1; padding: 1rem 0; }
                 .nav-item {
@@ -83,16 +111,22 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
                     color: #A0A0A0;
                     text-decoration: none;
                     font-weight: 500;
-                    transition: all 0.2s ease;
+                    transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
                     position: relative;
+                    border-radius: 0.5rem;
+                    overflow: hidden;
+                    will-change: background-color, color, transform;
                 }
                 .nav-item:hover {
                     background-color: rgba(255,255,255,0.05);
                     color: #FFFFFF;
+                    transform: translateX(4px);
                 }
                 .nav-item.active {
                     color: #FFFFFF;
                     font-weight: 600;
+                    background-color: rgba(255,255,255,0.05);
+                    transform: translateX(4px);
                 }
                 .nav-item.active::before {
                     content: '';
@@ -103,6 +137,10 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
                     width: 3px;
                     background: #FFFFFF;
                     box-shadow: 0 0 8px #FFFFFF;
+                    transition: width 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+                }
+                .nav-item.active:hover::before {
+                    width: 4px;
                 }
                 .sidebar-footer { padding: 1.5rem; border-top: 1px solid rgba(255,255,255,0.15); }
                 .user-profile { display: flex; align-items: center; gap: 0.75rem; cursor: pointer; }
@@ -122,51 +160,89 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
                     display: flex;
                     align-items: center;
                     backdrop-filter: blur(5px);
+                    transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+                    opacity: 1;
+                    transform: scale(1);
+                    will-change: opacity, transform;
+                }
+                .menu-button:hover {
+                    transform: scale(1.05);
+                    background: rgba(255,255,255,0.05);
+                    border-color: #FFFFFF;
+                }
+                .app-container.sidebar-open .menu-button { 
+                    opacity: 0;
+                    transform: scale(0.8);
+                    pointer-events: none;
+                }
+
+                /* Sidebar backdrop for mobile */
+                .sidebar-backdrop {
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    background-color: rgba(0, 0, 0, 0.5);
+                    backdrop-filter: blur(2px);
+                    z-index: 99;
+                    opacity: 0;
+                    visibility: hidden;
+                    transition: opacity 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+                               visibility 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+                }
+                .sidebar-backdrop.visible {
+                    opacity: 1;
+                    visibility: visible;
+                }
+                @media (min-width: 768px) {
+                    .sidebar-backdrop { display: none; }
                 }
             `}</style>
+            
+            {/* Backdrop for mobile */}
+            <div 
+                className={`sidebar-backdrop ${isOpen ? 'visible' : ''}`}
+                onClick={toggleSidebar}
+            />
+            
             {isOpen && (
                 <div className={`sidebar open`}>
                     <div className="sidebar-header">
                         <div className="logo">
                             <span className="logo-text">xVERTA</span>
                         </div>
-                    <button className="close-button" onClick={toggleSidebar}>
-                        <X size={24} />
-                    </button>
-                </div>
-                <nav className="sidebar-nav">
-                    {menuItems.map(item => (
-                        <a 
-                            key={item.view} 
-                            href="#" 
-                            onClick={e => {
-                                e.preventDefault();
-                                navigate(item.path);
-                                if (window.innerWidth < 768) toggleSidebar();
-                            }} 
-                            className={`nav-item ${currentPath === item.path ? 'active' : ''}`}
-                        >
-                            {item.icon}
-                            <span>{item.title}</span>
-                        </a>
-                    ))}
-                </nav>
-                <div className="sidebar-footer">
-                    <div className="user-profile">
-                        <img src="https://placehold.co/40x40/000000/ffffff?text=A" alt="User Avatar" />
-                        <div className="user-info">
-                            <span>Admin User</span>
-                            <small>admin@securai.com</small>
+                        <button className="close-button" onClick={toggleSidebar}>
+                            <X size={24} />
+                        </button>
+                    </div>
+                    <nav className="sidebar-nav">
+                        {menuItems.map(item => (
+                            <a 
+                                key={item.view} 
+                                href="#" 
+                                onClick={e => {
+                                    e.preventDefault();
+                                    handleNavigation(item);
+                                }} 
+                                className={`nav-item ${currentPath === item.path ? 'active' : ''}`}
+                            >
+                                {item.icon}
+                                <span>{item.title}</span>
+                            </a>
+                        ))}
+                    </nav>
+                    <div className="sidebar-footer">
+                        <div className="user-profile">
+                            <img src="https://placehold.co/40x40/000000/ffffff?text=A" alt="User Avatar" />
+                            <div className="user-info">
+                                <span>Admin User</span>
+                                <small>admin@securai.com</small>
+                            </div>
+                            <ChevronDown size={16} />
                         </div>
-                        <ChevronDown size={16} />
                     </div>
                 </div>
-                </div>
-            )}
-            {!isOpen && (
-                <button className="menu-button" onClick={toggleSidebar}>
-                    <Menu size={24} />
-                </button>
             )}
         </>
     );
@@ -406,10 +482,17 @@ const ThreeBackground = React.memo(({
     return <div ref={mountRef} style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', zIndex: -1, backgroundColor: '#000' }} />;
 });
 
-// --- Shared Page Wrapper Component (Unchanged) ---
+// --- Shared Page Wrapper Component (Enhanced) ---
 const PageWrapper = ({ children }) => {
-    const [isSidebarOpen, setSidebarOpen] = useState(false);
+    const [isSidebarOpen, setSidebarOpen] = useState(true);
     const location = useLocation();
+
+    useEffect(() => {
+        if (window.innerWidth < 768) {
+            setSidebarOpen(false);
+        }
+    }, []);
+    
     const toggleSidebar = () => setSidebarOpen(!isSidebarOpen);
 
     // Hide sidebar on /login and /signup
@@ -422,6 +505,19 @@ const PageWrapper = ({ children }) => {
                     /* --- Global Styles & Variables --- */
                     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
                     @import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@700&display=swap');
+                    
+                    * {
+                        margin: 0;
+                        padding: 0;
+                        box-sizing: border-box;
+                    }
+                    
+                    html, body {
+                        overflow-x: hidden;
+                        width: 100%;
+                        height: 100%;
+                    }
+                    
                     :root {
                         --primary-green: #00f5c3;
                         --text-light: #f8fafc;
@@ -431,20 +527,79 @@ const PageWrapper = ({ children }) => {
                         --card-bg-hover: rgba(0, 0, 0, 0.5);
                         --card-border: rgba(0, 245, 195, 0.2);
                         --card-border-hover: rgba(0, 245, 195, 0.5);
+                        --sidebar-width: 260px;
+                        --glass-bg: rgba(16, 16, 16, 0.6);
+                        --surface-color: rgba(255, 255, 255, 0.05);
+                        --border-color: rgba(255, 255, 255, 0.15);
+                        --text-primary: #FFFFFF;
+                        --text-secondary: #A0A0A0;
+                        --accent-glow: #FFFFFF;
                     }
                     .main-app, .app-container, .report-page, .security-scan-page, .deploy-page, .repo-analysis-page, .project-builder-page {
                         background: transparent !important;
                         background-color: transparent !important;
                     }
+
+                    /* App Container with Sidebar Effects */
+                    .app-container { 
+                        display: flex; 
+                        min-height: 100vh; 
+                        background-color: transparent;
+                        position: relative;
+                    }
+
+                    /* Login/Signup pages should have full width without sidebar constraints */
+                    .app-container.auth-page {
+                        display: block;
+                    }
+
+                    .main-content {
+                        flex-grow: 1;
+                        padding: 1.5rem;
+                        transition: margin-left 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94), 
+                                   transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+                        margin-left: 0;
+                        position: relative;
+                        z-index: 2;
+                        min-height: 100vh;
+                        overflow-x: hidden;
+                        overflow-y: auto;
+                        will-change: margin-left, transform;
+                    }
+
+                    /* Auth pages should have no padding and full control */
+                    .main-content.auth-content {
+                        padding: 0;
+                        height: auto;
+                        min-height: 100vh;
+                        overflow: visible;
+                    }
+                    
+                    @media (min-width: 768px) {
+                        .main-content { 
+                            padding: 3rem; 
+                            transition: margin-left 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+                        }
+                        .app-container.sidebar-open .main-content {
+                            margin-left: var(--sidebar-width);
+                        }
+                    }
                 `}
             </style>
-            <main className="main-app">
+            <div className={`app-container ${isSidebarOpen ? 'sidebar-open' : ''} ${hideSidebar ? 'auth-page' : ''}`}>
                 <ThreeBackground /> 
                 {!hideSidebar && <Sidebar isOpen={isSidebarOpen} toggleSidebar={toggleSidebar} />}
-                <div className="relative" style={{position: 'relative', zIndex: 1}}>
+                
+                {!hideSidebar && !isSidebarOpen && (
+                    <button className="menu-button" onClick={toggleSidebar}>
+                        <Menu size={24} />
+                    </button>
+                )}
+                
+                <div className={`main-content ${hideSidebar ? 'auth-content' : ''}`}>
                     {children}
                 </div>
-            </main>
+            </div>
         </>
     );
 };

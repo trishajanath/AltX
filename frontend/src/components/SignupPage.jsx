@@ -78,13 +78,14 @@ const SignupPage = () => {
 
     const validateConfirmPassword = (password, confirmPassword) => {
         if (!confirmPassword) return { isValid: null, message: '' };
-            const [loading, setLoading] = useState(false);
         if (password === confirmPassword) {
             return { isValid: true, message: 'Passwords match' };
         } else {
             return { isValid: false, message: 'Passwords do not match' };
         }
     };
+
+    const [loading, setLoading] = useState(false);
 
     const validateName = (name) => {
         if (!name) return { isValid: null, message: '' };
@@ -132,10 +133,14 @@ const SignupPage = () => {
 
     const handleSubmit = (e) => {
         e.preventDefault();
-        // Here you would normally handle the signup logic
-        console.log('Signup data:', formData);
-        // Redirect to home page after successful signup
-        navigate('/home');
+        setLoading(true);
+        setTimeout(() => {
+            setLoading(false);
+            // Here you would normally handle the signup logic
+            console.log('Signup data:', formData);
+            // Redirect to home page after successful signup
+            navigate('/home');
+        }, 1800);
     };
 
     const handleBackToLanding = () => {
@@ -171,8 +176,8 @@ const SignupPage = () => {
                         background: rgba(10, 10, 10, 0.5);
                         backdrop-filter: blur(15px);
                         border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-                        height: 80px;
-                        min-height: 80px;
+                        height: 70px;
+                        min-height: 70px;
                     }
 
                     .header-content {
@@ -241,21 +246,22 @@ const SignupPage = () => {
                         text-align: center;
                         position: relative;
                         z-index: 2;
-                        padding-top: 80px;
-                        min-height: calc(100vh - 80px);
-                        padding-left: 2rem;
-                        padding-right: 2rem;
+                        padding: 90px 2rem 2rem 2rem;
+                        min-height: 100vh;
+                        box-sizing: border-box;
                     }
 
                     .signup-card {
-                        background: rgba(0, 0, 0, 0.3);
-                        border: 1px solid rgba(255, 255, 255, 0.1);
-                        border-radius: 1rem;
-                        padding: 3rem;
+                        background: rgba(16, 16, 16, 0.8);
+                        border: 1px solid rgba(255, 255, 255, 0.15);
+                        border-radius: 1.5rem;
+                        padding: 2.5rem;
                         max-width: 500px;
                         width: 100%;
-                        backdrop-filter: blur(15px);
-                        box-shadow: 0 0 25px rgba(255, 255, 255, 0.05);
+                        backdrop-filter: blur(20px);
+                        -webkit-backdrop-filter: blur(20px);
+                        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+                        margin: 0 auto;
                     }
 
                     .signup-header {
@@ -284,19 +290,19 @@ const SignupPage = () => {
 
                     .form-label {
                         display: block;
-                        margin-bottom: 0.5rem;
-                        font-weight: 500;
+                        margin-bottom: 0.75rem;
+                        font-weight: 600;
                         color: #ffffff;
-                        font-size: 0.9rem;
+                        font-size: 0.95rem;
                     }
 
                     .form-input {
                         width: 100%;
-                        padding: 0.875rem 1rem;
-                        background: rgba(0, 0, 0, 0.3);
+                        padding: 1rem 1.25rem;
+                        background: rgba(0, 0, 0, 0.4);
                         border: 1px solid rgba(255, 255, 255, 0.2);
-                        border-radius: 0.5rem;
-                        color: #ffffffff;
+                        border-radius: 0.75rem;
+                        color: #ffffff;
                         font-size: 1rem;
                         transition: all 0.3s ease;
                         box-sizing: border-box;
@@ -342,30 +348,30 @@ const SignupPage = () => {
 
 
                     .form-input.valid {
-                        border-color: #360657ff;
-                        background: #000000ff;
+                        border-color: #22c55e;
+                        background: rgba(34, 197, 94, 0.1);
                     }
 
                     .form-input.invalid {
-                        border-color: #360657ff;
-                        background: #000000ff;
+                        border-color: #ef4444;
+                        background: rgba(239, 68, 68, 0.1);
                     }
 
                     .form-input:focus {
                         outline: none;
-                        border-color: #360657ff;
-                        background: #000000ff;
-                        box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
+                        border-color: #ffffff;
+                        background: rgba(255, 255, 255, 0.05);
+                        box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1);
                     }
 
                     .form-input.valid:focus {
-                        border-color: #360657ff;
+                        border-color: #22c55e;
                         box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.2);
                     }
 
                     .form-input.invalid:focus {
-                        border-color: #360657ff;
-                        box-shadow: 0 0 0 2px rgba(45, 7, 63, 0.2);
+                        border-color: #ef4444;
+                        box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2);
                     }
 
                     .validation-icon {
@@ -395,12 +401,12 @@ const SignupPage = () => {
                         border: none;
                         cursor: pointer;
                         padding: 0.25rem;
-                        color: #666666;
+                        color: #a3a3a3;
                         transition: color 0.3s ease;
                     }
 
                     .password-toggle:hover {
-                        color: #000000;
+                        color: #ffffff;
                     }
 
                     .validation-message {
@@ -448,10 +454,40 @@ const SignupPage = () => {
                         background: #22c55e;
                     }
 
+                    .login-button {
+                        width: 100%;
+                        padding: 1.125rem 2rem;
+                        background: #ffffff;
+                        color: #000000;
+                        border: 2px solid #ffffff;
+                        border-radius: 0.75rem;
+                        font-size: 1.1rem;
+                        font-weight: 700;
+                        cursor: pointer;
+                        transition: all 0.3s ease;
+                        margin-bottom: 2rem;
+                        text-transform: uppercase;
+                        letter-spacing: 1px;
+                        font-family: inherit;
+                    }
+
+                    .login-button:hover {
+                        transform: translateY(-2px);
+                        box-shadow: 0 10px 30px rgba(255, 255, 255, 0.2);
+                        background: #ffffff;
+                        color: #000000;
+                    }
+
+                    .login-button:disabled {
+                        opacity: 0.7;
+                        cursor: not-allowed;
+                        transform: none;
+                    }
+
                     .name-row {
                         display: grid;
                         grid-template-columns: 1fr 1fr;
-                        gap: 1rem;
+                        gap: 1.5rem;
                     }
 
 
@@ -547,15 +583,15 @@ const SignupPage = () => {
                     }
                     .social-button {
                         width: 100%;
-                        padding: 0.875rem;
-                        background: rgba(0, 0, 0, 0.3);
+                        padding: 1rem 1.25rem;
+                        background: rgba(0, 0, 0, 0.4);
                         border: 1px solid rgba(255, 255, 255, 0.2);
-                        border-radius: 0.5rem;
+                        border-radius: 0.75rem;
                         color: #ffffff;
-                        font-size: 0.9rem;
+                        font-size: 0.95rem;
                         cursor: pointer;
                         transition: all 0.3s ease;
-                        margin-bottom: 0.75rem;
+                        margin-bottom: 1rem;
                         font-family: inherit;
                         font-weight: 500;
                         display: flex;
@@ -591,11 +627,35 @@ const SignupPage = () => {
                     @media (max-width: 768px) {
                         .header { height: 70px; min-height: 70px; }
                         .header-content { padding: 1rem; }
-                        .main-content { padding-top: 70px; min-height: calc(100vh - 70px); }
-                        .signup-card { padding: 2rem; margin: 1rem; }
+                        .main-content { 
+                            padding: 90px 1rem 2rem 1rem;
+                            min-height: 100vh;
+                        }
+                        .signup-card { 
+                            padding: 2rem; 
+                            margin: 0;
+                            max-width: none;
+                            border-radius: 1rem;
+                            width: 100%;
+                        }
                         .name-row { 
                             grid-template-columns: 1fr; 
                             gap: 0; 
+                        }
+                        .signup-title {
+                            font-size: 2rem;
+                        }
+                        .signup-subtitle {
+                            font-size: 1rem;
+                        }
+                        .form-input {
+                            padding: 0.875rem 1rem;
+                        }
+                        .login-button {
+                            padding: 1rem 2rem;
+                        }
+                        .social-button {
+                            padding: 0.875rem 1rem;
                         }
                     }
                 `}</style>
@@ -794,8 +854,8 @@ const SignupPage = () => {
                                 )}
                             </div>
 
-                            <button type="submit" className="social-button">
-                                Create Account
+                            <button type="submit" className="login-button" disabled={loading}>
+                                {loading ? 'Creating Account...' : 'CREATE ACCOUNT'}
                             </button>
                         </form>
 

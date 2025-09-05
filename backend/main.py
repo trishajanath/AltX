@@ -8,7 +8,7 @@ import time
 import tempfile
 import stat
 import platform
-from fastapi import Request, Header, FastAPI, HTTPException
+from fastapi import Request, Header, FastAPI, HTTPException, Body
 from fastapi.responses import RedirectResponse, HTMLResponse
 import hmac
 import hashlib
@@ -689,24 +689,60 @@ async def analyze_repo_comprehensive(request: RepoAnalysisRequest):
                     print(f"⚠️ Shallow clone also failed: {shallow_error}")
                     raise Exception(f"All Git clone methods failed. Last error: {shallow_error}")
             
-            # Get basic repo info from GitHub API
+            # Get basic repo info from GitHub API with enhanced error handling
             repo_url_clean = repo_url.rstrip('/').replace('.git', '')
             parts = repo_url_clean.split('/')
             github_repo = None
             github_error = None
             
-            if len(parts) >= 5 and github_client:
+            # Extract owner and repo name from URL
+            if len(parts) >= 5:
                 owner, repo_name = parts[-2], parts[-1]
-                try:
-                    github_repo = github_client.get_repo(f"{owner}/{repo_name}")
-                    print(f"✅ Successfully fetched GitHub repo info for {owner}/{repo_name}")
-                except Exception as e:
-                    github_error = str(e)
-                    print(f"⚠️ Could not fetch GitHub repo info: {e}")
-                    if "404" in str(e):
-                        print(f"💡 Repository might be private or URL might be incorrect")
-                    elif "403" in str(e):
-                        print(f"💡 API rate limit reached or authentication required")
+                print(f"🔍 Extracted repo info: {owner}/{repo_name}")
+                
+                # Try to use github_client first, then create a new one if needed
+                working_client = github_client
+                
+                if not working_client:
+                    print("⚠️ github_client not available, attempting to create new client...")
+                    # Try to create a new GitHub client if the imported one failed
+                    token = os.getenv("GITHUB_TOKEN")
+                    if token:
+                        try:
+                            from github import Github
+                            working_client = Github(token)
+                            print("✅ Created new GitHub client with token")
+                        except Exception as client_error:
+                            print(f"❌ Failed to create GitHub client: {client_error}")
+                    else:
+                        # Try anonymous access for public repos
+                        try:
+                            from github import Github
+                            working_client = Github()
+                            print("✅ Created anonymous GitHub client")
+                        except Exception as anon_error:
+                            print(f"❌ Failed to create anonymous GitHub client: {anon_error}")
+                
+                if working_client:
+                    try:
+                        github_repo = working_client.get_repo(f"{owner}/{repo_name}")
+                        print(f"✅ Successfully fetched GitHub repo info for {owner}/{repo_name}")
+                        print(f"📊 Repo details: {github_repo.full_name}, {github_repo.language}, {github_repo.stargazers_count} stars")
+                    except Exception as e:
+                        github_error = str(e)
+                        print(f"⚠️ Could not fetch GitHub repo info: {e}")
+                        if "404" in str(e):
+                            print(f"💡 Repository might be private or URL might be incorrect")
+                        elif "403" in str(e):
+                            print(f"💡 API rate limit reached or authentication required")
+                        elif "401" in str(e):
+                            print(f"💡 Authentication failed - check GitHub token")
+                else:
+                    github_error = "No GitHub client available"
+                    print(f"❌ No GitHub client available for API access")
+            else:
+                github_error = "Invalid repository URL format"
+                print(f"❌ Invalid repository URL format: {repo_url_clean}")
             
             # Parallel scanning for better performance
             print("🔍 Starting parallel security scans...")
@@ -844,20 +880,47 @@ async def analyze_repo_comprehensive(request: RepoAnalysisRequest):
 • {len(code_quality_results)} code quality issues identified
 • Security recommendations generated using RAG-enhanced AI"""
             
-            # Compile comprehensive results
+            # Compile comprehensive results with enhanced repository info
             # Ensure all dicts are valid for .get() usage
             file_scan_results = file_scan_results if isinstance(file_scan_results, dict) else {}
             dependency_scan_results = dependency_scan_results if isinstance(dependency_scan_results, dict) else {}
+            
+            # Create repository info with better fallback handling
+            repository_info = {
+                "url": repo_url,
+                "name": "Unknown",
+                "description": "No description",
+                "language": "Unknown", 
+                "stars": 0,
+                "forks": 0,
+                "open_issues": 0
+            }
+            
+            if github_repo:
+                # Successfully got GitHub API data
+                repository_info.update({
+                    "name": getattr(github_repo, 'full_name', "Unknown"),
+                    "description": getattr(github_repo, 'description', None) or "No description",
+                    "language": getattr(github_repo, 'language', None) or "Unknown",
+                    "stars": getattr(github_repo, 'stargazers_count', 0),
+                    "forks": getattr(github_repo, 'forks_count', 0),
+                    "open_issues": getattr(github_repo, 'open_issues_count', 0)
+                })
+                print(f"✅ Using GitHub API data: {repository_info['name']} ({repository_info['language']})")
+            else:
+                # Fallback: extract what we can from the URL
+                if len(parts) >= 5:
+                    owner, repo_name = parts[-2], parts[-1]
+                    repository_info["name"] = f"{owner}/{repo_name}"
+                    print(f"⚠️ Using URL-based fallback: {repository_info['name']}")
+                    
+                    # Add GitHub API error to analysis warnings
+                    if github_error:
+                        analysis_warnings.append(f"GitHub API access failed: {github_error}")
+                        analysis_warnings.append("Repository statistics (stars, forks, language) unavailable - using URL-based fallback")
+            
             comprehensive_results = {
-                "repository_info": {
-                    "url": repo_url,
-                    "name": getattr(github_repo, 'full_name', "Unknown") if github_repo else "Unknown",
-                    "description": getattr(github_repo, 'description', "No description") if github_repo else "No description",
-                    "language": getattr(github_repo, 'language', "Unknown") if github_repo else "Unknown",
-                    "stars": getattr(github_repo, 'stargazers_count', 0) if github_repo else 0,
-                    "forks": getattr(github_repo, 'forks_count', 0) if github_repo else 0,
-                    "open_issues": getattr(github_repo, 'open_issues_count', 0) if github_repo else 0
-                },
+                "repository_info": repository_info,
                 "file_security_scan": file_scan_results,
                 "secret_scan_results": secret_scan_results,
                 "static_analysis_results": static_analysis_results,
@@ -1571,21 +1634,31 @@ No specific scan data available. I can help with:
             "action_taken": None
         }
 @app.post("/owasp-mapping")
-async def owasp_mapping():
+async def owasp_mapping(request_data: dict = Body(...)):
     """
     Map detected security issues to OWASP Top 10 categories
     Uses the latest scan and repo analysis results automatically
     """
     try:
+        # Check if request specifies to exclude repo analysis (for website-only reports)
+        exclude_repo = request_data.get('exclude_repo', False) if request_data else False
+        scan_result_data = request_data.get('scan_result') if request_data else None
+        
+        print(f"🎯 OWASP Mapping - exclude_repo: {exclude_repo}")
+        
         # Get the latest scan results from stored data
         scan_results = None
         if hasattr(WebsiteScan, 'latest_scan') and WebsiteScan.latest_scan:
             scan_results = WebsiteScan.latest_scan
+            print(f"📊 Using stored website scan results")
         
-        # Get the latest repository results from stored data
+        # Get the latest repository results from stored data (only if not excluded)
         repo_results = None
-        if hasattr(RepoAnalysis, 'latest_analysis') and RepoAnalysis.latest_analysis:
+        if not exclude_repo and hasattr(RepoAnalysis, 'latest_analysis') and RepoAnalysis.latest_analysis:
             repo_results = RepoAnalysis.latest_analysis
+            print(f"📁 Using stored repository analysis results")
+        elif exclude_repo:
+            print(f"🚫 Repository analysis excluded for website-only OWASP mapping")
         
         # Check if we have any data to analyze
         if not scan_results and not repo_results:
