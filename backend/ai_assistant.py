@@ -246,13 +246,22 @@ def format_chat_response(text: str) -> str:
     return formatted
 
 def get_chat_response(history: List[Dict], model_type: str = 'fast') -> str:
-    """Enhanced chat response with model selection and comprehensive context"""
+    """
+    Generates a chat response using the specified model, including context from the latest repository analysis.
+
+    Args:
+        history: A list of previous chat messages.
+        model_type: The type of model to use ('fast' or 'smart').
+
+    Returns:
+        A formatted string containing the AI's response.
+    """
     model = get_model(model_type)
     if model is None:
         return f"❌ **AI model ({model_type}) is not available**"
 
     try:
-        # Enhanced context based on model type
+        # Define base context based on the selected model type
         if model_type == 'smart':
             context = """You are GitHub Copilot, an expert cybersecurity consultant and code analysis specialist. You provide comprehensive, detailed security analysis with:
 
@@ -277,7 +286,7 @@ def get_chat_response(history: List[Dict], model_type: str = 'fast') -> str:
 • Give step-by-step implementation guides
 • Explain the 'why' behind each recommendation
 • Use technical terminology appropriately"""
-        else:  # fast model
+        else:  # 'fast' model
             context = """You are GitHub Copilot, a friendly cybersecurity assistant focused on quick, actionable security guidance:
 
 🔒 **Quick Security Analysis:**
@@ -294,50 +303,13 @@ def get_chat_response(history: List[Dict], model_type: str = 'fast') -> str:
 • Prioritize critical issues first
 • Give practical examples and code snippets
 • Be encouraging and supportive"""
-        
-        # Add current analysis context if available
+
+        # Append the latest repository analysis to the context, if it exists
         if RepoAnalysis.latest_analysis:
             if isinstance(RepoAnalysis.latest_analysis, dict):
                 # Handle new comprehensive analysis format from /analyze-repo
-                repo_info = RepoAnalysis.latest_analysis.get('repository_info', {})
-                security_summary = RepoAnalysis.latest_analysis.get('security_summary', {})
-                
-                if model_type == 'smart':
-                    context += f"""
-
-📂 **COMPREHENSIVE REPOSITORY CONTEXT:**
-**Repository:** {repo_info.get('name', 'Unknown')} ({repo_info.get('language', 'Unknown')})
-**Description:** {repo_info.get('description', 'No description')}
-**Security Score:** {RepoAnalysis.latest_analysis.get('overall_security_score', 'N/A')}/100 ({RepoAnalysis.latest_analysis.get('security_level', 'Unknown')})
-
-**DETAILED SECURITY METRICS:**
-• Files Scanned: {security_summary.get('total_files_scanned', 0)}
-• Sensitive Files: {security_summary.get('sensitive_files_found', 0)}
-• Hardcoded Secrets: {security_summary.get('secrets_found', 0)}
-• Static Analysis Issues: {security_summary.get('static_issues_found', 0)}
-• Vulnerable Dependencies: {security_summary.get('vulnerable_dependencies', 0)}
-• Code Quality Issues: {security_summary.get('code_quality_issues', 0)}
-• Security Files Present: {security_summary.get('security_files_present', 0)}
-
-**CRITICAL FINDINGS SUMMARY:**
-• Secret Scan: {len(RepoAnalysis.latest_analysis.get('secret_scan_results', []))} secrets detected
-• Code Quality: {len(RepoAnalysis.latest_analysis.get('code_quality_results', []))} patterns found
-• Dependencies: {len(RepoAnalysis.latest_analysis.get('dependency_scan_results', {}).get('vulnerable_packages', []))} vulnerable packages
-• Static Analysis: {len(RepoAnalysis.latest_analysis.get('static_analysis_results', []))} issues found
-
-**TOP RECOMMENDATIONS:**
-{chr(10).join([f'• {rec}' for rec in RepoAnalysis.latest_analysis.get('recommendations', [])[:5]])}
-
-**RECENT FINDINGS DETAILS:**
-{chr(10).join([f'• {finding.get("file", "unknown")}: {finding.get("description", "Security issue")}' for finding in RepoAnalysis.latest_analysis.get('secret_scan_results', [])[:3]])}
-{chr(10).join([f'• {finding.get("file", "unknown")}: {finding.get("pattern", "unknown")} ({finding.get("severity", "unknown")} severity)' for finding in RepoAnalysis.latest_analysis.get('code_quality_results', [])[:3]])}"""
-                else:  # fast model
-                    context += f"""
-
-📂 **REPOSITORY CONTEXT:**
-**Repository:** {repo_info.get('name', 'Unknown')} - Security Score: {RepoAnalysis.latest_analysis.get('overall_security_score', 'N/A')}/100
-**Key Issues:** {security_summary.get('secrets_found', 0)} secrets, {security_summary.get('code_quality_issues', 0)} code issues, {security_summary.get('vulnerable_dependencies', 0)} vulnerable deps
-**Priority Actions:** {', '.join(RepoAnalysis.latest_analysis.get('recommendations', [])[:2])}"""
+                analysis_context = format_analysis_for_context(RepoAnalysis.latest_analysis)
+                context += "\n\n📂 **CURRENT REPOSITORY ANALYSIS:**\n" + analysis_context
             else:
                 # Handle legacy RepoAnalysis format
                 context += f"""
@@ -348,56 +320,98 @@ def get_chat_response(history: List[Dict], model_type: str = 'fast') -> str:
 **Security Findings:** {len(RepoAnalysis.latest_analysis.security_findings)} issues found
 **Recent Findings:** {', '.join(RepoAnalysis.latest_analysis.security_findings[:3])}"""
         
-        # Build conversation history with proper error handling
-        formatted_history = [{'parts': [{'text': context}], 'role': 'model'}]
+        # Also add website scan context if available
+        if WebsiteScan.latest_scan:
+            website_data = WebsiteScan.latest_scan
+            if isinstance(website_data, dict):
+                scan_data = website_data.get('scan_result', {})
+                context += f"""
+
+🌐 **WEBSITE SECURITY SCAN:**
+• Target: {scan_data.get('url', 'N/A')}
+• Security Score: {scan_data.get('security_score', 'N/A')}/100
+• HTTPS: {'✅ Enabled' if scan_data.get('https', False) else '❌ Disabled'}
+• Vulnerabilities: {len(scan_data.get('flags', []))} issues found"""
+
+        # Prepare the chat history in the format required by the Generative AI model.
+        # The history always starts with the model's context.
+        new_history = [{"role": "model", "parts": [context]}]
         
-        for msg in history:
+        for message in history:
             try:
-                # Handle different message formats
-                if isinstance(msg.get('parts'), list):
-                    # Handle parts as list of dicts: [{"text": "content"}]
-                    if len(msg['parts']) > 0 and isinstance(msg['parts'][0], dict):
-                        content = msg['parts'][0].get('text', '')
-                    # Handle parts as list with string: ["content"]
-                    elif len(msg['parts']) > 0 and isinstance(msg['parts'][0], str):
-                        content = msg['parts'][0]
-                    else:
-                        content = str(msg.get('parts', ''))
-                elif isinstance(msg.get('parts'), dict):
-                    # Handle parts as single dict: {"text": "content"}
-                    content = msg['parts'].get('text', '')
-                elif isinstance(msg.get('parts'), str):
-                    # Handle parts as string: "content"
-                    content = msg['parts']
-                else:
-                    # Fallback: try to get message content from other fields
-                    content = msg.get('message', msg.get('content', str(msg.get('parts', ''))))
+                # Extract content ensuring it's always a string
+                content = ""
                 
-                role = 'user' if msg.get('type') == 'user' or msg.get('role') == 'user' else 'model'
-                formatted_message = {'parts': [{'text': str(content)}], 'role': role}
-                formatted_history.append(formatted_message)
+                if isinstance(message, dict):
+                    # Method 1: Check for 'parts' field
+                    if 'parts' in message and isinstance(message['parts'], list) and len(message['parts']) > 0:
+                        first_part = message['parts'][0]
+                        if isinstance(first_part, str):
+                            content = first_part
+                        elif isinstance(first_part, dict) and 'text' in first_part:
+                            content = first_part['text']
+                        else:
+                            content = str(first_part)
+                    
+                    # Method 2: Check for direct message content
+                    elif 'message' in message:
+                        content = str(message['message'])
+                    elif 'content' in message:
+                        content = str(message['content'])
+                    elif 'text' in message:
+                        content = str(message['text'])
+                    
+                    # Method 3: Fallback - convert entire message to string
+                    else:
+                        content = str(message)
+                else:
+                    # If message is not a dict, convert to string
+                    content = str(message)
+                
+                # Ensure content is not empty and is a string
+                if not content or not isinstance(content, str):
+                    content = "No message content"
+                
+                # Determine role
+                role = 'user'
+                if isinstance(message, dict):
+                    if message.get('type') == 'assistant' or message.get('type') == 'model':
+                        role = 'model'
+                    elif message.get('role') == 'model' or message.get('role') == 'assistant':
+                        role = 'model'
+                
+                new_history.append({
+                    "role": role,
+                    "parts": [content]  # Always a single string in a list
+                })
                 
             except Exception as e:
                 print(f"Warning: Error processing message in history: {e}")
-                # Skip malformed messages
                 continue
 
-        # Use selected model for response
-        chat = model.start_chat(history=formatted_history[:-1])
-        last_message = formatted_history[-1]['parts'][0]['text']
-        response = chat.send_message(last_message)
-        
-        # Enhanced response formatting based on model type
+        # The last message is what the model needs to respond to.
+        if len(new_history) > 1:
+            chat_history_for_model = new_history[:-1]
+            last_user_message = new_history[-1]['parts'][0]
+        else:
+            chat_history_for_model = [{"role": "model", "parts": [context]}]
+            last_user_message = "Please help with security analysis."
+
+        # Initiate the chat and get the response
+        chat = model.start_chat(history=chat_history_for_model)
+        response = chat.send_message(last_user_message)
+
+        # Format and return the final response
         formatted_response = format_chat_response(response.text.strip())
         
         if model_type == 'smart':
-            # Add model indicator for comprehensive responses
             return f"🧠 **Comprehensive Analysis** (Smart Model)\n\n{formatted_response}"
         else:
-            # Add model indicator for quick responses
             return f"⚡ **Quick Analysis** (Fast Model)\n\n{formatted_response}"
-        
+
     except Exception as e:
+        # Provide a clear error message if something goes wrong during the process
+        print(f"An unexpected error occurred in get_chat_response: {e}") # For server-side logging
         return f"❌ **Chat Error ({model_type} model):** {str(e)}"
 
 # --- Main Analysis Function ---
@@ -561,7 +575,7 @@ Simple recommendations for improving security.
 • Use simple, clear language
 """
         
-        history = [{"type": "user", "parts": [{"text": security_prompt}]}]
+        history = [{"type": "user", "parts": [security_prompt]}]
         return get_chat_response(history, model_type)
 
     except Exception as e:

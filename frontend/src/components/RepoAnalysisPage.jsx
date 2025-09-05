@@ -106,37 +106,61 @@ const RepoAnalysisPage = ({ setScanResult }) => { // Assuming setScanResult is p
         return `**Repository Analysis Complete**\n\n- **Repository:** ${data.repository_info?.name || 'Unknown'}\n- **Security Score:** ${score}/100 (${level})\n- **Language:** ${data.repository_info?.language || 'N/A'}\n\n**Scan Results:**\n- **Secrets Found:** ${summary.secrets_found || 0}\n- **Static Issues:** ${summary.static_issues_found || 0}\n- **Vulnerable Dependencies:** ${summary.vulnerable_dependencies || 0}\n\nI am ready to answer specific questions about these findings.`;
     };
     
-    const askAI = async () => {
-        if (!currentQuestion.trim() || !analysisResult) return;
-        setIsAskingAI(true);
-        const userMessage = { type: 'user', message: currentQuestion };
-        setChatMessages(prev => [...prev, userMessage]);
-        const questionToAsk = currentQuestion;
-        setCurrentQuestion('');
-        try {
-            // Format chat history for backend compatibility
-            const formattedHistory = [...chatMessages, userMessage].map(msg => ({
-                type: msg.type === 'ai' ? 'assistant' : 'user',
-                parts: [typeof msg.message === 'string' ? msg.message : JSON.stringify(msg.message)]
-            }));
+   const askAI = async () => {
+    if (!currentQuestion.trim() || !analysisResult) return;
+    setIsAskingAI(true);
+    const userMessage = { type: 'user', message: currentQuestion };
+    setChatMessages(prev => [...prev, userMessage]);
+    const questionToAsk = currentQuestion;
+    setCurrentQuestion('');
+    try {
+        // Format chat history properly - ensure all parts are strings
+        const formattedHistory = [...chatMessages, userMessage].map(msg => {
+            let messageContent = '';
+            if (typeof msg.message === 'string') {
+                messageContent = msg.message;
+            } else if (typeof msg.message === 'object') {
+                messageContent = JSON.stringify(msg.message);
+            } else {
+                messageContent = String(msg.message);
+            }
             
-            const response = await fetch('http://localhost:8000/ai-chat', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    question: questionToAsk,
-                    context: 'repo_analysis',
-                    history: formattedHistory
-                }),
-            });
-            const data = await response.json();
-            setChatMessages(prev => [...prev, { type: 'ai', message: data.response || 'Sorry, I could not process your question.' }]);
-        } catch (err) {
-            setChatMessages(prev => [...prev, { type: 'ai', message: 'Error: Could not connect to AI assistant.' }]);
-        } finally {
-            setIsAskingAI(false);
+            return {
+                type: msg.type === 'ai' ? 'assistant' : 'user',
+                parts: [messageContent] // Ensure this is always a string
+            };
+        });
+        
+        const response = await fetch('http://localhost:8000/ai-chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                question: questionToAsk,
+                context: 'repo_analysis',
+                history: formattedHistory
+            }),
+        });
+        
+        const data = await response.json();
+        
+        // Handle the response properly
+        let aiResponse = '';
+        if (data.response) {
+            aiResponse = data.response;
+        } else if (data.error) {
+            aiResponse = `Error: ${data.error}`;
+        } else {
+            aiResponse = 'Sorry, I could not process your question.';
         }
-    };
+        
+        setChatMessages(prev => [...prev, { type: 'ai', message: aiResponse }]);
+        
+    } catch (err) {
+        setChatMessages(prev => [...prev, { type: 'ai', message: 'Error: Could not connect to AI assistant.' }]);
+    } finally {
+        setIsAskingAI(false);
+    }
+};
     
     const isIssueFixed = (issueType, issueIndex) => fixedIssues.has(`${issueType}-${issueIndex}`);
     

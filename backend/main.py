@@ -960,6 +960,32 @@ async def unified_ai_chat(request: dict):
         if model_type not in ['fast', 'smart']:
             model_type = 'fast'
         
+        # Clean and validate previous_history to ensure all parts are strings
+        cleaned_history = []
+        for msg in previous_history:
+            if isinstance(msg, dict) and 'type' in msg and 'parts' in msg:
+                # Ensure parts contains only strings
+                clean_parts = []
+                for part in msg['parts']:
+                    if isinstance(part, str):
+                        clean_parts.append(part)
+                    elif isinstance(part, dict) or isinstance(part, list):
+                        # Convert complex objects to strings
+                        clean_parts.append(str(part)[:1000])  # Limit length
+                    else:
+                        clean_parts.append(str(part))
+                
+                cleaned_history.append({
+                    'type': msg['type'],
+                    'parts': clean_parts
+                })
+        
+        # Keep only last 5 messages for context (to prevent token limit issues)
+        cleaned_history = cleaned_history[-5:]
+        
+        print(f"🤖 Processing AI chat request: '{question[:100]}...'")
+        print(f"📝 History cleaned: {len(cleaned_history)} messages")
+        
         # Check if this is a fix request
         is_fix_request = any(phrase in question.lower() for phrase in [
             'fix this', 'fix the', 'propose fix', 'create fix', 'generate fix',
@@ -1003,176 +1029,13 @@ async def unified_ai_chat(request: dict):
 Please provide a comprehensive explanation using the above security knowledge.
 """
 
-        # Handle fix requests for repository analysis
-        if is_fix_request and context_type == 'repo_analysis':
-            analysis_data = RepoAnalysis.latest_analysis
-            
-            if not analysis_data:
-                return {
-                    "response": "❌ No repository analysis available. Please run `/analyze-repo` first to scan for issues to fix.",
-                    "model_used": model_type,
-                    "context_detected": context_type,
-                    "scan_data_available": False,
-                    "history": previous_history,
-                    "action_taken": None
-                }
-            
-            # Try to identify which issue the user wants to fix
-            repo_url = analysis_data.get('repository_info', {}).get('url', '')
-            
-            # Collect all fixable issues
-            fixable_issues = []
-            
-            # Add secret scan results
-            for secret in analysis_data.get('secret_scan_results', []):
-                fixable_issues.append({
-                    'file': secret.get('file', ''),
-                    'line': secret.get('line', ''),
-                    'type': 'Secret Detection',
-                    'description': f"Hardcoded {secret.get('secret_type', 'secret')} found",
-                    'vulnerable_code': secret.get('match', ''),
-                    'severity': 'Critical'
-                })
-            
-            # Add static analysis results
-            for issue in analysis_data.get('static_analysis_results', []):
-                if isinstance(issue, dict):
-                    fixable_issues.append({
-                        'file': issue.get('filename', ''),
-                        'line': issue.get('line_number', ''),
-                        'type': 'Static Analysis',
-                        'description': issue.get('issue_text', str(issue)),
-                        'vulnerable_code': '',
-                        'severity': issue.get('issue_severity', 'Medium')
-                    })
-            
-            # Add code quality issues
-            for issue in analysis_data.get('code_quality_results', []):
-                fixable_issues.append({
-                    'file': issue.get('file', ''),
-                    'line': issue.get('line', ''),
-                    'type': 'Code Quality',
-                    'description': issue.get('description', issue.get('pattern', '')),
-                    'vulnerable_code': issue.get('code_snippet', ''),
-                    'severity': issue.get('severity', 'Medium')
-                })
-            
-            if not fixable_issues:
-                return {
-                    "response": "✅ Great news! No fixable security issues were found in the latest repository scan. Your code appears to be secure based on our analysis.",
-                    "model_used": model_type,
-                    "context_detected": context_type,
-                    "scan_data_available": True,
-                    "history": previous_history,
-                    "action_taken": None
-                }
-            
-            # If user specified a particular issue type or file, try to match it
-            target_issue = None
-            question_lower = question.lower()
-            
-            # Look for specific mentions
-            for issue in fixable_issues:
-                if (issue['file'].lower() in question_lower or 
-                    issue['type'].lower() in question_lower or
-                    any(word in issue['description'].lower() for word in question_lower.split())):
-                    target_issue = issue
-                    break
-            
-            # If no specific issue identified, pick the most critical one
-            if not target_issue:
-                # Sort by severity: Critical > High > Medium > Low
-                severity_order = {'Critical': 0, 'High': 1, 'Medium': 2, 'Low': 3}
-                fixable_issues.sort(key=lambda x: severity_order.get(x['severity'], 4))
-                target_issue = fixable_issues[0]
-            
-            # Call the propose-fix endpoint
-            try:
-                fix_request = FixRequest(
-                    repo_url=repo_url,
-                    issue=target_issue
-                )
-                
-                fix_response = await propose_fix(fix_request)
-                
-                if fix_response['success']:
-                    pr_url = fix_response['pull_request']['url']
-                    pr_number = fix_response['pull_request']['number']
-                    changes_made = fix_response['fix_details']['changes_made']
-                    
-                    response = f"""🔧 **RAG-Powered Fix Generated Successfully!**
-
-✅ I've created an automated security fix using advanced AI and secure coding patterns:
-
-**Issue Fixed:**
-• **File:** `{target_issue['file']}`
-• **Type:** {target_issue['type']}
-• **Description:** {target_issue['description']}
-
-**AI-Generated Changes:**
-{chr(10).join([f'• {change}' for change in changes_made])}
-
-**🚀 Pull Request Created:**
-**[#{pr_number} - Review Automated Fix]({pr_url})**
-
-**✨ RAG-Enhanced Features:**
-• 🧠 Applied secure coding patterns from OWASP guidelines
-• 🛡️ Context-aware vulnerability remediation
-• 📚 Knowledge base of 1000+ security best practices
-
-**Next Steps:**
-1. 📋 Review the automated changes in the pull request
-2. 🧪 Test the fix to ensure functionality is preserved
-3. ✅ Merge the PR once you're satisfied with the changes
-
-This fix was generated using RAG (Retrieval-Augmented Generation) technology, combining AI reasoning with a curated database of security expertise.
-
-Need me to explain any part of the fix or have questions about the security issue?"""
-                    
-                    return {
-                        "response": response,
-                        "model_used": model_type,
-                        "context_detected": context_type,
-                        "scan_data_available": True,
-                        "history": previous_history + [
-                            {'type': 'user', 'parts': [question]},
-                            {'type': 'assistant', 'parts': [response]}
-                        ],
-                        "action_taken": {
-                            "type": "fix_generated",
-                            "pull_request_url": pr_url,
-                            "issue_fixed": target_issue,
-                            "rag_enhanced": True
-                        }
-                    }
-                else:
-                    return {
-                        "response": f"❌ Failed to generate fix: {fix_response.get('error', 'Unknown error')}",
-                        "model_used": model_type,
-                        "context_detected": context_type,
-                        "scan_data_available": True,
-                        "history": previous_history,
-                        "action_taken": None
-                    }
-                    
-            except Exception as e:
-                return {
-                    "response": f"❌ Error generating fix: {str(e)}\n\nWould you like me to explain the security issue instead?",
-                    "model_used": model_type,
-                    "context_detected": context_type,
-                    "scan_data_available": True,
-                    "history": previous_history,
-                    "action_taken": None
-                }
-        
         # Repository Analysis Context (Enhanced with RAG capabilities and detailed findings)
         if context_type == 'repo_analysis':
             analysis_data = getattr(RepoAnalysis, 'latest_analysis', None)
             if isinstance(analysis_data, dict):
-                repo_info = analysis_data.get('repository_info', {}) if analysis_data else {}
-                security_summary = analysis_data.get('security_summary', {}) if analysis_data else {}
-                detailed_findings = analysis_data.get('detailed_findings', {}) if analysis_data else {}
-                recommendations = analysis_data.get('recommendations', []) if analysis_data else []
+                repo_info = analysis_data.get('repository_info', {})
+                security_summary = analysis_data.get('security_summary', {})
+                detailed_findings = analysis_data.get('detailed_findings', {})
                 
                 enhanced_context += f"""
 📁 **REPOSITORY SECURITY ANALYSIS:**
@@ -1190,92 +1053,33 @@ Need me to explain any part of the fix or have questions about the security issu
 🚨 **DETAILED SECURITY FINDINGS:**
 
 🔐 **SECRETS FOUND:** {len(detailed_findings.get('secrets', []))} critical issues
-{chr(10).join([f"• {s['file']} (Line {s['line']}): {s['secret_type']} - {s['description']}" for s in detailed_findings.get('secrets', [])[:3]] if detailed_findings.get('secrets') else ['• No secrets detected'])}
+{chr(10).join([f"• {s.get('file', 'unknown')} (Line {s.get('line', 'N/A')}): {s.get('secret_type', 'unknown')} - {s.get('description', 'No description')}" for s in detailed_findings.get('secrets', [])[:3]])}
 
 🛡️ **STATIC ANALYSIS ISSUES:** {len(detailed_findings.get('static_issues', []))} security vulnerabilities
-{chr(10).join([f"• {s['file']} (Line {s['line']}): {s['issue']} ({s['severity']}) - {s['description']}" for s in detailed_findings.get('static_issues', [])[:3]] if detailed_findings.get('static_issues') else ['• No static analysis issues found'])}
+{chr(10).join([f"• {s.get('file', 'unknown')} (Line {s.get('line', 'N/A')}): {s.get('issue', 'Security issue')} ({s.get('severity', 'Unknown')})" for s in detailed_findings.get('static_issues', [])[:3]])}
 
 📦 **VULNERABLE DEPENDENCIES:** {len(detailed_findings.get('vulnerable_dependencies', []))} packages need updates
-{chr(10).join([f"• {d['package']} v{d['version']}: {d['severity']} - {d['advisory']} (CVE: {d['cve']})" for d in detailed_findings.get('vulnerable_dependencies', [])[:3]] if detailed_findings.get('vulnerable_dependencies') else ['• No vulnerable dependencies found'])}
-
-⚡ **CODE QUALITY ISSUES:** {len(detailed_findings.get('code_quality', []))} patterns detected
-{chr(10).join([f"• {c['file']} (Line {c['line']}): {c['pattern']} ({c['severity']}) - {c['description']}" for c in detailed_findings.get('code_quality', [])[:3]] if detailed_findings.get('code_quality') else ['• No code quality issues found'])}
-
-📄 **SENSITIVE FILES:** {len(detailed_findings.get('sensitive_files', []))} files require attention
-{chr(10).join([f"• {f['file']}: {f['risk']} risk - {f['reason']}" for f in detailed_findings.get('sensitive_files', [])[:3]] if detailed_findings.get('sensitive_files') else ['• No sensitive files detected'])}
-
-🎯 **TOP RECOMMENDATIONS:**
-{chr(10).join([f"• {rec.get('fix', rec) if isinstance(rec, dict) else str(rec)}" for rec in recommendations[:3]] if recommendations else ['• No specific recommendations at this time'])}
+{chr(10).join([f"• {d.get('package', 'unknown')} v{d.get('version', 'unknown')}: {d.get('severity', 'Unknown')} - {d.get('advisory', 'Update recommended')}" for d in detailed_findings.get('vulnerable_dependencies', [])[:3]])}
 
 🤖 **AI CAPABILITIES:**
 - Ask "explain [specific issue]" for detailed OWASP-backed explanations
 - Request "fix [package/file]" for automated pull request generation
 - Get "tell me exact lines" for precise vulnerability locations
-- Use "propose solution for [issue]" for step-by-step remediation guides
 """
             else:
-                enhanced_context += f"""
-📁 **REPOSITORY ANALYSIS RESULTS:**
-{str(analysis_data)[:2000]}...
-"""
+                enhanced_context += "📁 **REPOSITORY ANALYSIS:** Data available but in unexpected format\n"
         
-        # Website Scan Context (Enhanced with RAG capabilities)
+        # Website Scan Context
         elif context_type == 'website_scan':
-            scan_result = request.get('scan_result', None)
-
-            # Use provided scan_result or stored scan data
             website_data = getattr(WebsiteScan, 'latest_scan', None)
-            if scan_result:
-                scan_data = scan_result
-            elif website_data:
-                scan_data = website_data.get('scan_result', {}) if isinstance(website_data, dict) else {}
-            else:
-                scan_data = None
-
-            waf_analysis = website_data.get('waf_analysis', {}) if website_data else {}
-            dns_security = website_data.get('dns_security', {}) if website_data else {}
-            exposed_paths = website_data.get('exposed_paths', []) if website_data else []
-            pages = website_data.get('pages', []) if website_data else []
-            ai_assistant_advice = website_data.get('ai_assistant_advice', 'No AI suggestions available') if website_data else 'No AI suggestions available'
-
-            if scan_data:
+            if isinstance(website_data, dict):
+                scan_data = website_data.get('scan_result', {})
                 enhanced_context += f"""
 🌐 **WEBSITE SECURITY SCAN:**
 • Target: {scan_data.get('url', 'N/A')}
 • Security Score: {scan_data.get('security_score', 'N/A')}/100 ({scan_data.get('security_level', 'Unknown')})
 • HTTPS: {'✅ Enabled' if scan_data.get('https', False) else '❌ Disabled'}
 • Vulnerabilities: {len(scan_data.get('flags', []))} issues found
-• Security Headers: {len(scan_data.get('headers', {}))} detected
-
-🛡️ **WAF ANALYSIS:**
-• WAF Detected: {'✅ Yes' if waf_analysis.get('waf_detected') else '❌ No'}
-• WAF Type: {waf_analysis.get('waf_type', 'None detected')}
-• Protection Level: {waf_analysis.get('protection_level', 'Unknown')}
-
-🔐 **DNS SECURITY:**
-• DNSSEC: {'✅ Enabled' if dns_security.get('dnssec', {}).get('enabled') else '❌ Disabled'}
-• DMARC: {'✅ Enabled' if dns_security.get('dmarc', {}).get('enabled') else '❌ Not configured'}
-• DKIM: {'✅ Found' if dns_security.get('dkim', {}).get('selectors_found') else '❌ Not found'}
-
-🚨 **SECURITY ISSUES:**
-{chr(10).join([f'• {flag}' for flag in scan_data.get('flags', [])]) if scan_data.get('flags', []) else '• No critical issues detected'}
-
-🔒 **SECURITY HEADERS:**
-{chr(10).join([f'• {header}: {value}' for header, value in scan_data.get('headers', {}).items()]) if scan_data.get('headers', {}) else '• No security headers detected'}
-
-🚪 **EXPOSED PATHS:**
-{chr(10).join([f'• {p["path"]} (Status: {p.get("status_code", "N/A")})' for p in exposed_paths[:5]]) if exposed_paths else '• No exposed paths found'}
-
-📄 **PAGES CRAWLED:**
-{chr(10).join([f'• {page}' for page in pages[:5]]) if pages else '• No pages data'}
-
-🧠 **RAG-ENHANCED CAPABILITIES:**
-- I can explain any security finding using curated OWASP knowledge
-- Ask about specific vulnerabilities for detailed explanations
-- Get implementation guidance for security fixes
-
-💡 **AI SUGGESTIONS:**
-{ai_assistant_advice}
 """
             else:
                 enhanced_context += "🌐 **WEBSITE SCAN:** No scan result available.\n"
@@ -1290,42 +1094,51 @@ No specific scan data available. I can help with:
 • Security implementation guidance
 • Code review suggestions
 • Security tool recommendations
-
-🧠 **RAG-ENHANCED:** I have access to comprehensive security knowledge including OWASP guidelines, secure coding patterns, and vulnerability remediation techniques.
-
-To get specific analysis, please run:
-• `/analyze-repo` for repository security analysis (with automated fix generation)
-• `/scan` for website security scanning
 """
         
-        # Add RAG capability notice to responses
         enhanced_context += "\n\n🧠 **RAG-ENHANCED AI:** I now have access to a comprehensive security knowledge base for detailed explanations and automated fixes!"
         
-        # Build conversation history and get response
-        if previous_history:
-            history = previous_history.copy()
-            history.append({'type': 'user', 'parts': [enhanced_context + f"\n\nBased on the above security analysis and knowledge base, provide a helpful response to: {question}"]})
-        else:
-            history = [{'type': 'user', 'parts': [enhanced_context + f"\n\nBased on the above security analysis and knowledge base, provide a helpful response to: {question}"]}]
+        # Create the final message for AI
+        final_message = enhanced_context + f"\n\nBased on the above security analysis and knowledge base, provide a helpful response to: {question}"
         
-        response = await run_in_threadpool(get_chat_response, history, model_type)
+        # Build conversation history with proper string formatting
+        final_history = []
+        
+        # Add cleaned previous history
+        final_history.extend(cleaned_history)
+        
+        # Add current user message
+        final_history.append({
+            'type': 'user', 
+            'parts': [final_message]
+        })
+        
+        print(f"🎯 Sending to AI model: {len(final_history)} messages")
+        print(f"🔤 Final message length: {len(final_message)} characters")
+        
+        # Get AI response with error handling
+        response = await run_in_threadpool(get_chat_response, final_history, model_type)
+        
+        if not isinstance(response, str):
+            response = str(response)
         
         # Add response to history
-        history.append({'type': 'assistant', 'parts': [response]})
+        final_history.append({'type': 'assistant', 'parts': [response]})
         
         return {
             "response": response,
             "model_used": model_type,
             "context_detected": context_type,
             "scan_data_available": context_type in ['repo_analysis', 'website_scan'],
-            "history": history,
+            "history": final_history,
             "action_taken": None,
             "rag_enhanced": True
         }
         
     except Exception as e:
+        print(f"❌ Chat Error ({model_type} model): {str(e)}")
         return {
-            "response": f"❌ Error: {str(e)}",
+            "response": f"❌ **Chat Error ({model_type} model):** {str(e)}",
             "model_used": model_type if 'model_type' in locals() else 'unknown',
             "context_detected": 'error',
             "scan_data_available": False,
