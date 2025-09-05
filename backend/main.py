@@ -194,9 +194,11 @@ async def test_github_token_direct():
             "suggestion": "Check if token has 'repo' and 'public_repo' permissions"
         }
 # --- Enhanced Security Analysis Functions ---
+# Replace the scan processing section in your /scan endpoint (around lines 240-280) with this enhanced version:
+
 @app.post("/scan")
 async def scan(request: ScanRequest):
-    """Scan a website for security vulnerabilities and store results for AI chat"""
+    """Scan a website for security vulnerabilities with weighted scoring and store results for AI chat"""
     url = request.url
     
     try:
@@ -221,24 +223,306 @@ async def scan(request: ScanRequest):
             request.model_type
         )
 
-        security_level = scan_result.get("security_level", "Unknown") if scan_result else "Unknown"
-        security_score = scan_result.get("security_score", 0) if scan_result else 0
-
-        # Extract SSL analysis data
+        # Extract basic scan data
         ssl_certificate = scan_result.get("ssl_certificate", {}) if scan_result else {}
+        flags = scan_result.get("flags", []) if scan_result else []
+        headers = scan_result.get("headers", {}) if scan_result else {}
+        https_enabled = scan_result.get("https", False) if scan_result else False
 
-        # Enhanced summary with SSL certificate information (using imported function)
+        # ============================================================================
+        # 🎯 NEW WEIGHTED CATEGORY-BASED WEBSITE SECURITY SCORING SYSTEM
+        # ============================================================================
+        
+        print("📊 Calculating weighted website security score...")
+
+        # Initialize category scores (each starts at 100)
+        category_scores = {
+            'https_ssl': 100,       # HTTPS/SSL/TLS security
+            'security_headers': 100, # HTTP security headers
+            'vulnerabilities': 100,  # General vulnerabilities/flags
+            'exposed_paths': 100,    # Directory/path exposure
+            'dns_security': 100      # DNS security features
+        }
+
+        # Define category weights (must sum to 1.0)
+        weights = {
+            'https_ssl': 0.30,        # 30% - Most critical for web
+            'security_headers': 0.25,  # 25% - Very important
+            'vulnerabilities': 0.25,   # 25% - High impact
+            'exposed_paths': 0.10,     # 10% - Medium impact
+            'dns_security': 0.10       # 10% - Lower impact but important
+        }
+
+        print(f"🔍 Category weights: {weights}")
+
+        # 1. Calculate HTTPS/SSL Score
+        if not https_enabled:
+            # Major penalty for no HTTPS
+            category_scores['https_ssl'] -= 60
+            print(f"🚨 HTTPS penalty: No HTTPS = -60 points")
+        else:
+            # Check SSL certificate issues
+            ssl_issues = 0
+            ssl_cert = ssl_certificate if isinstance(ssl_certificate, dict) else {}
+            
+            # Check for SSL certificate problems
+            if ssl_cert.get('expired', False):
+                category_scores['https_ssl'] -= 30
+                ssl_issues += 1
+                print(f"🔒 SSL penalty: Certificate expired = -30 points")
+            
+            if ssl_cert.get('self_signed', False):
+                category_scores['https_ssl'] -= 20
+                ssl_issues += 1
+                print(f"🔒 SSL penalty: Self-signed certificate = -20 points")
+            
+            if ssl_cert.get('weak_cipher', False):
+                category_scores['https_ssl'] -= 15
+                ssl_issues += 1
+                print(f"🔒 SSL penalty: Weak cipher = -15 points")
+            
+            # Check SSL version/protocol issues
+            ssl_version = ssl_cert.get('version', '').lower()
+            if 'sslv' in ssl_version or 'tlsv1.0' in ssl_version or 'tlsv1.1' in ssl_version:
+                category_scores['https_ssl'] -= 25
+                ssl_issues += 1
+                print(f"🔒 SSL penalty: Outdated protocol ({ssl_version}) = -25 points")
+            
+            if ssl_issues == 0:
+                print(f"✅ SSL bonus: Good HTTPS configuration")
+
+        # 2. Calculate Security Headers Score
+        essential_headers = {
+            'strict-transport-security': 20,  # HSTS
+            'content-security-policy': 20,    # CSP
+            'x-frame-options': 15,           # Clickjacking protection
+            'x-content-type-options': 10,    # MIME sniffing protection
+            'referrer-policy': 10,           # Referrer policy
+            'x-xss-protection': 10,          # XSS protection
+            'permissions-policy': 10,        # Feature policy
+            'expect-ct': 5                   # Certificate transparency
+        }
+
+        headers_penalty_total = 0
+        missing_headers = []
+        
+        for header, penalty in essential_headers.items():
+            header_found = False
+            
+            # Check for header (case insensitive)
+            for actual_header in headers.keys():
+                if header.lower() == actual_header.lower():
+                    header_found = True
+                    break
+            
+            if not header_found:
+                category_scores['security_headers'] -= penalty
+                headers_penalty_total += penalty
+                missing_headers.append(header)
+
+        print(f"🛡️ Security headers penalty: {len(missing_headers)} missing = -{headers_penalty_total} points")
+        if missing_headers:
+            print(f"   Missing: {', '.join(missing_headers[:3])}{'...' if len(missing_headers) > 3 else ''}")
+
+        # 3. Calculate Vulnerabilities Score (from flags)
+        vulnerability_penalty_total = 0
+        critical_flags = []
+        
+        for flag in flags:
+            flag_lower = flag.lower()
+            
+            # Categorize vulnerability severity
+            if any(keyword in flag_lower for keyword in ['injection', 'xss', 'csrf', 'sql', 'rce', 'critical']):
+                category_scores['vulnerabilities'] -= 25
+                vulnerability_penalty_total += 25
+                critical_flags.append(flag)
+                print(f"🚨 Critical vulnerability: {flag} = -25 points")
+            elif any(keyword in flag_lower for keyword in ['missing', 'weak', 'insecure', 'exposed']):
+                category_scores['vulnerabilities'] -= 15
+                vulnerability_penalty_total += 15
+                print(f"⚠️ High vulnerability: {flag} = -15 points")
+            elif any(keyword in flag_lower for keyword in ['deprecated', 'outdated', 'info']):
+                category_scores['vulnerabilities'] -= 8
+                vulnerability_penalty_total += 8
+                print(f"📋 Medium vulnerability: {flag} = -8 points")
+            else:
+                # General vulnerability
+                category_scores['vulnerabilities'] -= 10
+                vulnerability_penalty_total += 10
+                print(f"🔍 General vulnerability: {flag} = -10 points")
+
+        print(f"🛡️ Total vulnerability penalty: {len(flags)} flags = -{vulnerability_penalty_total} points")
+
+        # 4. Calculate Exposed Paths Score
+        exposed_paths_penalty_total = 0
+        sensitive_paths = []
+        
+        for path_info in exposed_paths:
+            path = path_info.get('path', '') if isinstance(path_info, dict) else str(path_info)
+            path_lower = path.lower()
+            
+            # Categorize path sensitivity
+            if any(keyword in path_lower for keyword in [
+                'admin', 'config', 'backup', '.env', 'secret', 'private', 'key', 'password'
+            ]):
+                category_scores['exposed_paths'] -= 20
+                exposed_paths_penalty_total += 20
+                sensitive_paths.append(path)
+                print(f"🚨 Sensitive path exposed: {path} = -20 points")
+            elif any(keyword in path_lower for keyword in [
+                'test', 'dev', 'debug', 'staging', 'internal'
+            ]):
+                category_scores['exposed_paths'] -= 10
+                exposed_paths_penalty_total += 10
+                print(f"⚠️ Development path exposed: {path} = -10 points")
+            else:
+                # General exposed path
+                category_scores['exposed_paths'] -= 5
+                exposed_paths_penalty_total += 5
+                print(f"📁 Path exposed: {path} = -5 points")
+
+        print(f"🚪 Exposed paths penalty: {len(exposed_paths)} paths = -{exposed_paths_penalty_total} points")
+
+        # 5. Calculate DNS Security Score
+        dns_penalty_total = 0
+        dns_issues = []
+        
+        if isinstance(dns_security, dict):
+            # DNSSEC check
+            dnssec_info = dns_security.get('dnssec', {})
+            if isinstance(dnssec_info, dict) and not dnssec_info.get('enabled', False):
+                category_scores['dns_security'] -= 30
+                dns_penalty_total += 30
+                dns_issues.append('No DNSSEC')
+                print(f"🔐 DNS penalty: No DNSSEC = -30 points")
+
+            # DMARC check
+            dmarc_info = dns_security.get('dmarc', {})
+            if isinstance(dmarc_info, dict) and not dmarc_info.get('enabled', False):
+                category_scores['dns_security'] -= 25
+                dns_penalty_total += 25
+                dns_issues.append('No DMARC')
+                print(f"📧 DNS penalty: No DMARC = -25 points")
+
+            # DKIM check
+            dkim_info = dns_security.get('dkim', {})
+            if isinstance(dkim_info, dict):
+                selectors = dkim_info.get('selectors_found', [])
+                if not selectors or len(selectors) == 0:
+                    category_scores['dns_security'] -= 20
+                    dns_penalty_total += 20
+                    dns_issues.append('No DKIM')
+                    print(f"🔑 DNS penalty: No DKIM selectors = -20 points")
+
+        print(f"🔐 DNS security penalty: {len(dns_issues)} issues = -{dns_penalty_total} points")
+
+        # Ensure no category score goes below 0
+        for category in category_scores:
+            category_scores[category] = max(0, category_scores[category])
+
+        print(f"📊 Category scores after penalties: {category_scores}")
+
+        # 6. Calculate Weighted Average Score
+        overall_score = 0
+        for category, score in category_scores.items():
+            weighted_contribution = score * weights[category]
+            overall_score += weighted_contribution
+            print(f"   {category}: {score} × {weights[category]} = {weighted_contribution:.1f}")
+
+        print(f"📊 Base weighted score: {overall_score:.1f}")
+
+        # 7. Add Bonus for Good Security Practices
+        security_bonus_total = 0
+        
+        # WAF detection bonus
+        if waf_info.get('waf_detected', False):
+            waf_bonus = 5
+            overall_score += waf_bonus
+            security_bonus_total += waf_bonus
+            print(f"🛡️ WAF bonus: WAF detected = +{waf_bonus} points")
+
+        # Strong security headers bonus
+        if 'content-security-policy' in [h.lower() for h in headers.keys()] and \
+           'strict-transport-security' in [h.lower() for h in headers.keys()]:
+            headers_bonus = 3
+            overall_score += headers_bonus
+            security_bonus_total += headers_bonus
+            print(f"🔒 Security headers bonus: CSP + HSTS = +{headers_bonus} points")
+
+        # Perfect HTTPS implementation bonus
+        if https_enabled and category_scores['https_ssl'] >= 90:
+            https_bonus = 2
+            overall_score += https_bonus
+            security_bonus_total += https_bonus
+            print(f"✅ HTTPS bonus: Perfect SSL/TLS = +{https_bonus} points")
+
+        if security_bonus_total > 0:
+            print(f"✅ Total security bonus: +{security_bonus_total} points")
+
+        # 8. Final Score Calculation
+        overall_score = max(0, min(100, int(overall_score)))
+
+        print(f"🎯 Final Website Security Score: {overall_score}/100")
+
+        # Determine security level
+        if overall_score >= 90:
+            security_level = "Excellent"
+        elif overall_score >= 75:
+            security_level = "Good"
+        elif overall_score >= 50:
+            security_level = "Medium"
+        elif overall_score >= 25:
+            security_level = "Low" 
+        else:
+            security_level = "Critical"
+
+        # Store detailed scoring breakdown
+        scoring_breakdown = {
+            "category_scores": category_scores,
+            "category_weights": weights,
+            "penalties_applied": {
+                "https_ssl": (60 if not https_enabled else 0) + sum([30 if ssl_certificate.get('expired') else 0,
+                                                                     20 if ssl_certificate.get('self_signed') else 0,
+                                                                     15 if ssl_certificate.get('weak_cipher') else 0]),
+                "security_headers": headers_penalty_total,
+                "vulnerabilities": vulnerability_penalty_total,
+                "exposed_paths": exposed_paths_penalty_total,
+                "dns_security": dns_penalty_total
+            },
+            "bonuses_applied": {
+                "waf_detection": 5 if waf_info.get('waf_detected', False) else 0,
+                "security_headers": 3 if all(h in [header.lower() for header in headers.keys()] 
+                                           for h in ['content-security-policy', 'strict-transport-security']) else 0,
+                "perfect_https": 2 if https_enabled and category_scores['https_ssl'] >= 90 else 0
+            },
+            "weighted_contributions": {
+                category: category_scores[category] * weights[category] 
+                for category in category_scores
+            }
+        }
+
+        # Update scan_result with new scoring
+        if scan_result:
+            scan_result["security_score"] = overall_score
+            scan_result["security_level"] = security_level
+            scan_result["scoring_breakdown"] = scoring_breakdown
+
+        # ============================================================================
+        # END OF NEW WEBSITE SCORING SYSTEM  
+        # ============================================================================
+
+        # Enhanced summary with new scoring information
         scan_summary = scan_data.get('scan_summary', {}) if scan_data else {}
         domain = scan_summary.get('domain', 'Unknown')
         summary = f"""🔒 **Security Scan Complete**
 
 📊 **Target Analysis:**
 • Domain: {domain}
-• Overall Security Score: {security_score}/100 ({security_level})
-• HTTPS: {'✅ Enabled' if scan_result.get("https", False) else '❌ Disabled'}
-• Vulnerabilities: {len(scan_result.get("flags", []))} issues found
+• Overall Security Score: {overall_score}/100 ({security_level})
+• HTTPS: {'✅ Enabled' if https_enabled else '❌ Disabled'}
+• Vulnerabilities: {len(flags)} issues found
 • Pages Crawled: {len(pages)} pages
-• Security Headers: {len(scan_result.get("headers", {}))} detected
+• Security Headers: {len(headers)} detected
 • Exposed Paths: {len(exposed_paths)} found
 
 🛡️ **Web Application Firewall (WAF):**
@@ -255,11 +539,18 @@ async def scan(request: ScanRequest):
 🔐 **SSL/TLS Security Analysis:**
 {_format_ssl_analysis(ssl_certificate)}
 
+🎯 **Security Score Breakdown:**
+• HTTPS/SSL: {category_scores['https_ssl']}/100 ({weights['https_ssl']*100:.0f}% weight)
+• Security Headers: {category_scores['security_headers']}/100 ({weights['security_headers']*100:.0f}% weight)
+• Vulnerabilities: {category_scores['vulnerabilities']}/100 ({weights['vulnerabilities']*100:.0f}% weight)
+• Exposed Paths: {category_scores['exposed_paths']}/100 ({weights['exposed_paths']*100:.0f}% weight)
+• DNS Security: {category_scores['dns_security']}/100 ({weights['dns_security']*100:.0f}% weight)
+
 🚨 **Key Issues Found:**
-{chr(10).join([f'• {flag}' for flag in scan_result.get("flags", [])[:5]]) if scan_result.get("flags", []) else '• No critical issues detected'}
+{chr(10).join([f'• {flag}' for flag in flags[:5]]) if flags else '• No critical issues detected'}
 
 🚪 **Potentially Exposed Paths:**
-{chr(10).join([f'• Found accessible path: {p["path"]}' for p in exposed_paths[:3]]) if exposed_paths else '• No common sensitive paths were found.'}
+{chr(10).join([f'• Found accessible path: {p.get("path", p) if isinstance(p, dict) else p}' for p in exposed_paths[:3]]) if exposed_paths else '• No common sensitive paths were found.'}
 
 💡 **Ready to help with specific security questions about this scan!**"""
         
@@ -268,16 +559,16 @@ async def scan(request: ScanRequest):
             "pages": pages,
             "scan_result": scan_result,
             "exposed_paths": exposed_paths,
-            "waf_analysis": waf_info,          # NEW: WAF detection results
-            "dns_security": dns_security,      # NEW: DNSSEC, DMARC, DKIM results
+            "waf_analysis": waf_info,
+            "dns_security": dns_security,
             "suggestions": suggestions,
             "ai_assistant_advice": ai_advice,
             "summary": summary
         }
         
         # Debug logging to see what we're returning
-        print(f"🔍 DEBUG - WAF Analysis Data: {waf_info}")
-        print(f"🔍 DEBUG - DNS Security Data: {dns_security}")
+        print(f"🔍 DEBUG - Overall Security Score: {overall_score}/100 ({security_level})")
+        print(f"🔍 DEBUG - Category Scores: {category_scores}")
         print(f"🔍 DEBUG - Scan Response Keys: {list(scan_response.keys())}")
         
         WebsiteScan.latest_scan = scan_response
@@ -466,8 +757,6 @@ async def analyze_repo_comprehensive(request: RepoAnalysisRequest):
             if deep_scan:
                 print("🕵️ Performing deep content scanning for secrets...")
                 scanned_files = 0
-                print("🕵️ Performing deep content scanning for secrets...")
-                scanned_files = 0
                 skip_dirs = {
                     'venv', 'env', '.env', 'virtualenv', '__pycache__', 
                     'node_modules', '.git', '.svn', 'build', 'dist', 'target',
@@ -590,28 +879,165 @@ async def analyze_repo_comprehensive(request: RepoAnalysisRequest):
                 }
             }
             
-            # Enhanced security score calculation
-            base_score = 70
+            # ============================================================================
+            # 🎯 NEW WEIGHTED CATEGORY-BASED SECURITY SCORING SYSTEM
+            # ============================================================================
             
-            # Deduct for security issues
-            sensitive_files_penalty = min(30, len(file_scan_results.get('sensitive_files', [])) * 10)
-            risky_files_penalty = min(20, len(file_scan_results.get('risky_files', [])) * 5)
-            secrets_penalty = min(40, len(secret_scan_results) * 15)
-            static_analysis_penalty = min(25, len(static_analysis_results) * 5)
-            dependency_penalty = min(20, len(dependency_scan_results.get('vulnerable_packages', [])) * 10)
-            code_quality_penalty = min(15, len([r for r in code_quality_results if r.get('severity') in ['Critical', 'High']]) * 3)
-            
-            # Add points for good practices
-            security_files_bonus = min(15, len(file_scan_results.get('security_files_found', [])) * 2)
-            
-            overall_score = max(0, base_score - sensitive_files_penalty - risky_files_penalty - secrets_penalty - static_analysis_penalty - dependency_penalty - code_quality_penalty + security_files_bonus)
-            
+            print("📊 Calculating weighted security score...")
+
+            # Initialize category scores (each starts at 100)
+            category_scores = {
+                'secrets': 100,
+                'sensitive_files': 100,
+                'static_analysis': 100,
+                'dependencies': 100,
+                'code_quality': 100
+            }
+
+            # Define category weights (must sum to 1.0)
+            weights = {
+                'secrets': 0.30,           # 30% - Most critical
+                'sensitive_files': 0.20,   # 20% - High impact
+                'static_analysis': 0.20,   # 20% - High impact  
+                'dependencies': 0.20,      # 20% - High impact
+                'code_quality': 0.10       # 10% - Lower impact
+            }
+
+            print(f"🔍 Category weights: {weights}")
+
+            # 1. Calculate Secrets Score (Critical Impact)
+            secrets_count = len(secret_scan_results) if secret_scan_results else 0
+            if secrets_count > 0:
+                # Critical penalty: -40 points per secret (very harsh)
+                category_scores['secrets'] -= secrets_count * 40
+                print(f"🚨 Secrets penalty: {secrets_count} secrets × 40 = -{secrets_count * 40} points")
+
+            # 2. Calculate Sensitive Files Score
+            sensitive_files_count = len(file_scan_results.get('sensitive_files', []))
+            risky_files_count = len(file_scan_results.get('risky_files', []))
+
+            if sensitive_files_count > 0:
+                # High penalty: -15 points per sensitive file
+                category_scores['sensitive_files'] -= sensitive_files_count * 15
+                print(f"⚠️ Sensitive files penalty: {sensitive_files_count} files × 15 = -{sensitive_files_count * 15} points")
+
+            if risky_files_count > 0:
+                # Medium penalty: -5 points per risky file
+                category_scores['sensitive_files'] -= risky_files_count * 5
+                print(f"📁 Risky files penalty: {risky_files_count} files × 5 = -{risky_files_count * 5} points")
+
+            # 3. Calculate Static Analysis Score (Severity-Based)
+            static_penalty_total = 0
+            if static_analysis_results:
+                for issue in static_analysis_results:
+                    severity = issue.get('severity', 'UNKNOWN').upper()
+                    if severity in ['HIGH', 'CRITICAL']:
+                        category_scores['static_analysis'] -= 10
+                        static_penalty_total += 10
+                    elif severity in ['MEDIUM', 'MODERATE']:
+                        category_scores['static_analysis'] -= 5
+                        static_penalty_total += 5
+                    else:  # LOW, INFO, etc.
+                        category_scores['static_analysis'] -= 2
+                        static_penalty_total += 2
+                print(f"🛡️ Static analysis penalty: {len(static_analysis_results)} issues = -{static_penalty_total} points")
+
+            # 4. Calculate Dependencies Score (Severity-Based)
+            dependency_penalty_total = 0
+            vulnerable_packages = dependency_scan_results.get('vulnerable_packages', []) if isinstance(dependency_scan_results, dict) else []
+
+            if vulnerable_packages:
+                for pkg in vulnerable_packages:
+                    severity = pkg.get('severity', 'Unknown').lower()
+                    if severity == 'critical':
+                        category_scores['dependencies'] -= 15
+                        dependency_penalty_total += 15
+                    elif severity == 'high':
+                        category_scores['dependencies'] -= 10
+                        dependency_penalty_total += 10
+                    elif severity == 'medium':
+                        category_scores['dependencies'] -= 7
+                        dependency_penalty_total += 7
+                    else:  # low, info
+                        category_scores['dependencies'] -= 3
+                        dependency_penalty_total += 3
+                print(f"📦 Dependencies penalty: {len(vulnerable_packages)} packages = -{dependency_penalty_total} points")
+
+            # 5. Calculate Code Quality Score (Severity-Based)
+            code_quality_penalty_total = 0
+            if code_quality_results:
+                for issue in code_quality_results:
+                    severity = issue.get('severity', 'Unknown')
+                    if severity in ['Critical', 'High']:
+                        category_scores['code_quality'] -= 5
+                        code_quality_penalty_total += 5
+                    elif severity == 'Medium':
+                        category_scores['code_quality'] -= 2
+                        code_quality_penalty_total += 2
+                    else:  # Low, Info
+                        category_scores['code_quality'] -= 1
+                        code_quality_penalty_total += 1
+                print(f"⚡ Code quality penalty: {len(code_quality_results)} issues = -{code_quality_penalty_total} points")
+
+            # Ensure no category score goes below 0
+            for category in category_scores:
+                category_scores[category] = max(0, category_scores[category])
+
+            print(f"📊 Category scores after penalties: {category_scores}")
+
+            # 6. Calculate Weighted Average Score
+            overall_score = 0
+            for category, score in category_scores.items():
+                weighted_contribution = score * weights[category]
+                overall_score += weighted_contribution
+                print(f"   {category}: {score} × {weights[category]} = {weighted_contribution:.1f}")
+
+            print(f"📊 Base weighted score: {overall_score:.1f}")
+
+            # 7. Add Bonus for Good Security Practices
+            security_files_found = len(file_scan_results.get('security_files_found', []))
+            if security_files_found > 0:
+                # Bonus: up to 10 points for security files (2 points each, max 5 files)
+                security_files_bonus = min(10, security_files_found * 2)
+                overall_score += security_files_bonus
+                print(f"✅ Security files bonus: {security_files_found} files × 2 = +{security_files_bonus} points")
+
+            # 8. Final Score Calculation
+            overall_score = max(0, min(100, int(overall_score)))
+
+            print(f"🎯 Final Security Score: {overall_score}/100")
+
+            # Store detailed scoring breakdown for frontend
+            comprehensive_results["scoring_breakdown"] = {
+                "category_scores": category_scores,
+                "category_weights": weights,
+                "penalties_applied": {
+                    "secrets": secrets_count * 40 if secrets_count > 0 else 0,
+                    "sensitive_files": (sensitive_files_count * 15) + (risky_files_count * 5),
+                    "static_analysis": static_penalty_total,
+                    "dependencies": dependency_penalty_total,
+                    "code_quality": code_quality_penalty_total
+                },
+                "bonuses_applied": {
+                    "security_files": security_files_bonus if 'security_files_bonus' in locals() else 0
+                },
+                "weighted_contributions": {
+                    category: category_scores[category] * weights[category] 
+                    for category in category_scores
+                }
+            }
+
             comprehensive_results["overall_security_score"] = overall_score
             comprehensive_results["security_level"] = (
-                "High" if overall_score >= 80 else 
-                "Medium" if overall_score >= 60 else 
+                "Excellent" if overall_score >= 90 else
+                "Good" if overall_score >= 75 else
+                "Medium" if overall_score >= 50 else
                 "Low"
             )
+            
+            # ============================================================================
+            # END OF NEW SCORING SYSTEM
+            # ============================================================================
             
             # Add detailed findings for AI chat context
             comprehensive_results["detailed_findings"] = {
@@ -944,7 +1370,6 @@ async def analyze_repo_comprehensive(request: RepoAnalysisRequest):
                 
     except Exception as e:
         return {"error": f"Analysis setup failed: {str(e)}"}
-
 # REPLACE your existing @app.post("/ai-chat") endpoint with this enhanced version
 
 @app.post("/ai-chat")
