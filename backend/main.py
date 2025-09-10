@@ -2882,15 +2882,17 @@ async def google_callback(request: Request):
 
         print(f"✅ User authenticated: {email} ({name})")
 
-        # Redirect to frontend with success and user info
-        redirect_url = f"/?auth=success&user={email}&name={name}&avatar={picture}"
+        # Redirect to frontend homepage with success and user info
+        frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+        redirect_url = f"{frontend_url}/home?auth=success&user={email}&name={name}&avatar={picture}"
         print(f"🚀 Redirecting user to: {redirect_url}")
 
         return RedirectResponse(url=redirect_url, status_code=302)
 
     except Exception as e:
         print(f"❌ OAuth callback error: {str(e)}")
-        return RedirectResponse(url=f"/?error=callback_failed&message={str(e)}", status_code=302)
+        frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+        return RedirectResponse(url=f"{frontend_url}/home?error=callback_failed&message={str(e)}", status_code=302)
 @app.get("/auth/google/login")
 async def google_login():
     """

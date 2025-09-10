@@ -10,6 +10,7 @@ import ProjectBuilder from './components/ProjectBuilder';
 import LandingPage from './components/LandingPage';
 import SignupPage from './components/SignupPage';
 import LoginPage from './components/LoginPage';
+import ProtectedRoute from './components/ProtectedRoute';
 
 
 
@@ -25,12 +26,36 @@ function App() {
             <Route path="/" element={<div className="page"><LandingPage /></div>} />
             <Route path="/login" element={<div className="page"><LoginPage /></div>} />
             <Route path="/signup" element={<div className="page"><SignupPage /></div>} />
-            <Route path="/home" element={<div className="page"><HomePage /></div>} />
-            <Route path="/build" element={<div className="page"><ProjectBuilder /></div>} />
-            <Route path="/deploy" element={<div className="page"><DeployPage setScanResult={setScanResult} /></div>} />
-            <Route path="/security" element={<div className="page"><SecurityScanPage setScanResult={setScanResult} /></div>} />
-            <Route path="/repo-analysis" element={<div className="page"><RepoAnalysisPage /></div>} />
-            <Route path="/report" element={<div className="page"><ReportPage scanResult={scanResult} /></div>} />
+            <Route path="/home" element={
+              <ProtectedRoute>
+                <div className="page"><HomePage /></div>
+              </ProtectedRoute>
+            } />
+            <Route path="/build" element={
+              <ProtectedRoute>
+                <div className="page"><ProjectBuilder /></div>
+              </ProtectedRoute>
+            } />
+            <Route path="/deploy" element={
+              <ProtectedRoute>
+                <div className="page"><DeployPage setScanResult={setScanResult} /></div>
+              </ProtectedRoute>
+            } />
+            <Route path="/security" element={
+              <ProtectedRoute>
+                <div className="page"><SecurityScanPage setScanResult={setScanResult} /></div>
+              </ProtectedRoute>
+            } />
+            <Route path="/repo-analysis" element={
+              <ProtectedRoute>
+                <div className="page"><RepoAnalysisPage /></div>
+              </ProtectedRoute>
+            } />
+            <Route path="/report" element={
+              <ProtectedRoute>
+                <div className="page"><ReportPage scanResult={scanResult} /></div>
+              </ProtectedRoute>
+            } />
           </Routes>
         </div>
       </div>

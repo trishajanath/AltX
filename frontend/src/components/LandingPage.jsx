@@ -14,6 +14,36 @@ const VexelLandingPage = () => {
     const [activeButton, setActiveButton] = useState(null);
     const [performanceWarning, setPerformanceWarning] = useState(false);
 
+    // Handle OAuth callback if user lands on root with auth params
+    useEffect(() => {
+        const urlParams = new URLSearchParams(window.location.search);
+        const authStatus = urlParams.get('auth');
+        const userEmail = urlParams.get('user');
+        
+        if (authStatus === 'success' && userEmail) {
+            // Store auth info and redirect to home
+            const userName = urlParams.get('name');
+            const userAvatar = urlParams.get('avatar');
+            
+            const userInfo = {
+                email: userEmail,
+                name: userName || 'User',
+                avatar: userAvatar || '',
+                authenticatedAt: new Date().toISOString()
+            };
+            
+            localStorage.setItem('user', JSON.stringify(userInfo));
+            localStorage.setItem('isAuthenticated', 'true');
+            
+            // Redirect to homepage
+            navigate('/home');
+        } else if (urlParams.get('error')) {
+            console.error('Authentication error:', urlParams.get('error'));
+            // Clean URL
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
+    }, [navigate]);
+
     // Effect for the interactive 3D particle animation
     useEffect(() => {
         let scene, camera, renderer, particles, lines;

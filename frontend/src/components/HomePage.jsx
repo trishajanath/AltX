@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Rocket, Shield, GitBranch, BrainCircuit, BarChart3, Menu, ChevronDown, X } from 'lucide-react';
+import { Rocket, Shield, GitBranch, BrainCircuit, BarChart3, Menu, ChevronDown, X, LogOut } from 'lucide-react';
 import {
     Scene,
     OrthographicCamera,
@@ -259,8 +259,9 @@ const ThreeBackground = React.memo(({
 
 
 // --- Sidebar Component (Enhanced with backdrop) ---
-const Sidebar = ({ isOpen, toggleSidebar, setView, currentView }) => {
+const Sidebar = ({ isOpen, toggleSidebar, setView, currentView, user, isAuthenticated, onLogout }) => {
     const navigate = useNavigate();
+    
     const menuItems = [
         { icon: <BarChart3 size={20} />, title: 'Dashboard', view: 'dashboard', path: '/home' },
         { icon: <Rocket size={20} />, title: 'Deploy Project', view: 'deploy', path: '/deploy' },
@@ -313,14 +314,36 @@ const Sidebar = ({ isOpen, toggleSidebar, setView, currentView }) => {
                         ))}
                     </nav>
                     <div className="sidebar-footer">
-                        <div className="user-profile">
-                            <img src="https://placehold.co/40x40/000000/ffffff?text=A" alt="User Avatar" />
-                            <div className="user-info">
-                                <span>Admin User</span>
-                                <small>admin@securai.com</small>
+                        {isAuthenticated && user ? (
+                            <div className="user-profile">
+                                <img 
+                                    src={user.avatar || "https://placehold.co/40x40/000000/ffffff?text=" + (user.name?.charAt(0)?.toUpperCase() || 'U')} 
+                                    alt="User Avatar" 
+                                />
+                                <div className="user-info">
+                                    <span>{user.name || 'User'}</span>
+                                    <small>{user.email || 'Not logged in'}</small>
+                                </div>
+                                <button 
+                                    onClick={onLogout}
+                                    className="logout-button"
+                                    title="Logout"
+                                >
+                                    <LogOut size={16} />
+                                </button>
                             </div>
-                            <ChevronDown size={16} />
-                        </div>
+                        ) : (
+                            <div className="user-profile login-prompt">
+                                <div className="user-info">
+                                    <span>Not Logged In</span>
+                                    <small>
+                                        <a href="/login" style={{ color: 'var(--accent)', textDecoration: 'none' }}>
+                                            Sign in to continue
+                                        </a>
+                                    </small>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}
@@ -444,14 +467,75 @@ const PlaceholderView = ({ title }) => (
 export default function App() {
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [currentView, setCurrentView] = useState('dashboard');
+    const [user, setUser] = useState(null);
+    const [isAuthenticated, setIsAuthenticated] = useState(false);
 
     useEffect(() => {
         if (window.innerWidth < 768) {
             setSidebarOpen(false);
         }
     }, []);
+
+    // Check for authentication state on component mount and set up listener
+    useEffect(() => {
+        const checkAuthState = () => {
+            try {
+                const userData = localStorage.getItem('user');
+                const token = localStorage.getItem('access_token');
+                
+                if (userData && token) {
+                    const userInfo = JSON.parse(userData);
+                    if (userInfo.email && userInfo.name) {
+                        setUser(userInfo);
+                        setIsAuthenticated(true);
+                        console.log('✅ Authentication state loaded in HomePage:', userInfo);
+                        return;
+                    }
+                }
+                
+                // If no valid auth, reset state
+                setUser(null);
+                setIsAuthenticated(false);
+            } catch (error) {
+                console.error('Error checking auth state in HomePage:', error);
+                setUser(null);
+                setIsAuthenticated(false);
+            }
+        };
+
+        // Check auth state on mount
+        checkAuthState();
+
+        // Set up storage event listener to react to auth changes
+        const handleStorageChange = (e) => {
+            if (e.key === 'user' || e.key === 'access_token') {
+                checkAuthState();
+            }
+        };
+
+        window.addEventListener('storage', handleStorageChange);
+        
+        // Also check periodically in case of same-tab changes
+        const interval = setInterval(checkAuthState, 1000);
+
+        return () => {
+            window.removeEventListener('storage', handleStorageChange);
+            clearInterval(interval);
+        };
+    }, []);
     
     const toggleSidebar = () => setSidebarOpen(!sidebarOpen);
+
+    const handleLogout = () => {
+        localStorage.removeItem('user');
+        localStorage.removeItem('access_token');
+        setUser(null);
+        setIsAuthenticated(false);
+        console.log('🚪 User logged out');
+        
+        // Redirect to landing page after logout
+        window.location.href = '/';
+    };
 
     const renderView = () => {
         // This logic would be handled by a router in a real app
@@ -687,12 +771,60 @@ export default function App() {
                     width: 4px;
                 }
 
-                .sidebar-footer { padding: 1.5rem; border-top: 1px solid var(--border-color); }
-                .user-profile { display: flex; align-items: center; gap: 0.75rem; cursor: pointer; }
-                .user-profile img { border-radius: 50%; border: 1px solid var(--border-color); }
-                .user-info { flex-grow: 1; }
-                .user-info span { display: block; font-weight: 600; color: var(--text-primary); }
-                .user-info small { color: var(--text-secondary); }
+                .sidebar-footer { padding: 1rem; border-top: 1px solid var(--border-color); }
+                .user-profile { 
+                    display: flex; align-items: center; gap: 0.5rem; cursor: pointer;
+                    min-height: 48px; padding: 0.5rem;
+                    border-radius: 6px; transition: background 0.2s ease;
+                }
+                .user-profile:hover { background: rgba(255, 255, 255, 0.05); }
+                .user-profile img { 
+                    width: 32px; height: 32px; border-radius: 50%; 
+                    border: 1px solid var(--border-color); flex-shrink: 0;
+                    object-fit: cover;
+                }
+                .user-info { 
+                    flex-grow: 1; min-width: 0; /* Allow text to shrink */
+                }
+                .user-info span { 
+                    display: block; font-weight: 600; color: var(--text-primary);
+                    font-size: 0.875rem; line-height: 1.2;
+                    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+                }
+                .user-info small { 
+                    color: var(--text-secondary); font-size: 0.75rem; line-height: 1.2;
+                    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+                    display: block;
+                }
+                .logout-button {
+                    background: none; border: none; color: var(--text-secondary);
+                    cursor: pointer; padding: 0.375rem; border-radius: 4px;
+                    transition: all 0.2s ease; flex-shrink: 0;
+                    display: flex; align-items: center; justify-content: center;
+                    width: 28px; height: 28px;
+                }
+                .logout-button:hover {
+                    background: rgba(239, 68, 68, 0.1); 
+                    color: #ef4444;
+                    transform: translateX(2px);
+                }
+                .logout-button:hover::after {
+                    content: 'Logout';
+                    position: absolute;
+                    right: 100%;
+                    margin-right: 8px;
+                    background: rgba(0, 0, 0, 0.8);
+                    color: white;
+                    padding: 4px 8px;
+                    border-radius: 4px;
+                    font-size: 12px;
+                    white-space: nowrap;
+                    pointer-events: none;
+                }
+                .login-prompt { cursor: default; }
+                .login-prompt .user-info small a:hover {
+                    text-decoration: underline !important;
+                }
                 
                 .menu-button {
                     position: fixed; top: 20px; left: 20px; z-index: 101;
@@ -815,6 +947,9 @@ export default function App() {
                 toggleSidebar={toggleSidebar} 
                 setView={setCurrentView} 
                 currentView={currentView} 
+                user={user}
+                isAuthenticated={isAuthenticated}
+                onLogout={handleLogout}
             />
             
             {!sidebarOpen && (
