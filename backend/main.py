@@ -31,6 +31,10 @@ from github import Github
 from rag_query import get_secure_coding_patterns
 import tempfile
 from rag_query import get_secure_coding_patterns
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -701,20 +705,34 @@ async def analyze_repo_comprehensive(request: RepoAnalysisRequest):
                 print(f"🔍 Extracted repo info: {owner}/{repo_name}")
                 
                 # Try to use github_client first, then create a new one if needed
-                working_client = github_client
+                working_client = None
+                
+                # First try the imported github_client
+                if github_client:
+                    try:
+                        # Test the client with a quick call
+                        github_client.get_user()
+                        working_client = github_client
+                        print("✅ Using imported GitHub client")
+                    except Exception as test_error:
+                        print(f"⚠️ Imported github_client failed: {test_error}")
                 
                 if not working_client:
-                    print("⚠️ github_client not available, attempting to create new client...")
+                    print("⚠️ Creating new GitHub client...")
                     # Try to create a new GitHub client if the imported one failed
                     token = os.getenv("GITHUB_TOKEN")
                     if token:
                         try:
                             from github import Github
                             working_client = Github(token)
+                            # Test the new client
+                            working_client.get_user()
                             print("✅ Created new GitHub client with token")
                         except Exception as client_error:
                             print(f"❌ Failed to create GitHub client: {client_error}")
-                    else:
+                            working_client = None
+                    
+                    if not working_client:
                         # Try anonymous access for public repos
                         try:
                             from github import Github

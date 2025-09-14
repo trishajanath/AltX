@@ -531,7 +531,9 @@ const PageWrapper = ({ children }) => {
                     if (userInfo.email && userInfo.name) {
                         setUser(userInfo);
                         setIsAuthenticated(true);
-                        console.log('✅ Authentication state loaded in PageWrapper:', userInfo);
+                        if (process.env.NODE_ENV === 'development') {
+                            console.log('✅ Authentication state loaded in PageWrapper:', userInfo);
+                        }
                         return;
                     }
                 }
@@ -575,7 +577,9 @@ const PageWrapper = ({ children }) => {
         localStorage.removeItem('access_token');
         setUser(null);
         setIsAuthenticated(false);
-        console.log('🚪 User logged out');
+        if (process.env.NODE_ENV === 'development') {
+            console.log('🚪 User logged out');
+        }
         
         // Redirect to landing page after logout
         window.location.href = '/';

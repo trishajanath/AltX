@@ -18,6 +18,67 @@ from pathlib import Path
 from scanner.secrets_detector import scan_secrets
 from scanner.static_python import run_bandit # --- PHASE 1B ---
 
+# Rate limiting state
+RATE_LIMIT_STATE = {
+    'last_request_time': 0,
+    'requests_this_minute': 0,
+    'minute_start': 0,
+    'blocked_until': 0
+}
+
+def check_rate_limit() -> tuple[bool, str]:
+    """
+    Check if we can make a request without hitting rate limits.
+    Returns (can_proceed, message)
+    """
+    current_time = time.time()
+    
+    # Check if we're still in a cooldown period
+    if current_time < RATE_LIMIT_STATE['blocked_until']:
+        remaining = int(RATE_LIMIT_STATE['blocked_until'] - current_time)
+        return False, f"Rate limited. Please wait {remaining} seconds before trying again."
+    
+    # Reset minute counter if a new minute has started
+    if current_time - RATE_LIMIT_STATE['minute_start'] >= 60:
+        RATE_LIMIT_STATE['minute_start'] = current_time
+        RATE_LIMIT_STATE['requests_this_minute'] = 0
+    
+    # Check if we're approaching the limit (8 requests per minute to be safe)
+    if RATE_LIMIT_STATE['requests_this_minute'] >= 8:
+        wait_time = 60 - (current_time - RATE_LIMIT_STATE['minute_start'])
+        if wait_time > 0:
+            return False, f"Rate limit approaching. Please wait {int(wait_time)} seconds to avoid hitting the limit."
+    
+    return True, ""
+
+def update_rate_limit_state():
+    """Update rate limiting state after making a request"""
+    current_time = time.time()
+    RATE_LIMIT_STATE['last_request_time'] = current_time
+    RATE_LIMIT_STATE['requests_this_minute'] += 1
+
+def handle_rate_limit_error(error_message: str):
+    """Handle rate limit error and set cooldown period"""
+    current_time = time.time()
+    
+    # Extract retry delay from error message if available
+    retry_delay = 60  # Default to 60 seconds
+    if "retry_delay" in error_message and "seconds:" in error_message:
+        try:
+            # Try to extract the delay from the error message
+            import re
+            delay_match = re.search(r'seconds: (\d+)', error_message)
+            if delay_match:
+                retry_delay = int(delay_match.group(1))
+        except:
+            pass
+    
+    # Set blocked until time
+    RATE_LIMIT_STATE['blocked_until'] = current_time + retry_delay + 5  # Add 5 seconds buffer
+    RATE_LIMIT_STATE['requests_this_minute'] = 10  # Mark as over limit
+    
+    print(f"🚫 Rate limit hit. Blocking requests for {retry_delay + 5} seconds.")
+
 # Updated RepoAnalysis class to handle both formats
 @dataclass
 class RepoAnalysis:
@@ -256,6 +317,11 @@ def get_chat_response(history: List[Dict], model_type: str = 'fast') -> str:
     Returns:
         A formatted string containing the AI's response.
     """
+    # Check rate limits first
+    can_proceed, rate_limit_message = check_rate_limit()
+    if not can_proceed:
+        return f"⏱️ **Rate Limit:** {rate_limit_message}\n\nThe Gemini API has usage limits on the free tier. Please wait a moment and try again."
+    
     model = get_model(model_type)
     if model is None:
         return f"❌ **AI model ({model_type}) is not available**"
@@ -397,6 +463,9 @@ def get_chat_response(history: List[Dict], model_type: str = 'fast') -> str:
             chat_history_for_model = [{"role": "model", "parts": [context]}]
             last_user_message = "Please help with security analysis."
 
+        # Update rate limit state before making request
+        update_rate_limit_state()
+
         # Initiate the chat and get the response
         chat = model.start_chat(history=chat_history_for_model)
         response = chat.send_message(last_user_message)
@@ -410,9 +479,25 @@ def get_chat_response(history: List[Dict], model_type: str = 'fast') -> str:
             return f"⚡ **Quick Analysis** (Fast Model)\n\n{formatted_response}"
 
     except Exception as e:
-        # Provide a clear error message if something goes wrong during the process
+        error_message = str(e)
         print(f"An unexpected error occurred in get_chat_response: {e}") # For server-side logging
-        return f"❌ **Chat Error ({model_type} model):** {str(e)}"
+        
+        # Handle rate limit errors specifically
+        if "429" in error_message or "quota" in error_message.lower() or "rate" in error_message.lower():
+            handle_rate_limit_error(error_message)
+            return f"""⏱️ **Rate Limit Exceeded**
+
+The Gemini API free tier has a limit of 10 requests per minute. You've hit this limit.
+
+**What to do:**
+• Wait about 1 minute before trying again
+• Consider upgrading to a paid plan for higher limits
+• Use the chat less frequently to stay within limits
+
+**Current status:** Requests are temporarily blocked. Please try again in a moment."""
+        
+        # Handle other errors
+        return f"❌ **Chat Error ({model_type} model):** {error_message}"
 
 # --- Main Analysis Function ---
 def analyze_github_repo(repo_url: str, model_type: str = 'smart', existing_clone_path: str = None) -> str:

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import PageWrapper from './PageWrapper';
 import usePreventZoom from './usePreventZoom';
 import ChatResponseFormatter from './ChatResponseFormatter';
+import CodePreviewTester from './CodePreviewTester';
 
 // --- Sub-component: Diff Viewer ---
 const DiffViewer = ({ original, fixed, filename, diffStats, unifiedDiff }) => {
@@ -123,6 +124,40 @@ const DiffViewer = ({ original, fixed, filename, diffStats, unifiedDiff }) => {
         </div>
     );
 };
+// --- Sub-component: Rate Limit Indicator ---
+const RateLimitIndicator = ({ rateLimitStatus }) => {
+    if (!rateLimitStatus) return null;
+    
+    const getStatusColor = () => {
+        if (rateLimitStatus.is_blocked) return '#ef4444';
+        if (rateLimitStatus.requests_remaining_this_minute <= 2) return '#f59e0b';
+        return '#22c55e';
+    };
+    
+    const getStatusText = () => {
+        if (rateLimitStatus.is_blocked) return 'Rate Limited';
+        if (rateLimitStatus.requests_remaining_this_minute <= 2) return 'Low Quota';
+        return 'API OK';
+    };
+    
+    return (
+        <div className="rate-limit-indicator">
+            <div className="rate-limit-status" style={{ color: getStatusColor() }}>
+                <div className="status-dot" style={{ backgroundColor: getStatusColor() }}></div>
+                <span className="status-text">{getStatusText()}</span>
+            </div>
+            <div className="rate-limit-details">
+                <small>
+                    {rateLimitStatus.is_blocked ? (
+                        `Blocked for ${Math.max(0, rateLimitStatus.blocked_until - Date.now() / 1000).toFixed(0)}s`
+                    ) : (
+                        `${rateLimitStatus.requests_remaining_this_minute}/8 requests left`
+                    )}
+                </small>
+            </div>
+        </div>
+    );
+};
 
 // --- Sub-component: Security Score Gauge ---
 const SecurityScoreGauge = ({ score }) => {
@@ -185,11 +220,13 @@ const RepoAnalysisPage = ({ setScanResult }) => { // Assuming setScanResult is p
     const [chatMessages, setChatMessages] = useState([]);
     const [fixDetails, setFixDetails] = useState({}); // Store fix details with diffs
     const [expandedDiffs, setExpandedDiffs] = useState({}); // Track which diffs are expanded
+    const [rateLimitStatus, setRateLimitStatus] = useState(null); // Track API rate limits
     const [currentQuestion, setCurrentQuestion] = useState('');
     const [isAskingAI, setIsAskingAI] = useState(false);
     const [fixingIssues, setFixingIssues] = useState({});
     const [fixedIssues, setFixedIssues] = useState(new Set());
     const [isFixingAll, setIsFixingAll] = useState(false);
+    const [showAllIssues, setShowAllIssues] = useState(false); // Toggle for showing low priority issues
     
     // --- Core Logic Functions (Restored) ---
 
@@ -308,6 +345,16 @@ I'm ready to answer specific questions about these findings, provide detailed ex
     
    const askAI = async () => {
     if (!currentQuestion.trim() || !analysisResult) return;
+    
+    // Check rate limits before making request
+    if (rateLimitStatus && !rateLimitStatus.can_make_request) {
+        setChatMessages(prev => [...prev, { 
+            type: 'ai', 
+            message: `⏱️ **Rate Limit:** ${rateLimitStatus.message}\n\nPlease wait a moment before asking another question.` 
+        }]);
+        return;
+    }
+    
     setIsAskingAI(true);
     const userMessage = { type: 'user', message: currentQuestion };
     setChatMessages(prev => [...prev, userMessage]);
@@ -354,6 +401,9 @@ I'm ready to answer specific questions about these findings, provide detailed ex
         }
         
         setChatMessages(prev => [...prev, { type: 'ai', message: aiResponse }]);
+        
+        // Update rate limit status after successful request
+        checkRateLimitStatus();
         
     } catch (err) {
         setChatMessages(prev => [...prev, { type: 'ai', message: 'Error: Could not connect to AI assistant.' }]);
@@ -542,8 +592,27 @@ I'm ready to answer specific questions about these findings, provide detailed ex
         }));
     };
 
+    // Function to check rate limit status
+    const checkRateLimitStatus = async () => {
+        try {
+            const response = await fetch('http://localhost:8000/api/rate-limit-status');
+            const data = await response.json();
+            setRateLimitStatus(data);
+        } catch (error) {
+            console.warn('Could not fetch rate limit status:', error);
+        }
+    };
+
+    // Check rate limits periodically
+    useEffect(() => {
+        checkRateLimitStatus();
+        const interval = setInterval(checkRateLimitStatus, 30000); // Check every 30 seconds
+        return () => clearInterval(interval);
+    }, []);
+
     return (
         <PageWrapper>
+            <RateLimitIndicator rateLimitStatus={rateLimitStatus} />
             <style>{`
                 /* Enhanced styles with sidebar layout */
                 :root {
@@ -936,6 +1005,46 @@ I'm ready to answer specific questions about these findings, provide detailed ex
                 .pr-link-inline:hover {
                     color: #2563eb;
                     text-decoration: underline;
+                }
+                
+                /* Rate Limit Indicator */
+                .rate-limit-indicator {
+                    position: fixed;
+                    top: 1rem;
+                    right: 1rem;
+                    background: var(--card-bg);
+                    border: 1px solid var(--card-border);
+                    border-radius: 8px;
+                    padding: 0.75rem;
+                    z-index: 1000;
+                    min-width: 120px;
+                    backdrop-filter: blur(10px);
+                }
+                
+                .rate-limit-status {
+                    display: flex;
+                    align-items: center;
+                    gap: 0.5rem;
+                    font-weight: 600;
+                    font-size: 0.875rem;
+                }
+                
+                .status-dot {
+                    width: 8px;
+                    height: 8px;
+                    border-radius: 50%;
+                    flex-shrink: 0;
+                }
+                
+                .rate-limit-details {
+                    margin-top: 0.25rem;
+                    color: var(--text-secondary);
+                    font-size: 0.75rem;
+                }
+                
+                .rate-limit-details small {
+                    display: block;
+                    line-height: 1.2;
                 }
                 
                 .hero-section { text-align: center; padding: 4rem 1rem 3rem 1rem; }
@@ -1948,6 +2057,12 @@ I'm ready to answer specific questions about these findings, provide detailed ex
                                     <div className="card-header-action">
                                         <h3>🔍 All Security Issues Detected</h3>
                                         <div className="header-actions">
+                                            <button 
+                                                onClick={() => setShowAllIssues(!showAllIssues)} 
+                                                className="btn btn-outline"
+                                            >
+                                                {showAllIssues ? 'Show High Priority Only' : 'Show All Issues'}
+                                            </button>
                                             <button onClick={fixAllIssues} disabled={isFixingAll} className="btn btn-secondary">
                                                 {isFixingAll ? 'Fixing All...' : 'Fix All Issues'}
                                             </button>
@@ -2001,6 +2116,18 @@ I'm ready to answer specific questions about these findings, provide detailed ex
                                             </div>
                                         </div>
                                     </div>
+                                    
+                                    {/* Display Filter Info */}
+                                    {!showAllIssues && (analysisResult.code_quality_results?.length || 0) > 0 && (
+                                        <div className="issues-filter-info">
+                                            <span className="filter-indicator">
+                                                Showing high priority issues only. 
+                                                <button onClick={() => setShowAllIssues(true)} className="text-link">
+                                                    Show all {analysisResult.code_quality_results.length} issues
+                                                </button>
+                                            </span>
+                                        </div>
+                                    )}
                                     
                                     {/* All Issues Table */}
                                     <div className="issues-table-container">
@@ -2069,13 +2196,24 @@ I'm ready to answer specific questions about these findings, provide detailed ex
                                                                             </div>
                                                                         )}
                                                                         {fixDetails[`secret-${index}`].code_comparison && (
-                                                                            <DiffViewer
-                                                                                original={fixDetails[`secret-${index}`].code_comparison.original_content}
-                                                                                fixed={fixDetails[`secret-${index}`].code_comparison.fixed_content}
-                                                                                filename={issue.file || issue.filename || 'N/A'}
-                                                                                diffStats={fixDetails[`secret-${index}`].code_comparison.diff_statistics}
-                                                                                unifiedDiff={fixDetails[`secret-${index}`].code_comparison.diff_statistics?.unified_diff}
-                                                                            />
+                                                                            <>
+                                                                                <DiffViewer
+                                                                                    original={fixDetails[`secret-${index}`].code_comparison.original_content}
+                                                                                    fixed={fixDetails[`secret-${index}`].code_comparison.fixed_content}
+                                                                                    filename={issue.file || issue.filename || 'N/A'}
+                                                                                    diffStats={fixDetails[`secret-${index}`].code_comparison.diff_statistics}
+                                                                                    unifiedDiff={fixDetails[`secret-${index}`].code_comparison.diff_statistics?.unified_diff}
+                                                                                />
+                                                                                <CodePreviewTester
+                                                                                    originalCode={fixDetails[`secret-${index}`].code_comparison.original_content}
+                                                                                    fixedCode={fixDetails[`secret-${index}`].code_comparison.fixed_content}
+                                                                                    filename={issue.file || issue.filename || 'N/A'}
+                                                                                    issue={issue}
+                                                                                    onTestComplete={(results) => {
+                                                                                        console.log('Test results for secret issue:', results);
+                                                                                    }}
+                                                                                />
+                                                                            </>
                                                                         )}
                                                                     </div>
                                                                 </td>
@@ -2137,13 +2275,24 @@ I'm ready to answer specific questions about these findings, provide detailed ex
                                                                             </div>
                                                                         )}
                                                                         {fixDetails[`static_analysis-${index}`].code_comparison && (
-                                                                            <DiffViewer
-                                                                                original={fixDetails[`static_analysis-${index}`].code_comparison.original_content}
-                                                                                fixed={fixDetails[`static_analysis-${index}`].code_comparison.fixed_content}
-                                                                                filename={issue.file || issue.filename || 'N/A'}
-                                                                                diffStats={fixDetails[`static_analysis-${index}`].code_comparison.diff_statistics}
-                                                                                unifiedDiff={fixDetails[`static_analysis-${index}`].code_comparison.diff_statistics?.unified_diff}
-                                                                            />
+                                                                            <>
+                                                                                <DiffViewer
+                                                                                    original={fixDetails[`static_analysis-${index}`].code_comparison.original_content}
+                                                                                    fixed={fixDetails[`static_analysis-${index}`].code_comparison.fixed_content}
+                                                                                    filename={issue.file || issue.filename || 'N/A'}
+                                                                                    diffStats={fixDetails[`static_analysis-${index}`].code_comparison.diff_statistics}
+                                                                                    unifiedDiff={fixDetails[`static_analysis-${index}`].code_comparison.diff_statistics?.unified_diff}
+                                                                                />
+                                                                                <CodePreviewTester
+                                                                                    originalCode={fixDetails[`static_analysis-${index}`].code_comparison.original_content}
+                                                                                    fixedCode={fixDetails[`static_analysis-${index}`].code_comparison.fixed_content}
+                                                                                    filename={issue.file || issue.filename || 'N/A'}
+                                                                                    issue={issue}
+                                                                                    onTestComplete={(results) => {
+                                                                                        console.log('Test results for static analysis issue:', results);
+                                                                                    }}
+                                                                                />
+                                                                            </>
                                                                         )}
                                                                     </div>
                                                                 </td>
@@ -2159,7 +2308,7 @@ I'm ready to answer specific questions about these findings, provide detailed ex
                                                             <td><span className="issue-type dependency">Dependency</span></td>
                                                             <td className="file-path">{issue.file || issue.package_name || 'Package Dependencies'}</td>
                                                             <td><span className={`severity-badge severity-${(issue.severity || 'medium').toLowerCase()}`}>{issue.severity || 'Medium'}</span></td>
-                                                            <td className="issue-description">{issue.description || issue.vulnerability || `Vulnerable dependency: ${issue.package_name}` || 'Vulnerable dependency detected'}</td>
+                                                            <td className="issue-description">{issue.description || issue.vulnerability || (issue.package_name ? `Vulnerable dependency: ${issue.package_name}` : 'Vulnerable dependency detected')}</td>
                                                             <td>{issue.line || '-'}</td>
                                                             <td>
                                                                 {!isIssueFixed('dependency', index) && (
@@ -2205,13 +2354,24 @@ I'm ready to answer specific questions about these findings, provide detailed ex
                                                                             </div>
                                                                         )}
                                                                         {fixDetails[`dependency-${index}`].code_comparison && (
-                                                                            <DiffViewer
-                                                                                original={fixDetails[`dependency-${index}`].code_comparison.original_content}
-                                                                                fixed={fixDetails[`dependency-${index}`].code_comparison.fixed_content}
-                                                                                filename={issue.file || issue.package_name || 'Package Dependencies'}
-                                                                                diffStats={fixDetails[`dependency-${index}`].code_comparison.diff_statistics}
-                                                                                unifiedDiff={fixDetails[`dependency-${index}`].code_comparison.diff_statistics?.unified_diff}
-                                                                            />
+                                                                            <>
+                                                                                <DiffViewer
+                                                                                    original={fixDetails[`dependency-${index}`].code_comparison.original_content}
+                                                                                    fixed={fixDetails[`dependency-${index}`].code_comparison.fixed_content}
+                                                                                    filename={issue.file || issue.package_name || 'Package Dependencies'}
+                                                                                    diffStats={fixDetails[`dependency-${index}`].code_comparison.diff_statistics}
+                                                                                    unifiedDiff={fixDetails[`dependency-${index}`].code_comparison.diff_statistics?.unified_diff}
+                                                                                />
+                                                                                <CodePreviewTester
+                                                                                    originalCode={fixDetails[`dependency-${index}`].code_comparison.original_content}
+                                                                                    fixedCode={fixDetails[`dependency-${index}`].code_comparison.fixed_content}
+                                                                                    filename={issue.file || issue.package_name || 'Package Dependencies'}
+                                                                                    issue={issue}
+                                                                                    onTestComplete={(results) => {
+                                                                                        console.log('Test results for dependency issue:', results);
+                                                                                    }}
+                                                                                />
+                                                                            </>
                                                                         )}
                                                                     </div>
                                                                 </td>
@@ -2220,37 +2380,45 @@ I'm ready to answer specific questions about these findings, provide detailed ex
                                                     </React.Fragment>
                                                 ))}
                                                 
-                                                {/* High Priority Code Quality Issues */}
+                                                {/* Code Quality Issues */}
                                                 {analysisResult.code_quality_results?.filter(issue => 
+                                                    showAllIssues || 
                                                     (issue.severity || '').toLowerCase() === 'critical' || 
                                                     (issue.severity || '').toLowerCase() === 'high'
-                                                ).map((issue, index) => (
-                                                    <React.Fragment key={`quality-${index}`}>
-                                                        <tr className={isIssueFixed('code_quality', index) ? 'issue-fixed' : ''}>
+                                                ).map((issue, index) => {
+                                                    // Find the original index in the full array for proper key generation
+                                                    const originalIndex = analysisResult.code_quality_results.findIndex(originalIssue => 
+                                                        originalIssue.file === issue.file && 
+                                                        originalIssue.line === issue.line && 
+                                                        originalIssue.description === issue.description
+                                                    );
+                                                    return (
+                                                    <React.Fragment key={`quality-${originalIndex}`}>
+                                                        <tr className={isIssueFixed('code_quality', originalIndex) ? 'issue-fixed' : ''}>
                                                             <td><span className="issue-type quality">Code Quality</span></td>
                                                             <td className="file-path">{issue.file || issue.filename || 'N/A'}</td>
                                                             <td><span className={`severity-badge severity-${(issue.severity || 'medium').toLowerCase()}`}>{issue.severity || 'Medium'}</span></td>
                                                             <td className="issue-description">{issue.description || issue.message || issue.rule_id || 'Code quality issue'}</td>
                                                             <td>{issue.line || issue.line_number || '-'}</td>
                                                             <td>
-                                                                {!isIssueFixed('code_quality', index) && (
+                                                                {!isIssueFixed('code_quality', originalIndex) && (
                                                                     <button 
                                                                         className="btn-fix" 
-                                                                        onClick={() => fixIssue(issue, 'code_quality', index)} 
-                                                                        disabled={fixingIssues[`code_quality-${index}`] || isFixingAll}
+                                                                        onClick={() => fixIssue(issue, 'code_quality', originalIndex)} 
+                                                                        disabled={fixingIssues[`code_quality-${originalIndex}`] || isFixingAll}
                                                                     >
-                                                                        {fixingIssues[`code_quality-${index}`] ? 'Fixing...' : 'Fix'}
+                                                                        {fixingIssues[`code_quality-${originalIndex}`] ? 'Fixing...' : 'Fix'}
                                                                     </button>
                                                                 )}
-                                                                {isIssueFixed('code_quality', index) && (
+                                                                {isIssueFixed('code_quality', originalIndex) && (
                                                                     <div className="fixed-actions">
                                                                         <span className="fixed-badge">✓ Fixed</span>
-                                                                        {fixDetails[`code_quality-${index}`] && (
+                                                                        {fixDetails[`code_quality-${originalIndex}`] && (
                                                                             <button 
                                                                                 className="btn-view-diff" 
-                                                                                onClick={() => toggleDiffView('code_quality', index)}
+                                                                                onClick={() => toggleDiffView('code_quality', originalIndex)}
                                                                             >
-                                                                                {expandedDiffs[`code_quality-${index}`] ? 'Hide Diff' : 'View Diff'}
+                                                                                {expandedDiffs[`code_quality-${originalIndex}`] ? 'Hide Diff' : 'View Diff'}
                                                                             </button>
                                                                         )}
                                                                     </div>
@@ -2258,38 +2426,50 @@ I'm ready to answer specific questions about these findings, provide detailed ex
                                                             </td>
                                                         </tr>
                                                         {/* Diff viewer row */}
-                                                        {isIssueFixed('code_quality', index) && expandedDiffs[`code_quality-${index}`] && fixDetails[`code_quality-${index}`] && (
+                                                        {isIssueFixed('code_quality', originalIndex) && expandedDiffs[`code_quality-${originalIndex}`] && fixDetails[`code_quality-${originalIndex}`] && (
                                                             <tr className="diff-row">
                                                                 <td colSpan="6" className="diff-cell">
                                                                     <div className="inline-diff-container">
-                                                                        {fixDetails[`code_quality-${index}`].fix_details && (
+                                                                        {fixDetails[`code_quality-${originalIndex}`].fix_details && (
                                                                             <div className="fix-summary-inline">
                                                                                 <h4>Fix Summary</h4>
-                                                                                <p>{fixDetails[`code_quality-${index}`].fix_details.fix_summary}</p>
-                                                                                {fixDetails[`code_quality-${index}`].pull_request?.url && (
+                                                                                <p>{fixDetails[`code_quality-${originalIndex}`].fix_details.fix_summary}</p>
+                                                                                {fixDetails[`code_quality-${originalIndex}`].pull_request?.url && (
                                                                                     <p>
-                                                                                        <a href={fixDetails[`code_quality-${index}`].pull_request.url} target="_blank" rel="noopener noreferrer" className="pr-link-inline">
-                                                                                            View Pull Request #{fixDetails[`code_quality-${index}`].pull_request.number}
+                                                                                        <a href={fixDetails[`code_quality-${originalIndex}`].pull_request.url} target="_blank" rel="noopener noreferrer" className="pr-link-inline">
+                                                                                            View Pull Request #{fixDetails[`code_quality-${originalIndex}`].pull_request.number}
                                                                                         </a>
                                                                                     </p>
                                                                                 )}
                                                                             </div>
                                                                         )}
-                                                                        {fixDetails[`code_quality-${index}`].code_comparison && (
-                                                                            <DiffViewer
-                                                                                original={fixDetails[`code_quality-${index}`].code_comparison.original_content}
-                                                                                fixed={fixDetails[`code_quality-${index}`].code_comparison.fixed_content}
-                                                                                filename={issue.file || issue.filename || 'N/A'}
-                                                                                diffStats={fixDetails[`code_quality-${index}`].code_comparison.diff_statistics}
-                                                                                unifiedDiff={fixDetails[`code_quality-${index}`].code_comparison.diff_statistics?.unified_diff}
-                                                                            />
+                                                                        {fixDetails[`code_quality-${originalIndex}`].code_comparison && (
+                                                                            <>
+                                                                                <DiffViewer
+                                                                                    original={fixDetails[`code_quality-${originalIndex}`].code_comparison.original_content}
+                                                                                    fixed={fixDetails[`code_quality-${originalIndex}`].code_comparison.fixed_content}
+                                                                                    filename={issue.file || issue.filename || 'N/A'}
+                                                                                    diffStats={fixDetails[`code_quality-${originalIndex}`].code_comparison.diff_statistics}
+                                                                                    unifiedDiff={fixDetails[`code_quality-${originalIndex}`].code_comparison.diff_statistics?.unified_diff}
+                                                                                />
+                                                                                <CodePreviewTester
+                                                                                    originalCode={fixDetails[`code_quality-${originalIndex}`].code_comparison.original_content}
+                                                                                    fixedCode={fixDetails[`code_quality-${originalIndex}`].code_comparison.fixed_content}
+                                                                                    filename={issue.file || issue.filename || 'N/A'}
+                                                                                    issue={issue}
+                                                                                    onTestComplete={(results) => {
+                                                                                        console.log('Test results for code quality issue:', results);
+                                                                                    }}
+                                                                                />
+                                                                            </>
                                                                         )}
                                                                     </div>
                                                                 </td>
                                                             </tr>
                                                         )}
                                                     </React.Fragment>
-                                                ))}
+                                                    );
+                                                })}
                                             </tbody>
                                         </table>
                                         
@@ -2297,15 +2477,18 @@ I'm ready to answer specific questions about these findings, provide detailed ex
                                         {(!analysisResult.secret_scan_results?.length && 
                                           !analysisResult.static_analysis_results?.length && 
                                           !analysisResult.dependency_scan_results?.vulnerable_packages?.length &&
-                                          !analysisResult.code_quality_results?.filter(issue => 
+                                          !(showAllIssues ? analysisResult.code_quality_results?.length : analysisResult.code_quality_results?.filter(issue => 
                                             (issue.severity || '').toLowerCase() === 'critical' || 
                                             (issue.severity || '').toLowerCase() === 'high'
-                                          ).length) && (
+                                          ).length)) && (
                                             <div className="no-issues-message">
                                                 <div className="no-issues-icon">✅</div>
                                                 <div className="no-issues-text">
-                                                    <h4>No Critical or High Severity Issues Found</h4>
+                                                    <h4>{showAllIssues ? 'No Security Issues Found' : 'No Critical or High Severity Issues Found'}</h4>
                                                     <p>Great! This repository appears to be well-maintained from a security perspective.</p>
+                                                    {!showAllIssues && analysisResult.code_quality_results?.length > 0 && (
+                                                        <p><button onClick={() => setShowAllIssues(true)} className="text-link">Show all {analysisResult.code_quality_results.length} code quality issues</button></p>
+                                                    )}
                                                 </div>
                                             </div>
                                         )}
