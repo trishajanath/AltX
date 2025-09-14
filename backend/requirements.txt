@@ -33,7 +33,7 @@ langchain-google-genai
 
 # NLP and ML
 sentence-transformers==5.0.0
-regex==2024.5.15
+regex==2025.9.1
 
 # Testing and Linting
 pytest==8.2.2

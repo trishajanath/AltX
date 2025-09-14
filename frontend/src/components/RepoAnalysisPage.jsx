@@ -3,6 +3,127 @@ import PageWrapper from './PageWrapper';
 import usePreventZoom from './usePreventZoom';
 import ChatResponseFormatter from './ChatResponseFormatter';
 
+// --- Sub-component: Diff Viewer ---
+const DiffViewer = ({ original, fixed, filename, diffStats, unifiedDiff }) => {
+    const [showDiff, setShowDiff] = useState(false);
+    const [viewMode, setViewMode] = useState('unified'); // 'unified', 'split', 'raw'
+    
+    if (!diffStats?.has_changes) {
+        return (
+            <div className="diff-viewer">
+                <div className="diff-header">
+                    <span className="diff-filename">{filename}</span>
+                    <span className="no-changes">No changes detected</span>
+                </div>
+            </div>
+        );
+    }
+    
+    const renderUnifiedDiff = () => {
+        if (!unifiedDiff) return <div>No diff available</div>;
+        
+        const lines = unifiedDiff.split('\n');
+        return (
+            <div className="unified-diff">
+                {lines.map((line, index) => {
+                    let className = 'diff-line';
+                    if (line.startsWith('+++') || line.startsWith('---')) {
+                        className += ' diff-file-header';
+                    } else if (line.startsWith('@@')) {
+                        className += ' diff-hunk-header';
+                    } else if (line.startsWith('+')) {
+                        className += ' diff-addition';
+                    } else if (line.startsWith('-')) {
+                        className += ' diff-deletion';
+                    } else {
+                        className += ' diff-context';
+                    }
+                    
+                    return (
+                        <div key={index} className={className}>
+                            <code>{line}</code>
+                        </div>
+                    );
+                })}
+            </div>
+        );
+    };
+    
+    const renderSplitDiff = () => {
+        const originalLines = (original || '').split('\n');
+        const fixedLines = (fixed || '').split('\n');
+        const maxLines = Math.max(originalLines.length, fixedLines.length);
+        
+        return (
+            <div className="split-diff">
+                <div className="split-diff-pane">
+                    <div className="pane-header">Original</div>
+                    <div className="pane-content">
+                        {originalLines.map((line, index) => (
+                            <div key={index} className="diff-line">
+                                <span className="line-number">{index + 1}</span>
+                                <code>{line}</code>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+                <div className="split-diff-pane">
+                    <div className="pane-header">Fixed</div>
+                    <div className="pane-content">
+                        {fixedLines.map((line, index) => (
+                            <div key={index} className="diff-line">
+                                <span className="line-number">{index + 1}</span>
+                                <code>{line}</code>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </div>
+        );
+    };
+    
+    return (
+        <div className="diff-viewer">
+            <div className="diff-header" onClick={() => setShowDiff(!showDiff)}>
+                <div className="diff-title">
+                    <span className="diff-filename">{filename}</span>
+                    <div className="diff-stats">
+                        {diffStats.lines_added > 0 && <span className="stat-added">+{diffStats.lines_added}</span>}
+                        {diffStats.lines_removed > 0 && <span className="stat-removed">-{diffStats.lines_removed}</span>}
+                        {diffStats.lines_modified > 0 && <span className="stat-modified">~{diffStats.lines_modified}</span>}
+                    </div>
+                </div>
+                <button className="diff-toggle">
+                    {showDiff ? '−' : '+'}
+                </button>
+            </div>
+            
+            {showDiff && (
+                <div className="diff-content">
+                    <div className="diff-controls">
+                        <button 
+                            className={`control-btn ${viewMode === 'unified' ? 'active' : ''}`}
+                            onClick={() => setViewMode('unified')}
+                        >
+                            Unified
+                        </button>
+                        <button 
+                            className={`control-btn ${viewMode === 'split' ? 'active' : ''}`}
+                            onClick={() => setViewMode('split')}
+                        >
+                            Split
+                        </button>
+                    </div>
+                    
+                    <div className="diff-display">
+                        {viewMode === 'unified' ? renderUnifiedDiff() : renderSplitDiff()}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
 // --- Sub-component: Security Score Gauge ---
 const SecurityScoreGauge = ({ score }) => {
     const scoreValue = score || 0;
@@ -62,6 +183,8 @@ const RepoAnalysisPage = ({ setScanResult }) => { // Assuming setScanResult is p
     const [analysisLogs, setAnalysisLogs] = useState([]);
     const [modelType, setModelType] = useState('smart');
     const [chatMessages, setChatMessages] = useState([]);
+    const [fixDetails, setFixDetails] = useState({}); // Store fix details with diffs
+    const [expandedDiffs, setExpandedDiffs] = useState({}); // Track which diffs are expanded
     const [currentQuestion, setCurrentQuestion] = useState('');
     const [isAskingAI, setIsAskingAI] = useState(false);
     const [fixingIssues, setFixingIssues] = useState({});
@@ -252,6 +375,18 @@ I'm ready to answer specific questions about these findings, provide detailed ex
                 file: issue.file || issue.filename || null,
                 line: issue.line || issue.line_number || null,
                 severity: issue.severity || 'Medium',
+                // Add more context for better fix generation
+                vulnerable_code: issue.code || issue.vulnerable_code || issue.pattern || null,
+                rule_id: issue.rule_id || issue.cwe || null,
+                advisory: issue.advisory || null,
+                package: issue.package || null,
+                version: issue.version || null,
+                // Include full issue object for additional context
+                context: {
+                    full_issue: issue,
+                    issue_type: issueType,
+                    repo_url: repoUrl.trim()
+                }
             };
             const response = await fetch('http://localhost:8000/propose-fix', {
                 method: 'POST',
@@ -261,10 +396,34 @@ I'm ready to answer specific questions about these findings, provide detailed ex
             const data = await response.json();
             if (response.ok && data.success) {
                 setFixedIssues(prev => new Set(prev).add(issueId));
+                
+                // Store fix details with diff information
+                setFixDetails(prev => ({
+                    ...prev,
+                    [issueId]: {
+                        ...data,
+                        timestamp: new Date().toISOString()
+                    }
+                }));
+                
                 let successMessage = `**Issue Fixed Successfully!**\n\n- **Issue:** ${issueData.description}\n- **File:** ${issueData.file || 'Multiple files'}`;
+                
+                // Add diff statistics to the message
+                if (data.code_comparison?.diff_statistics) {
+                    const stats = data.code_comparison.diff_statistics;
+                    successMessage += `\n- **Changes:** `;
+                    if (stats.lines_added > 0) successMessage += `+${stats.lines_added} `;
+                    if (stats.lines_removed > 0) successMessage += `-${stats.lines_removed} `;
+                    if (stats.lines_modified > 0) successMessage += `~${stats.lines_modified} `;
+                    successMessage += `lines`;
+                }
+                
                 if (data.pull_request?.url) {
                     successMessage += `\n- **Action:** Pull Request created at [${data.pull_request.url}](${data.pull_request.url})`;
                 }
+                
+                successMessage += `\n\n*Click "View Diff" next to the fixed issue to see the exact changes made.*`;
+                
                 setChatMessages(prev => [...prev, { type: 'ai', message: successMessage }]);
             } else {
                 throw new Error(data.error || 'Failed to fix issue');
@@ -318,6 +477,71 @@ I'm ready to answer specific questions about these findings, provide detailed ex
         );
     };
 
+    const renderFixedIssueWithDiff = (issue, type, index) => {
+        const issueId = `${type}-${index}`;
+        const fixData = fixDetails[issueId];
+        
+        if (!isIssueFixed(type, index) || !fixData) return null;
+        
+        const details = {
+            filePath: issue.file || issue.filename || 'N/A',
+            severity: issue.severity || 'Medium',
+            description: issue.description || issue.pattern || issue.rule_id || 'N/A',
+            line: issue.line || issue.line_number || '-',
+        };
+        
+        return (
+            <div key={`fixed-${issueId}`} className="fixed-issue-container">
+                <div className="fixed-issue-header">
+                    <span className="fixed-badge">✅ Fixed</span>
+                    <span className="fixed-issue-title">{details.description}</span>
+                    <span className="fixed-issue-file">{details.filePath}</span>
+                    {fixData.pull_request?.url && (
+                        <a href={fixData.pull_request.url} target="_blank" rel="noopener noreferrer" className="pr-link">
+                            View PR #{fixData.pull_request.number}
+                        </a>
+                    )}
+                </div>
+                
+                {fixData.code_comparison && (
+                    <DiffViewer
+                        original={fixData.code_comparison.original_content}
+                        fixed={fixData.code_comparison.fixed_content}
+                        filename={details.filePath}
+                        diffStats={fixData.code_comparison.diff_statistics}
+                        unifiedDiff={fixData.code_comparison.diff_statistics?.unified_diff}
+                    />
+                )}
+                
+                {fixData.fix_details && (
+                    <div className="fix-summary">
+                        <h4>Fix Summary</h4>
+                        <p>{fixData.fix_details.fix_summary}</p>
+                        {fixData.fix_details.changes_made && fixData.fix_details.changes_made.length > 0 && (
+                            <div className="changes-made">
+                                <h5>Changes Made:</h5>
+                                <ul>
+                                    {fixData.fix_details.changes_made.map((change, idx) => (
+                                        <li key={idx}>{change}</li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>
+        );
+    };
+
+    // Function to toggle diff visibility
+    const toggleDiffView = (issueType, index) => {
+        const issueId = `${issueType}-${index}`;
+        setExpandedDiffs(prev => ({
+            ...prev,
+            [issueId]: !prev[issueId]
+        }));
+    };
+
     return (
         <PageWrapper>
             <style>{`
@@ -336,6 +560,382 @@ I'm ready to answer specific questions about these findings, provide detailed ex
                 @media (max-width: 1200px) { 
                     .report-layout { grid-template-columns: 1fr; } 
                     .report-sidebar { position: static; height: auto; } 
+                }
+
+                /* Diff Viewer Styles */
+                .fixed-issue-container {
+                    background: var(--card-bg);
+                    border: 1px solid var(--card-border);
+                    border-radius: 8px;
+                    margin: 1rem 0;
+                    padding: 1rem;
+                }
+                
+                .fixed-issue-header {
+                    display: flex;
+                    align-items: center;
+                    gap: 1rem;
+                    margin-bottom: 1rem;
+                    flex-wrap: wrap;
+                }
+                
+                .fixed-badge {
+                    background: #22c55e;
+                    color: white;
+                    padding: 0.25rem 0.5rem;
+                    border-radius: 4px;
+                    font-size: 0.875rem;
+                    font-weight: 600;
+                }
+                
+                .fixed-issue-title {
+                    font-weight: 600;
+                    color: var(--text-primary);
+                }
+                
+                .fixed-issue-file {
+                    color: var(--text-secondary);
+                    font-family: monospace;
+                    font-size: 0.875rem;
+                }
+                
+                .pr-link {
+                    background: #3b82f6;
+                    color: white;
+                    padding: 0.25rem 0.5rem;
+                    border-radius: 4px;
+                    text-decoration: none;
+                    font-size: 0.875rem;
+                    margin-left: auto;
+                }
+                
+                .pr-link:hover {
+                    background: #2563eb;
+                }
+                
+                .diff-viewer {
+                    border: 1px solid var(--card-border);
+                    border-radius: 6px;
+                    margin: 1rem 0;
+                    overflow: hidden;
+                }
+                
+                .diff-header {
+                    background: rgba(255, 255, 255, 0.05);
+                    padding: 0.75rem 1rem;
+                    cursor: pointer;
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    user-select: none;
+                }
+                
+                .diff-header:hover {
+                    background: rgba(255, 255, 255, 0.08);
+                }
+                
+                .diff-title {
+                    display: flex;
+                    align-items: center;
+                    gap: 1rem;
+                }
+                
+                .diff-filename {
+                    font-family: monospace;
+                    font-weight: 600;
+                    color: var(--text-primary);
+                }
+                
+                .diff-stats {
+                    display: flex;
+                    gap: 0.5rem;
+                    font-size: 0.875rem;
+                }
+                
+                .stat-added {
+                    color: #22c55e;
+                    font-weight: 600;
+                }
+                
+                .stat-removed {
+                    color: #ef4444;
+                    font-weight: 600;
+                }
+                
+                .stat-modified {
+                    color: #f59e0b;
+                    font-weight: 600;
+                }
+                
+                .diff-toggle {
+                    background: none;
+                    border: none;
+                    color: var(--text-primary);
+                    font-size: 1.25rem;
+                    cursor: pointer;
+                    padding: 0.25rem;
+                    border-radius: 4px;
+                }
+                
+                .diff-toggle:hover {
+                    background: rgba(255, 255, 255, 0.1);
+                }
+                
+                .diff-content {
+                    border-top: 1px solid var(--card-border);
+                }
+                
+                .diff-controls {
+                    background: rgba(255, 255, 255, 0.02);
+                    padding: 0.5rem 1rem;
+                    display: flex;
+                    gap: 0.5rem;
+                    border-bottom: 1px solid var(--card-border);
+                }
+                
+                .control-btn {
+                    background: none;
+                    border: 1px solid var(--card-border);
+                    color: var(--text-secondary);
+                    padding: 0.25rem 0.75rem;
+                    border-radius: 4px;
+                    cursor: pointer;
+                    font-size: 0.875rem;
+                }
+                
+                .control-btn:hover {
+                    border-color: var(--card-border-hover);
+                    color: var(--text-primary);
+                }
+                
+                .control-btn.active {
+                    background: #3b82f6;
+                    border-color: #3b82f6;
+                    color: white;
+                }
+                
+                .diff-display {
+                    max-height: 400px;
+                    overflow-y: auto;
+                }
+                
+                .unified-diff {
+                    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+                    font-size: 0.875rem;
+                    line-height: 1.4;
+                }
+                
+                .diff-line {
+                    padding: 0.125rem 1rem;
+                    white-space: pre-wrap;
+                    word-break: break-all;
+                }
+                
+                .diff-line code {
+                    background: none;
+                    padding: 0;
+                    font-family: inherit;
+                }
+                
+                .diff-file-header {
+                    background: rgba(255, 255, 255, 0.05);
+                    color: var(--text-secondary);
+                    font-weight: 600;
+                }
+                
+                .diff-hunk-header {
+                    background: rgba(59, 130, 246, 0.1);
+                    color: #60a5fa;
+                }
+                
+                .diff-addition {
+                    background: rgba(34, 197, 94, 0.1);
+                    color: #4ade80;
+                }
+                
+                .diff-deletion {
+                    background: rgba(239, 68, 68, 0.1);
+                    color: #f87171;
+                }
+                
+                .diff-context {
+                    color: var(--text-primary);
+                }
+                
+                .split-diff {
+                    display: grid;
+                    grid-template-columns: 1fr 1fr;
+                    height: 400px;
+                }
+                
+                .split-diff-pane {
+                    border-right: 1px solid var(--card-border);
+                }
+                
+                .split-diff-pane:last-child {
+                    border-right: none;
+                }
+                
+                .pane-header {
+                    background: rgba(255, 255, 255, 0.05);
+                    padding: 0.5rem 1rem;
+                    font-weight: 600;
+                    border-bottom: 1px solid var(--card-border);
+                }
+                
+                .pane-content {
+                    height: calc(400px - 3rem);
+                    overflow-y: auto;
+                    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+                    font-size: 0.875rem;
+                    line-height: 1.4;
+                }
+                
+                .pane-content .diff-line {
+                    display: flex;
+                    align-items: flex-start;
+                    padding: 0.125rem 0;
+                }
+                
+                .line-number {
+                    display: inline-block;
+                    width: 3rem;
+                    padding: 0 0.5rem;
+                    color: var(--text-secondary);
+                    background: rgba(255, 255, 255, 0.02);
+                    text-align: right;
+                    user-select: none;
+                    border-right: 1px solid var(--card-border);
+                    margin-right: 0.5rem;
+                }
+                
+                .fix-summary {
+                    margin-top: 1rem;
+                    padding: 1rem;
+                    background: rgba(255, 255, 255, 0.02);
+                    border-radius: 6px;
+                    border: 1px solid var(--card-border);
+                }
+                
+                .fix-summary h4 {
+                    margin: 0 0 0.5rem 0;
+                    color: var(--text-primary);
+                    font-size: 1rem;
+                }
+                
+                .fix-summary h5 {
+                    margin: 1rem 0 0.5rem 0;
+                    color: var(--text-primary);
+                    font-size: 0.875rem;
+                }
+                
+                .fix-summary p {
+                    margin: 0 0 0.5rem 0;
+                    color: var(--text-secondary);
+                    line-height: 1.5;
+                }
+                
+                .changes-made ul {
+                    margin: 0;
+                    padding-left: 1.5rem;
+                }
+                
+                .changes-made li {
+                    color: var(--text-secondary);
+                    margin-bottom: 0.25rem;
+                    line-height: 1.4;
+                }
+                
+                .no-changes {
+                    color: var(--text-secondary);
+                    font-style: italic;
+                }
+                
+                /* Fixed Issues Section */
+                .fixed-issues-section {
+                    margin: 2rem 0;
+                    padding: 1.5rem;
+                    background: var(--card-bg);
+                    border: 1px solid var(--card-border);
+                    border-radius: 8px;
+                }
+                
+                .fixed-issues-section h3 {
+                    margin: 0 0 1.5rem 0;
+                    color: var(--text-primary);
+                    font-size: 1.25rem;
+                    display: flex;
+                    align-items: center;
+                    gap: 0.5rem;
+                }
+                
+                /* Inline diff styles */
+                .fixed-actions {
+                    display: flex;
+                    align-items: center;
+                    gap: 0.5rem;
+                    flex-wrap: wrap;
+                }
+                
+                .btn-view-diff {
+                    background: #3b82f6;
+                    color: white;
+                    border: none;
+                    padding: 0.25rem 0.75rem;
+                    border-radius: 4px;
+                    cursor: pointer;
+                    font-size: 0.875rem;
+                    transition: background-color 0.2s;
+                }
+                
+                .btn-view-diff:hover {
+                    background: #2563eb;
+                }
+                
+                .diff-row {
+                    background: rgba(255, 255, 255, 0.02);
+                }
+                
+                .diff-cell {
+                    padding: 0 !important;
+                    border-top: 1px solid var(--card-border);
+                }
+                
+                .inline-diff-container {
+                    padding: 1rem;
+                    background: var(--card-bg);
+                    border-radius: 0 0 6px 6px;
+                }
+                
+                .fix-summary-inline {
+                    margin-bottom: 1rem;
+                    padding: 1rem;
+                    background: rgba(255, 255, 255, 0.03);
+                    border-radius: 6px;
+                    border: 1px solid var(--card-border);
+                }
+                
+                .fix-summary-inline h4 {
+                    margin: 0 0 0.5rem 0;
+                    color: var(--text-primary);
+                    font-size: 1rem;
+                }
+                
+                .fix-summary-inline p {
+                    margin: 0 0 0.5rem 0;
+                    color: var(--text-secondary);
+                    line-height: 1.5;
+                }
+                
+                .pr-link-inline {
+                    color: #3b82f6;
+                    text-decoration: none;
+                    font-weight: 500;
+                }
+                
+                .pr-link-inline:hover {
+                    color: #2563eb;
+                    text-decoration: underline;
                 }
                 
                 .hero-section { text-align: center; padding: 4rem 1rem 3rem 1rem; }
@@ -1418,71 +2018,206 @@ I'm ready to answer specific questions about these findings, provide detailed ex
                                             <tbody>
                                                 {/* Secret Scan Results */}
                                                 {analysisResult.secret_scan_results?.map((issue, index) => (
-                                                    <tr key={`secret-${index}`} className={isIssueFixed('secret', index) ? 'issue-fixed' : ''}>
-                                                        <td><span className="issue-type secret">Secret</span></td>
-                                                        <td className="file-path">{issue.file || issue.filename || 'N/A'}</td>
-                                                        <td><span className={`severity-badge severity-${(issue.severity || 'critical').toLowerCase()}`}>{issue.severity || 'Critical'}</span></td>
-                                                        <td className="issue-description">{issue.description || issue.pattern || issue.rule_id || 'Hardcoded secret detected'}</td>
-                                                        <td>{issue.line || issue.line_number || '-'}</td>
-                                                        <td>
-                                                            {!isIssueFixed('secret', index) && (
-                                                                <button 
-                                                                    className="btn-fix" 
-                                                                    onClick={() => fixIssue(issue, 'secret', index)} 
-                                                                    disabled={fixingIssues[`secret-${index}`] || isFixingAll}
-                                                                >
-                                                                    {fixingIssues[`secret-${index}`] ? 'Fixing...' : 'Fix'}
-                                                                </button>
-                                                            )}
-                                                            {isIssueFixed('secret', index) && <span className="fixed-badge">✓ Fixed</span>}
-                                                        </td>
-                                                    </tr>
+                                                    <React.Fragment key={`secret-${index}`}>
+                                                        <tr className={isIssueFixed('secret', index) ? 'issue-fixed' : ''}>
+                                                            <td><span className="issue-type secret">Secret</span></td>
+                                                            <td className="file-path">{issue.file || issue.filename || 'N/A'}</td>
+                                                            <td><span className={`severity-badge severity-${(issue.severity || 'critical').toLowerCase()}`}>{issue.severity || 'Critical'}</span></td>
+                                                            <td className="issue-description">{issue.description || issue.pattern || issue.rule_id || 'Hardcoded secret detected'}</td>
+                                                            <td>{issue.line || issue.line_number || '-'}</td>
+                                                            <td>
+                                                                {!isIssueFixed('secret', index) && (
+                                                                    <button 
+                                                                        className="btn-fix" 
+                                                                        onClick={() => fixIssue(issue, 'secret', index)} 
+                                                                        disabled={fixingIssues[`secret-${index}`] || isFixingAll}
+                                                                    >
+                                                                        {fixingIssues[`secret-${index}`] ? 'Fixing...' : 'Fix'}
+                                                                    </button>
+                                                                )}
+                                                                {isIssueFixed('secret', index) && (
+                                                                    <div className="fixed-actions">
+                                                                        <span className="fixed-badge">✓ Fixed</span>
+                                                                        {fixDetails[`secret-${index}`] && (
+                                                                            <button 
+                                                                                className="btn-view-diff" 
+                                                                                onClick={() => toggleDiffView('secret', index)}
+                                                                            >
+                                                                                {expandedDiffs[`secret-${index}`] ? 'Hide Diff' : 'View Diff'}
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
+                                                                )}
+                                                            </td>
+                                                        </tr>
+                                                        {/* Diff viewer row */}
+                                                        {isIssueFixed('secret', index) && expandedDiffs[`secret-${index}`] && fixDetails[`secret-${index}`] && (
+                                                            <tr className="diff-row">
+                                                                <td colSpan="6" className="diff-cell">
+                                                                    <div className="inline-diff-container">
+                                                                        {fixDetails[`secret-${index}`].fix_details && (
+                                                                            <div className="fix-summary-inline">
+                                                                                <h4>Fix Summary</h4>
+                                                                                <p>{fixDetails[`secret-${index}`].fix_details.fix_summary}</p>
+                                                                                {fixDetails[`secret-${index}`].pull_request?.url && (
+                                                                                    <p>
+                                                                                        <a href={fixDetails[`secret-${index}`].pull_request.url} target="_blank" rel="noopener noreferrer" className="pr-link-inline">
+                                                                                            View Pull Request #{fixDetails[`secret-${index}`].pull_request.number}
+                                                                                        </a>
+                                                                                    </p>
+                                                                                )}
+                                                                            </div>
+                                                                        )}
+                                                                        {fixDetails[`secret-${index}`].code_comparison && (
+                                                                            <DiffViewer
+                                                                                original={fixDetails[`secret-${index}`].code_comparison.original_content}
+                                                                                fixed={fixDetails[`secret-${index}`].code_comparison.fixed_content}
+                                                                                filename={issue.file || issue.filename || 'N/A'}
+                                                                                diffStats={fixDetails[`secret-${index}`].code_comparison.diff_statistics}
+                                                                                unifiedDiff={fixDetails[`secret-${index}`].code_comparison.diff_statistics?.unified_diff}
+                                                                            />
+                                                                        )}
+                                                                    </div>
+                                                                </td>
+                                                            </tr>
+                                                        )}
+                                                    </React.Fragment>
                                                 ))}
                                                 
                                                 {/* Static Analysis Results */}
                                                 {analysisResult.static_analysis_results?.map((issue, index) => (
-                                                    <tr key={`static-${index}`} className={isIssueFixed('static_analysis', index) ? 'issue-fixed' : ''}>
-                                                        <td><span className="issue-type static">Static Analysis</span></td>
-                                                        <td className="file-path">{issue.file || issue.filename || 'N/A'}</td>
-                                                        <td><span className={`severity-badge severity-${(issue.severity || 'high').toLowerCase()}`}>{issue.severity || 'High'}</span></td>
-                                                        <td className="issue-description">{issue.description || issue.message || issue.rule_id || 'Security vulnerability detected'}</td>
-                                                        <td>{issue.line || issue.line_number || '-'}</td>
-                                                        <td>
-                                                            {!isIssueFixed('static_analysis', index) && (
-                                                                <button 
-                                                                    className="btn-fix" 
-                                                                    onClick={() => fixIssue(issue, 'static_analysis', index)} 
-                                                                    disabled={fixingIssues[`static_analysis-${index}`] || isFixingAll}
-                                                                >
-                                                                    {fixingIssues[`static_analysis-${index}`] ? 'Fixing...' : 'Fix'}
-                                                                </button>
-                                                            )}
-                                                            {isIssueFixed('static_analysis', index) && <span className="fixed-badge">✓ Fixed</span>}
-                                                        </td>
-                                                    </tr>
+                                                    <React.Fragment key={`static-${index}`}>
+                                                        <tr className={isIssueFixed('static_analysis', index) ? 'issue-fixed' : ''}>
+                                                            <td><span className="issue-type static">Static Analysis</span></td>
+                                                            <td className="file-path">{issue.file || issue.filename || 'N/A'}</td>
+                                                            <td><span className={`severity-badge severity-${(issue.severity || 'high').toLowerCase()}`}>{issue.severity || 'High'}</span></td>
+                                                            <td className="issue-description">{issue.description || issue.message || issue.rule_id || 'Security vulnerability detected'}</td>
+                                                            <td>{issue.line || issue.line_number || '-'}</td>
+                                                            <td>
+                                                                {!isIssueFixed('static_analysis', index) && (
+                                                                    <button 
+                                                                        className="btn-fix" 
+                                                                        onClick={() => fixIssue(issue, 'static_analysis', index)} 
+                                                                        disabled={fixingIssues[`static_analysis-${index}`] || isFixingAll}
+                                                                    >
+                                                                        {fixingIssues[`static_analysis-${index}`] ? 'Fixing...' : 'Fix'}
+                                                                    </button>
+                                                                )}
+                                                                {isIssueFixed('static_analysis', index) && (
+                                                                    <div className="fixed-actions">
+                                                                        <span className="fixed-badge">✓ Fixed</span>
+                                                                        {fixDetails[`static_analysis-${index}`] && (
+                                                                            <button 
+                                                                                className="btn-view-diff" 
+                                                                                onClick={() => toggleDiffView('static_analysis', index)}
+                                                                            >
+                                                                                {expandedDiffs[`static_analysis-${index}`] ? 'Hide Diff' : 'View Diff'}
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
+                                                                )}
+                                                            </td>
+                                                        </tr>
+                                                        {/* Diff viewer row */}
+                                                        {isIssueFixed('static_analysis', index) && expandedDiffs[`static_analysis-${index}`] && fixDetails[`static_analysis-${index}`] && (
+                                                            <tr className="diff-row">
+                                                                <td colSpan="6" className="diff-cell">
+                                                                    <div className="inline-diff-container">
+                                                                        {fixDetails[`static_analysis-${index}`].fix_details && (
+                                                                            <div className="fix-summary-inline">
+                                                                                <h4>Fix Summary</h4>
+                                                                                <p>{fixDetails[`static_analysis-${index}`].fix_details.fix_summary}</p>
+                                                                                {fixDetails[`static_analysis-${index}`].pull_request?.url && (
+                                                                                    <p>
+                                                                                        <a href={fixDetails[`static_analysis-${index}`].pull_request.url} target="_blank" rel="noopener noreferrer" className="pr-link-inline">
+                                                                                            View Pull Request #{fixDetails[`static_analysis-${index}`].pull_request.number}
+                                                                                        </a>
+                                                                                    </p>
+                                                                                )}
+                                                                            </div>
+                                                                        )}
+                                                                        {fixDetails[`static_analysis-${index}`].code_comparison && (
+                                                                            <DiffViewer
+                                                                                original={fixDetails[`static_analysis-${index}`].code_comparison.original_content}
+                                                                                fixed={fixDetails[`static_analysis-${index}`].code_comparison.fixed_content}
+                                                                                filename={issue.file || issue.filename || 'N/A'}
+                                                                                diffStats={fixDetails[`static_analysis-${index}`].code_comparison.diff_statistics}
+                                                                                unifiedDiff={fixDetails[`static_analysis-${index}`].code_comparison.diff_statistics?.unified_diff}
+                                                                            />
+                                                                        )}
+                                                                    </div>
+                                                                </td>
+                                                            </tr>
+                                                        )}
+                                                    </React.Fragment>
                                                 ))}
                                                 
                                                 {/* Dependency Vulnerabilities */}
                                                 {analysisResult.dependency_scan_results?.vulnerable_packages?.map((issue, index) => (
-                                                    <tr key={`dependency-${index}`} className={isIssueFixed('dependency', index) ? 'issue-fixed' : ''}>
-                                                        <td><span className="issue-type dependency">Dependency</span></td>
-                                                        <td className="file-path">{issue.file || issue.package_name || 'Package Dependencies'}</td>
-                                                        <td><span className={`severity-badge severity-${(issue.severity || 'medium').toLowerCase()}`}>{issue.severity || 'Medium'}</span></td>
-                                                        <td className="issue-description">{issue.description || issue.vulnerability || `Vulnerable dependency: ${issue.package_name}` || 'Vulnerable dependency detected'}</td>
-                                                        <td>{issue.line || '-'}</td>
-                                                        <td>
-                                                            {!isIssueFixed('dependency', index) && (
-                                                                <button 
-                                                                    className="btn-fix" 
-                                                                    onClick={() => fixIssue(issue, 'dependency', index)} 
-                                                                    disabled={fixingIssues[`dependency-${index}`] || isFixingAll}
-                                                                >
-                                                                    {fixingIssues[`dependency-${index}`] ? 'Fixing...' : 'Fix'}
-                                                                </button>
-                                                            )}
-                                                            {isIssueFixed('dependency', index) && <span className="fixed-badge">✓ Fixed</span>}
-                                                        </td>
-                                                    </tr>
+                                                    <React.Fragment key={`dependency-${index}`}>
+                                                        <tr className={isIssueFixed('dependency', index) ? 'issue-fixed' : ''}>
+                                                            <td><span className="issue-type dependency">Dependency</span></td>
+                                                            <td className="file-path">{issue.file || issue.package_name || 'Package Dependencies'}</td>
+                                                            <td><span className={`severity-badge severity-${(issue.severity || 'medium').toLowerCase()}`}>{issue.severity || 'Medium'}</span></td>
+                                                            <td className="issue-description">{issue.description || issue.vulnerability || `Vulnerable dependency: ${issue.package_name}` || 'Vulnerable dependency detected'}</td>
+                                                            <td>{issue.line || '-'}</td>
+                                                            <td>
+                                                                {!isIssueFixed('dependency', index) && (
+                                                                    <button 
+                                                                        className="btn-fix" 
+                                                                        onClick={() => fixIssue(issue, 'dependency', index)} 
+                                                                        disabled={fixingIssues[`dependency-${index}`] || isFixingAll}
+                                                                    >
+                                                                        {fixingIssues[`dependency-${index}`] ? 'Fixing...' : 'Fix'}
+                                                                    </button>
+                                                                )}
+                                                                {isIssueFixed('dependency', index) && (
+                                                                    <div className="fixed-actions">
+                                                                        <span className="fixed-badge">✓ Fixed</span>
+                                                                        {fixDetails[`dependency-${index}`] && (
+                                                                            <button 
+                                                                                className="btn-view-diff" 
+                                                                                onClick={() => toggleDiffView('dependency', index)}
+                                                                            >
+                                                                                {expandedDiffs[`dependency-${index}`] ? 'Hide Diff' : 'View Diff'}
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
+                                                                )}
+                                                            </td>
+                                                        </tr>
+                                                        {/* Diff viewer row */}
+                                                        {isIssueFixed('dependency', index) && expandedDiffs[`dependency-${index}`] && fixDetails[`dependency-${index}`] && (
+                                                            <tr className="diff-row">
+                                                                <td colSpan="6" className="diff-cell">
+                                                                    <div className="inline-diff-container">
+                                                                        {fixDetails[`dependency-${index}`].fix_details && (
+                                                                            <div className="fix-summary-inline">
+                                                                                <h4>Fix Summary</h4>
+                                                                                <p>{fixDetails[`dependency-${index}`].fix_details.fix_summary}</p>
+                                                                                {fixDetails[`dependency-${index}`].pull_request?.url && (
+                                                                                    <p>
+                                                                                        <a href={fixDetails[`dependency-${index}`].pull_request.url} target="_blank" rel="noopener noreferrer" className="pr-link-inline">
+                                                                                            View Pull Request #{fixDetails[`dependency-${index}`].pull_request.number}
+                                                                                        </a>
+                                                                                    </p>
+                                                                                )}
+                                                                            </div>
+                                                                        )}
+                                                                        {fixDetails[`dependency-${index}`].code_comparison && (
+                                                                            <DiffViewer
+                                                                                original={fixDetails[`dependency-${index}`].code_comparison.original_content}
+                                                                                fixed={fixDetails[`dependency-${index}`].code_comparison.fixed_content}
+                                                                                filename={issue.file || issue.package_name || 'Package Dependencies'}
+                                                                                diffStats={fixDetails[`dependency-${index}`].code_comparison.diff_statistics}
+                                                                                unifiedDiff={fixDetails[`dependency-${index}`].code_comparison.diff_statistics?.unified_diff}
+                                                                            />
+                                                                        )}
+                                                                    </div>
+                                                                </td>
+                                                            </tr>
+                                                        )}
+                                                    </React.Fragment>
                                                 ))}
                                                 
                                                 {/* High Priority Code Quality Issues */}
@@ -1490,25 +2225,70 @@ I'm ready to answer specific questions about these findings, provide detailed ex
                                                     (issue.severity || '').toLowerCase() === 'critical' || 
                                                     (issue.severity || '').toLowerCase() === 'high'
                                                 ).map((issue, index) => (
-                                                    <tr key={`quality-${index}`} className={isIssueFixed('code_quality', index) ? 'issue-fixed' : ''}>
-                                                        <td><span className="issue-type quality">Code Quality</span></td>
-                                                        <td className="file-path">{issue.file || issue.filename || 'N/A'}</td>
-                                                        <td><span className={`severity-badge severity-${(issue.severity || 'medium').toLowerCase()}`}>{issue.severity || 'Medium'}</span></td>
-                                                        <td className="issue-description">{issue.description || issue.message || issue.rule_id || 'Code quality issue'}</td>
-                                                        <td>{issue.line || issue.line_number || '-'}</td>
-                                                        <td>
-                                                            {!isIssueFixed('code_quality', index) && (
-                                                                <button 
-                                                                    className="btn-fix" 
-                                                                    onClick={() => fixIssue(issue, 'code_quality', index)} 
-                                                                    disabled={fixingIssues[`code_quality-${index}`] || isFixingAll}
-                                                                >
-                                                                    {fixingIssues[`code_quality-${index}`] ? 'Fixing...' : 'Fix'}
-                                                                </button>
-                                                            )}
-                                                            {isIssueFixed('code_quality', index) && <span className="fixed-badge">✓ Fixed</span>}
-                                                        </td>
-                                                    </tr>
+                                                    <React.Fragment key={`quality-${index}`}>
+                                                        <tr className={isIssueFixed('code_quality', index) ? 'issue-fixed' : ''}>
+                                                            <td><span className="issue-type quality">Code Quality</span></td>
+                                                            <td className="file-path">{issue.file || issue.filename || 'N/A'}</td>
+                                                            <td><span className={`severity-badge severity-${(issue.severity || 'medium').toLowerCase()}`}>{issue.severity || 'Medium'}</span></td>
+                                                            <td className="issue-description">{issue.description || issue.message || issue.rule_id || 'Code quality issue'}</td>
+                                                            <td>{issue.line || issue.line_number || '-'}</td>
+                                                            <td>
+                                                                {!isIssueFixed('code_quality', index) && (
+                                                                    <button 
+                                                                        className="btn-fix" 
+                                                                        onClick={() => fixIssue(issue, 'code_quality', index)} 
+                                                                        disabled={fixingIssues[`code_quality-${index}`] || isFixingAll}
+                                                                    >
+                                                                        {fixingIssues[`code_quality-${index}`] ? 'Fixing...' : 'Fix'}
+                                                                    </button>
+                                                                )}
+                                                                {isIssueFixed('code_quality', index) && (
+                                                                    <div className="fixed-actions">
+                                                                        <span className="fixed-badge">✓ Fixed</span>
+                                                                        {fixDetails[`code_quality-${index}`] && (
+                                                                            <button 
+                                                                                className="btn-view-diff" 
+                                                                                onClick={() => toggleDiffView('code_quality', index)}
+                                                                            >
+                                                                                {expandedDiffs[`code_quality-${index}`] ? 'Hide Diff' : 'View Diff'}
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
+                                                                )}
+                                                            </td>
+                                                        </tr>
+                                                        {/* Diff viewer row */}
+                                                        {isIssueFixed('code_quality', index) && expandedDiffs[`code_quality-${index}`] && fixDetails[`code_quality-${index}`] && (
+                                                            <tr className="diff-row">
+                                                                <td colSpan="6" className="diff-cell">
+                                                                    <div className="inline-diff-container">
+                                                                        {fixDetails[`code_quality-${index}`].fix_details && (
+                                                                            <div className="fix-summary-inline">
+                                                                                <h4>Fix Summary</h4>
+                                                                                <p>{fixDetails[`code_quality-${index}`].fix_details.fix_summary}</p>
+                                                                                {fixDetails[`code_quality-${index}`].pull_request?.url && (
+                                                                                    <p>
+                                                                                        <a href={fixDetails[`code_quality-${index}`].pull_request.url} target="_blank" rel="noopener noreferrer" className="pr-link-inline">
+                                                                                            View Pull Request #{fixDetails[`code_quality-${index}`].pull_request.number}
+                                                                                        </a>
+                                                                                    </p>
+                                                                                )}
+                                                                            </div>
+                                                                        )}
+                                                                        {fixDetails[`code_quality-${index}`].code_comparison && (
+                                                                            <DiffViewer
+                                                                                original={fixDetails[`code_quality-${index}`].code_comparison.original_content}
+                                                                                fixed={fixDetails[`code_quality-${index}`].code_comparison.fixed_content}
+                                                                                filename={issue.file || issue.filename || 'N/A'}
+                                                                                diffStats={fixDetails[`code_quality-${index}`].code_comparison.diff_statistics}
+                                                                                unifiedDiff={fixDetails[`code_quality-${index}`].code_comparison.diff_statistics?.unified_diff}
+                                                                            />
+                                                                        )}
+                                                                    </div>
+                                                                </td>
+                                                            </tr>
+                                                        )}
+                                                    </React.Fragment>
                                                 ))}
                                             </tbody>
                                         </table>
