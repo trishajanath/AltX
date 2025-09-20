@@ -1,0 +1,17 @@
+```text
+# Main web framework
+fastapi==0.111.0
+
+# ASGI server for running the application
+uvicorn[standard]==0.29.0
+
+# Pydantic is used for data validation and settings management
+# It's a dependency of FastAPI, but listed here for clarity
+pydantic==2.7.1
+pydantic-settings==2.2.1
+
+# Required for CORS middleware
+# This is a core dependency of fastapi, not a separate install
+# Listing it here is for informational purposes if context is needed
+# No need to add `python-cors` to pip install
+```

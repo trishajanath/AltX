@@ -1,0 +1,12 @@
+```text
+# FastAPI framework and ASGI server
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+
+# Data validation and settings management
+pydantic==2.7.1
+pydantic-settings==2.2.1
+
+# Middleware for Cross-Origin Resource Sharing
+python-cors==0.1.1
+```

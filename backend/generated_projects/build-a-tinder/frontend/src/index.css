@@ -1,0 +1,24 @@
+```css
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-gray-50;
+  font-family: 'Inter', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom class for the card's name/age gradient overlay */
+.gradient-overlay::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 50%;
+    background-image: linear-gradient(to top, rgba(0,0,0,0.7), transparent);
+    border-radius: 0 0 1rem 1rem; /* Match parent's border-radius */
+}
+```

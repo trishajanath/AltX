@@ -1,0 +1,28 @@
+```css
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-primary text-gray-100 antialiased;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply px-4 py-2 rounded-md font-semibold focus:outline-none focus:ring-2 focus:ring-opacity-75 transition-colors duration-200;
+  }
+  .btn-primary {
+    @apply bg-highlight text-white hover:bg-teal-500 focus:ring-highlight;
+  }
+  .btn-secondary {
+    @apply bg-accent text-gray-200 hover:bg-gray-600 focus:ring-accent;
+  }
+  .input-field {
+    @apply w-full px-4 py-2 bg-secondary border border-accent rounded-md focus:outline-none focus:ring-2 focus:ring-highlight focus:border-transparent transition-colors;
+  }
+}
+```

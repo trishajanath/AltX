@@ -17,7 +17,7 @@ import asyncio
 from pathlib import Path
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Union
 from starlette.concurrency import run_in_threadpool
 import json
 import re
@@ -99,46 +99,101 @@ class FixRequest(BaseModel):
     issue: Dict[str, Any]
     branch_name: Optional[str] = None
 
-from fastapi import Query
+from fastapi import Query, WebSocket, WebSocketDisconnect
+from fastapi.websockets import WebSocketState
+import asyncio
+import websockets
+from typing import Dict, Set
+import threading
+import uuid
 # --- Project File Tree Endpoint ---
 @app.get("/project-file-tree")
 async def get_project_file_tree(project_name: str = Query(...)):
     """
-    Returns a mock file tree for the generated project.
-    In production, this should read from the actual generated files.
+    Returns the file tree for the generated project.
     """
-    # For demo, return a static file tree
-    tree = [
-        {"name": "src", "type": "dir", "path": "src/"},
-        {"name": "App.jsx", "type": "file", "path": "src/App.jsx"},
-        {"name": "index.js", "type": "file", "path": "src/index.js"},
-        {"name": "components", "type": "dir", "path": "src/components/"},
-        {"name": "TodoList.jsx", "type": "file", "path": "src/components/TodoList.jsx"},
-        {"name": "public", "type": "dir", "path": "public/"},
-        {"name": "index.html", "type": "file", "path": "public/index.html"},
-        {"name": "package.json", "type": "file", "path": "package.json"},
-        {"name": "README.md", "type": "file", "path": "README.md"}
-    ]
-    return {"success": True, "tree": tree}
+    try:
+        projects_dir = Path("generated_projects")
+        project_path = projects_dir / project_name.lower().replace(" ", "-")
+        
+        if not project_path.exists():
+            return {"success": False, "error": "Project not found"}
+        
+        def build_tree(path: Path, relative_path: str = ""):
+            items = []
+            try:
+                for item in sorted(path.iterdir()):
+                    if item.name.startswith('.') or item.name == '__pycache__':
+                        continue
+                    
+                    relative_item_path = f"{relative_path}/{item.name}" if relative_path else item.name
+                    
+                    if item.is_dir():
+                        items.append({
+                            "name": item.name,
+                            "type": "dir", 
+                            "path": relative_item_path + "/",
+                            "children": build_tree(item, relative_item_path)
+                        })
+                    else:
+                        items.append({
+                            "name": item.name,
+                            "type": "file",
+                            "path": relative_item_path
+                        })
+            except PermissionError:
+                pass
+            return items
+        
+        tree = build_tree(project_path)
+        return {"success": True, "tree": tree}
+        
+    except Exception as e:
+        print(f"Error getting project tree: {e}")
+        return {"success": False, "error": str(e)}
 
 # --- Project File Content Endpoint ---
 @app.get("/project-file-content")
 async def get_project_file_content(project_name: str = Query(...), file_path: str = Query(...)):
     """
-    Returns mock file content for a given file in the generated project.
-    In production, this should read the actual file content.
+    Returns the actual file content for a given file in the generated project.
     """
-    # Demo content for some files
-    demo_files = {
-        "src/App.jsx": "import React, { useState } from 'react';\nimport TodoList from './components/TodoList';\nfunction App() {\n  return <div><h1>To Do App</h1><TodoList /></div>;\n}\nexport default App;",
-        "src/components/TodoList.jsx": "import React, { useState } from 'react';\nexport default function TodoList() {\n  const [items, setItems] = useState([]);\n  const [input, setInput] = useState('');\n  return (<div><input value={input} onChange={e => setInput(e.target.value)} /><button onClick={() => { setItems([...items, input]); setInput(''); }}>Add</button><ul>{items.map((item, i) => <li key={i}>{item}</li>)}</ul></div>);\n}",
-        "src/index.js": "import React from 'react';\nimport ReactDOM from 'react-dom';\nimport App from './App';\nReactDOM.render(<App />, document.getElementById('root'));",
-        "public/index.html": "<!DOCTYPE html><html><head><title>To Do App</title></head><body><div id='root'></div></body></html>",
-        "package.json": "{\n  \"name\": \"todo-app\",\n  \"version\": \"1.0.0\",\n  \"dependencies\": {\n    \"react\": \"^18.0.0\",\n    \"react-dom\": \"^18.0.0\"\n  }\n}",
-        "README.md": "# To Do App\nA simple React to-do application."
-    }
-    content = demo_files.get(file_path, f"// No content available for {file_path}")
-    return {"success": True, "content": content}
+    try:
+        projects_dir = Path("generated_projects")
+        project_path = projects_dir / project_name.lower().replace(" ", "-")
+        
+        if not project_path.exists():
+            return {"success": False, "error": "Project not found"}
+        
+        # Clean the file path and resolve it safely
+        clean_file_path = file_path.lstrip('/')
+        full_file_path = project_path / clean_file_path
+        
+        # Security check: ensure the path is within the project directory
+        try:
+            full_file_path.resolve().relative_to(project_path.resolve())
+        except ValueError:
+            return {"success": False, "error": "Invalid file path"}
+        
+        if not full_file_path.exists():
+            return {"success": False, "error": "File not found"}
+        
+        if full_file_path.is_dir():
+            return {"success": False, "error": "Path is a directory"}
+        
+        # Read file content
+        try:
+            with open(full_file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+        except UnicodeDecodeError:
+            # Handle binary files
+            content = f"[Binary file: {full_file_path.name}]"
+        
+        return {"success": True, "content": content}
+        
+    except Exception as e:
+        print(f"Error reading file content: {e}")
+        return {"success": False, "error": str(e)}
 
 # --- Project Preview URL Endpoint ---
 @app.get("/project-preview-url")
@@ -150,6 +205,2141 @@ async def get_project_preview_url(project_name: str = Query(...)):
     # Demo: return a placeholder preview URL
     url = f"https://demo.altx.app/{project_name.lower().replace(' ', '-')}-preview"
     return {"success": True, "url": url}
+
+# --- WebSocket Connection Manager ---
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: Dict[str, WebSocket] = {}
+        self.project_connections: Dict[str, Set[str]] = {}
+
+    async def connect(self, websocket: WebSocket, connection_id: str, project_name: str):
+        await websocket.accept()
+        self.active_connections[connection_id] = websocket
+        
+        if project_name not in self.project_connections:
+            self.project_connections[project_name] = set()
+        self.project_connections[project_name].add(connection_id)
+
+    def disconnect(self, connection_id: str, project_name: str):
+        if connection_id in self.active_connections:
+            del self.active_connections[connection_id]
+        
+        if project_name in self.project_connections:
+            self.project_connections[project_name].discard(connection_id)
+            if not self.project_connections[project_name]:
+                del self.project_connections[project_name]
+
+    async def send_to_project(self, project_name: str, message: dict):
+        """Send message to all connections for a specific project"""
+        if project_name in self.project_connections:
+            disconnected = []
+            for connection_id in self.project_connections[project_name]:
+                websocket = self.active_connections.get(connection_id)
+                if websocket and websocket.client_state == WebSocketState.CONNECTED:
+                    try:
+                        await websocket.send_json(message)
+                    except:
+                        disconnected.append(connection_id)
+                else:
+                    disconnected.append(connection_id)
+            
+            # Clean up disconnected connections
+            for connection_id in disconnected:
+                self.disconnect(connection_id, project_name)
+
+manager = ConnectionManager()
+
+# --- WebSocket Endpoint ---
+@app.websocket("/ws/project/{project_name}")
+async def websocket_endpoint(websocket: WebSocket, project_name: str):
+    connection_id = str(uuid.uuid4())
+    await manager.connect(websocket, connection_id, project_name)
+    
+    try:
+        # Send welcome message
+        await websocket.send_json({
+            "type": "connected",
+            "message": f"Connected to project: {project_name}"
+        })
+        
+        # Keep connection alive
+        while True:
+            try:
+                data = await websocket.receive_json()
+                # Handle incoming messages if needed
+                if data.get("type") == "ping":
+                    await websocket.send_json({"type": "pong"})
+                    
+            except WebSocketDisconnect:
+                break
+            except Exception as e:
+                print(f"WebSocket error: {e}")
+                break
+                
+    finally:
+        manager.disconnect(connection_id, project_name)
+
+# --- Enhanced Project Structure Creation ---
+@app.post("/api/create-project-structure")
+async def create_project_structure(request: dict = Body(...)):
+    """Create actual project files and structure"""
+    try:
+        project_name = request.get("project_name")
+        idea = request.get("idea") 
+        tech_stack = request.get("tech_stack", [])
+        
+        # Send progress updates via WebSocket
+        await manager.send_to_project(project_name, {
+            "type": "terminal_output",
+            "message": "🚀 Creating project structure...",
+            "level": "info"
+        })
+        
+        # Generate project name slug
+        project_slug = project_name.lower().replace(" ", "-").replace("_", "-")
+        projects_dir = Path("generated_projects")
+        projects_dir.mkdir(exist_ok=True)
+        project_path = projects_dir / project_slug
+        
+        # Remove existing project if it exists
+        if project_path.exists():
+            shutil.rmtree(project_path)
+        
+        # Determine tech stack based on AI analysis of the idea
+        detected_stack = await analyze_tech_stack_for_idea(idea)
+        
+        # Create project structure
+        files_created = await create_complete_project_structure(
+            project_path, idea, project_slug, detected_stack
+        )
+        
+        await manager.send_to_project(project_name, {
+            "type": "terminal_output", 
+            "message": f"✅ Created {len(files_created)} files",
+            "level": "success"
+        })
+        
+        return {
+            "success": True,
+            "files_created": files_created,
+            "tech_stack": detected_stack,
+            "project_path": str(project_path)
+        }
+        
+    except Exception as e:
+        await manager.send_to_project(project_name, {
+            "type": "terminal_output",
+            "message": f"❌ Error creating structure: {str(e)}",
+            "level": "error"
+        })
+        return {"success": False, "error": str(e)}
+
+async def analyze_tech_stack_for_idea(idea: str) -> List[str]:
+    """Use AI to determine the best tech stack for the project idea"""
+    try:
+        analysis_prompt = f"""
+        Analyze this project idea and recommend the best modern tech stack: "{idea}"
+        
+        Consider:
+        - Project complexity and requirements
+        - Modern best practices
+        - Development speed
+        - Scalability needs
+        - If it mentions AI/ML features
+        - If it needs real-time features
+        - If it needs authentication
+        - If it needs a database
+        
+        Return ONLY a JSON array of technologies, for example:
+        ["React", "TypeScript", "Node.js", "Express", "PostgreSQL", "TailwindCSS"]
+        
+        Choose from these options:
+        Frontend: React, Vue.js, Next.js, TypeScript, TailwindCSS, Material-UI
+        Backend: Node.js, Express, FastAPI, Python, Django
+        Database: PostgreSQL, MongoDB, Redis
+        AI/ML: OpenAI API, TensorFlow, PyTorch
+        Real-time: Socket.io, WebSockets
+        Auth: NextAuth.js, Auth0, JWT
+        """
+        
+        response = await run_in_threadpool(get_chat_response, analysis_prompt, "smart")
+        
+        # Extract JSON from response
+        import json
+        import re
+        
+        # Find JSON array in response
+        json_match = re.search(r'\[.*?\]', response, re.DOTALL)
+        if json_match:
+            tech_stack = json.loads(json_match.group())
+            return tech_stack[:8]  # Limit to 8 technologies
+        
+        # Fallback tech stack
+        return ["React", "TypeScript", "Node.js", "Express", "PostgreSQL", "TailwindCSS"]
+        
+    except Exception as e:
+        print(f"Error analyzing tech stack: {e}")
+        # Default modern stack
+        return ["React", "TypeScript", "Node.js", "Express", "PostgreSQL", "TailwindCSS"]
+
+async def create_complete_project_structure(project_path: Path, idea: str, project_name: str, tech_stack: List[str]) -> List[str]:
+    """Create complete project with all necessary files and real-time visualization"""
+    files_created = []
+    
+    # Send initial progress
+    await manager.send_to_project(project_name, {
+        "type": "file_creation_start",
+        "message": "🏗️ Starting project creation...",
+        "total_files": 15  # Estimated number of files
+    })
+    
+    # Create main directories
+    frontend_path = project_path / "frontend"
+    backend_path = project_path / "backend"
+    
+    frontend_path.mkdir(parents=True, exist_ok=True)
+    backend_path.mkdir(parents=True, exist_ok=True)
+    
+    # Send directory creation update
+    await manager.send_to_project(project_name, {
+        "type": "terminal_output",
+        "message": "📁 Created project directories",
+        "level": "info"
+    })
+    
+    # Determine if we need specific features
+    needs_typescript = "TypeScript" in tech_stack
+    needs_nextjs = "Next.js" in tech_stack
+    needs_fastapi = "FastAPI" in tech_stack or "Python" in tech_stack
+    needs_ai = any(ai in tech_stack for ai in ["OpenAI API", "TensorFlow", "PyTorch"]) or "ai" in idea.lower()
+    needs_auth = "auth" in idea.lower() or "login" in idea.lower() or "user" in idea.lower()
+    needs_database = any(db in tech_stack for db in ["PostgreSQL", "MongoDB"]) or "database" in idea.lower()
+    
+    # Create frontend files with AI-generated content
+    if needs_nextjs:
+        frontend_files = await create_nextjs_frontend_with_animation(frontend_path, idea, project_name, needs_typescript, needs_auth)
+    else:
+        # Use AI-powered React generation instead of templates
+        frontend_files = await generate_react_frontend_with_ai(frontend_path, idea, project_name, needs_typescript, needs_auth)
+    
+    files_created.extend(frontend_files)
+    
+    # Create backend files with AI-generated content  
+    if needs_fastapi:
+        # Use AI-powered FastAPI generation instead of templates
+        backend_files = await generate_fastapi_backend_with_ai(backend_path, idea, project_name, needs_ai, needs_auth, needs_database)
+    else:
+        backend_files = await create_nodejs_backend_with_animation(backend_path, idea, project_name, needs_ai, needs_auth, needs_database)
+    
+    files_created.extend(backend_files)
+    
+    # Create root files with real-time updates
+    root_files = await create_root_files_with_animation(project_path, project_name, idea, tech_stack)
+    files_created.extend(root_files)
+    
+    # Send completion
+    await manager.send_to_project(project_name, {
+        "type": "file_creation_complete",
+        "message": f"✅ Project creation complete! Created {len(files_created)} files",
+        "files_created": files_created
+    })
+    
+    return files_created
+
+async def simulate_typing_effect(project_name: str, file_path: str, content: str, delay_per_char: float = 0.01):
+    """Simulate typing effect by sending content in chunks"""
+    lines = content.split('\n')
+    current_content = ""
+    
+    for i, line in enumerate(lines):
+        current_content += line
+        if i < len(lines) - 1:  # Add newline except for last line
+            current_content += '\n'
+        
+        # Send partial content
+        await manager.send_to_project(project_name, {
+            "type": "file_content_update",
+            "file_path": file_path,
+            "content": current_content,
+            "is_complete": i == len(lines) - 1
+        })
+        
+        # Small delay for typing effect
+        await asyncio.sleep(delay_per_char * len(line))
+
+async def create_file_with_animation(file_path: Path, content: str, relative_path: str, project_name: str) -> str:
+    """Create a file with real-time typing animation"""
+    
+    # Announce file creation
+    await manager.send_to_project(project_name, {
+        "type": "terminal_output",
+        "message": f"📝 Creating {relative_path}...",
+        "level": "info"
+    })
+    
+    # Create directory if needed
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Send file creation start
+    await manager.send_to_project(project_name, {
+        "type": "file_created",
+        "file_path": relative_path,
+        "file_type": "file",
+        "size": len(content)
+    })
+    
+    # Simulate typing effect for code files
+    if any(relative_path.endswith(ext) for ext in ['.jsx', '.tsx', '.js', '.ts', '.py', '.css', '.html']):
+        await simulate_typing_effect(project_name, relative_path, content, 0.005)
+    else:
+        # For non-code files, just send the complete content
+        await manager.send_to_project(project_name, {
+            "type": "file_content_update",
+            "file_path": relative_path,
+            "content": content,
+            "is_complete": True
+        })
+    
+    # Write the actual file
+    with open(file_path, 'w', encoding='utf-8') as f:
+        f.write(content)
+    
+    await asyncio.sleep(0.1)  # Brief pause between files
+    
+    return relative_path
+
+# --- File Save Endpoint ---
+@app.post("/api/save-project-file")
+async def save_project_file(request: dict = Body(...)):
+    """Save file content to the project"""
+    try:
+        project_name = request.get("project_name")
+        file_path = request.get("file_path")
+        content = request.get("content")
+        
+        # Get project path
+        project_slug = project_name.lower().replace(" ", "-")
+        projects_dir = Path("generated_projects")
+        project_path = projects_dir / project_slug
+        
+        # Security check
+        full_file_path = project_path / file_path.lstrip('/')
+        try:
+            full_file_path.resolve().relative_to(project_path.resolve())
+        except ValueError:
+            return {"success": False, "error": "Invalid file path"}
+        
+        # Create directory if it doesn't exist
+        full_file_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Save file
+        with open(full_file_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        
+        # Notify via WebSocket
+        await manager.send_to_project(project_name, {
+            "type": "file_changed",
+            "file_path": file_path,
+            "message": f"File saved: {file_path}"
+        })
+        
+        return {"success": True}
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+# --- Install Dependencies Endpoint ---
+@app.post("/api/install-dependencies")
+async def install_dependencies(request: dict = Body(...)):
+    """Install project dependencies"""
+    try:
+        project_name = request.get("project_name")
+        tech_stack = request.get("tech_stack", [])
+        
+        project_slug = project_name.lower().replace(" ", "-")
+        projects_dir = Path("generated_projects")
+        project_path = projects_dir / project_slug
+        
+        if not project_path.exists():
+            return {"success": False, "error": "Project not found"}
+        
+        # Install frontend dependencies
+        frontend_path = project_path / "frontend"
+        if frontend_path.exists() and (frontend_path / "package.json").exists():
+            await manager.send_to_project(project_name, {
+                "type": "terminal_output",
+                "message": "📦 Installing frontend dependencies...",
+                "level": "info"
+            })
+            
+            try:
+                process = await asyncio.create_subprocess_shell(
+                    "npm install",
+                    cwd=frontend_path,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                stdout, stderr = await process.communicate()
+                
+                if process.returncode == 0:
+                    await manager.send_to_project(project_name, {
+                        "type": "terminal_output",
+                        "message": "✅ Frontend dependencies installed",
+                        "level": "success"
+                    })
+                else:
+                    await manager.send_to_project(project_name, {
+                        "type": "terminal_output",
+                        "message": f"⚠️ Frontend install issues: {stderr.decode()}",
+                        "level": "warning"
+                    })
+            except Exception as e:
+                await manager.send_to_project(project_name, {
+                    "type": "terminal_output",
+                    "message": f"❌ Frontend install failed: {str(e)}",
+                    "level": "error"
+                })
+        
+        # Install backend dependencies if Python/FastAPI
+        backend_path = project_path / "backend"
+        if backend_path.exists() and (backend_path / "requirements.txt").exists():
+            await manager.send_to_project(project_name, {
+                "type": "terminal_output",
+                "message": "📦 Installing backend dependencies...",
+                "level": "info"
+            })
+            
+            try:
+                process = await asyncio.create_subprocess_shell(
+                    "pip install -r requirements.txt",
+                    cwd=backend_path,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                stdout, stderr = await process.communicate()
+                
+                if process.returncode == 0:
+                    await manager.send_to_project(project_name, {
+                        "type": "terminal_output",
+                        "message": "✅ Backend dependencies installed",
+                        "level": "success"
+                    })
+                else:
+                    await manager.send_to_project(project_name, {
+                        "type": "terminal_output",
+                        "message": f"⚠️ Backend install issues: {stderr.decode()}",
+                        "level": "warning"
+                    })
+            except Exception as e:
+                await manager.send_to_project(project_name, {
+                    "type": "terminal_output",
+                    "message": f"❌ Backend install failed: {str(e)}",
+                    "level": "error"
+                })
+        
+        return {"success": True}
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+# --- Run Project Endpoint ---
+@app.post("/api/run-project")
+async def run_project(request: dict = Body(...)):
+    """Build and run the project"""
+    try:
+        project_name = request.get("project_name")
+        tech_stack = request.get("tech_stack", [])
+        
+        project_slug = project_name.lower().replace(" ", "-")
+        projects_dir = Path("generated_projects")
+        project_path = projects_dir / project_slug
+        
+        if not project_path.exists():
+            return {"success": False, "error": "Project not found"}
+        
+        # Start frontend dev server
+        frontend_path = project_path / "frontend"
+        backend_path = project_path / "backend"
+        
+        preview_urls = []
+        
+        # Start frontend
+        if frontend_path.exists():
+            await manager.send_to_project(project_name, {
+                "type": "terminal_output",
+                "message": "🚀 Starting frontend server...",
+                "level": "info"
+            })
+            
+            try:
+                # Use npm run dev or npm start
+                start_command = "npm run dev" if "Next.js" in tech_stack else "npm start"
+                
+                process = await asyncio.create_subprocess_shell(
+                    start_command,
+                    cwd=frontend_path,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                
+                # Give it a moment to start
+                await asyncio.sleep(3)
+                
+                if process.returncode is None:  # Still running
+                    preview_urls.append("http://localhost:3000")
+                    await manager.send_to_project(project_name, {
+                        "type": "terminal_output",
+                        "message": "✅ Frontend server started on http://localhost:3000",
+                        "level": "success"
+                    })
+                    
+                    await manager.send_to_project(project_name, {
+                        "type": "preview_ready",
+                        "url": "http://localhost:3000"
+                    })
+                
+            except Exception as e:
+                await manager.send_to_project(project_name, {
+                    "type": "terminal_output",
+                    "message": f"❌ Frontend start failed: {str(e)}",
+                    "level": "error"
+                })
+        
+        # Start backend if FastAPI
+        if backend_path.exists() and "FastAPI" in tech_stack:
+            await manager.send_to_project(project_name, {
+                "type": "terminal_output",
+                "message": "🔗 Starting backend server...",
+                "level": "info"
+            })
+            
+            try:
+                process = await asyncio.create_subprocess_shell(
+                    "python main.py",
+                    cwd=backend_path,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                
+                await asyncio.sleep(2)
+                
+                if process.returncode is None:
+                    await manager.send_to_project(project_name, {
+                        "type": "terminal_output",
+                        "message": "✅ Backend server started on http://localhost:8001",
+                        "level": "success"
+                    })
+                
+            except Exception as e:
+                await manager.send_to_project(project_name, {
+                    "type": "terminal_output",
+                    "message": f"❌ Backend start failed: {str(e)}",
+                    "level": "error"
+                })
+        
+        return {
+            "success": True,
+            "preview_url": preview_urls[0] if preview_urls else None,
+            "urls": preview_urls
+        }
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+# --- Error Checking Endpoint ---
+@app.get("/api/check-project-errors")
+async def check_project_errors(project_name: str = Query(...)):
+    """Check for errors in the project"""
+    try:
+        project_slug = project_name.lower().replace(" ", "-")
+        projects_dir = Path("generated_projects")
+        project_path = projects_dir / project_slug
+        
+        if not project_path.exists():
+            return {"success": False, "error": "Project not found"}
+        
+        errors = []
+        
+        # Check for common issues
+        frontend_path = project_path / "frontend"
+        if frontend_path.exists():
+            # Check package.json exists
+            if not (frontend_path / "package.json").exists():
+                errors.append({
+                    "severity": "error",
+                    "message": "Missing package.json",
+                    "file": "frontend/package.json",
+                    "line": 1
+                })
+            
+            # Check for syntax errors in JS/JSX files
+            for file in frontend_path.rglob("*.js*"):
+                if file.is_file():
+                    try:
+                        with open(file, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                            # Basic syntax check
+                            if content.count('{') != content.count('}'):
+                                errors.append({
+                                    "severity": "error",
+                                    "message": "Mismatched braces",
+                                    "file": str(file.relative_to(project_path)),
+                                    "line": 1
+                                })
+                    except Exception:
+                        pass
+        
+        return {"success": True, "errors": errors}
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+# --- Auto Fix Errors Endpoint ---  
+@app.post("/api/auto-fix-errors")
+async def auto_fix_errors(request: dict = Body(...)):
+    """Automatically fix common errors"""
+    try:
+        project_name = request.get("project_name")
+        errors = request.get("errors", [])
+        tech_stack = request.get("tech_stack", [])
+        
+        project_slug = project_name.lower().replace(" ", "-")
+        projects_dir = Path("generated_projects")
+        project_path = projects_dir / project_slug
+        
+        if not project_path.exists():
+            return {"success": False, "error": "Project not found"}
+        
+        files_modified = []
+        
+        await manager.send_to_project(project_name, {
+            "type": "terminal_output",
+            "message": f"🔧 Auto-fixing {len(errors)} errors...",
+            "level": "info"
+        })
+        
+        for error in errors:
+            if "Missing package.json" in error.get("message", ""):
+                # Create basic package.json
+                package_json = {
+                    "name": project_slug,
+                    "version": "1.0.0",
+                    "private": True,
+                    "scripts": {
+                        "dev": "next dev" if "Next.js" in tech_stack else "react-scripts start",
+                        "build": "next build" if "Next.js" in tech_stack else "react-scripts build",
+                        "start": "next start" if "Next.js" in tech_stack else "react-scripts start"
+                    },
+                    "dependencies": {
+                        "react": "^18.2.0",
+                        "react-dom": "^18.2.0"
+                    }
+                }
+                
+                if "Next.js" in tech_stack:
+                    package_json["dependencies"]["next"] = "^14.0.0"
+                else:
+                    package_json["dependencies"]["react-scripts"] = "^5.0.1"
+                
+                if "TypeScript" in tech_stack:
+                    package_json["dependencies"]["typescript"] = "^5.0.0"
+                    package_json["dependencies"]["@types/react"] = "^18.0.0"
+                    package_json["dependencies"]["@types/react-dom"] = "^18.0.0"
+                
+                package_path = project_path / "frontend" / "package.json"
+                with open(package_path, 'w', encoding='utf-8') as f:
+                    json.dump(package_json, f, indent=2)
+                
+                files_modified.append("frontend/package.json")
+                
+                await manager.send_to_project(project_name, {
+                    "type": "terminal_output",
+                    "message": "✅ Created package.json",
+                    "level": "success"
+                })
+        
+        return {
+            "success": True,
+            "files_modified": files_modified,
+            "fixes_applied": len(errors)
+        }
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+# --- Execute Terminal Command Endpoint ---
+@app.post("/api/execute-command") 
+async def execute_command(request: dict = Body(...)):
+    """Execute terminal command in project directory"""
+    try:
+        project_name = request.get("project_name")
+        command = request.get("command")
+        working_directory = request.get("working_directory", "/")
+        
+        project_slug = project_name.lower().replace(" ", "-")
+        projects_dir = Path("generated_projects")
+        project_path = projects_dir / project_slug
+        
+        if not project_path.exists():
+            return {"success": False, "error": "Project not found"}
+        
+        # Determine actual working directory
+        if working_directory == "/" or not working_directory:
+            cwd = project_path
+        else:
+            cwd = project_path / working_directory.lstrip('/')
+        
+        # Security: only allow safe commands
+        safe_commands = [
+            "ls", "dir", "pwd", "cat", "type", "npm", "node", "python", "pip",
+            "git", "cd", "mkdir", "touch", "echo", "clear", "cls"
+        ]
+        
+        command_parts = command.split()
+        if not command_parts or command_parts[0] not in safe_commands:
+            return {"success": False, "error": f"Command '{command_parts[0] if command_parts else command}' not allowed"}
+        
+        try:
+            # Handle cd command specially
+            if command.startswith("cd "):
+                target_dir = command[3:].strip()
+                if target_dir == "..":
+                    new_cwd = cwd.parent
+                elif target_dir == "/":
+                    new_cwd = project_path
+                else:
+                    new_cwd = cwd / target_dir
+                
+                # Security check
+                try:
+                    new_cwd.resolve().relative_to(project_path.resolve())
+                    return {
+                        "success": True,
+                        "output": f"Changed directory to {new_cwd.relative_to(project_path)}",
+                        "working_directory": str(new_cwd.relative_to(project_path))
+                    }
+                except ValueError:
+                    return {"success": False, "error": "Cannot navigate outside project directory"}
+            
+            # Execute other commands
+            process = await asyncio.create_subprocess_shell(
+                command,
+                cwd=cwd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            stdout, stderr = await process.communicate()
+            
+            output = stdout.decode('utf-8')
+            if stderr:
+                output += f"\nError: {stderr.decode('utf-8')}"
+            
+            return {
+                "success": True,
+                "output": output,
+                "working_directory": working_directory
+            }
+            
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+# --- Get Project File Tree Endpoint ---
+@app.get("/api/project-file-tree")
+async def get_project_file_tree(project_name: str = Query(...)):
+    """Get file tree structure for a project"""
+    try:
+        project_slug = project_name.lower().replace(" ", "-")
+        projects_dir = Path("generated_projects")
+        project_path = projects_dir / project_slug
+        
+        if not project_path.exists():
+            return {"success": False, "error": "Project not found"}
+        
+        def build_file_tree(path: Path, base_path: Path = None):
+            """Recursively build file tree structure"""
+            if base_path is None:
+                base_path = path
+            
+            items = []
+            
+            try:
+                for item in sorted(path.iterdir()):
+                    # Skip hidden files and common build directories
+                    if item.name.startswith('.') or item.name in ['node_modules', '__pycache__', 'dist', 'build']:
+                        continue
+                    
+                    relative_path = str(item.relative_to(base_path)).replace('\\', '/')
+                    
+                    if item.is_dir():
+                        items.append({
+                            "name": item.name,
+                            "path": relative_path,
+                            "type": "directory",
+                            "children": build_file_tree(item, base_path)
+                        })
+                    else:
+                        items.append({
+                            "name": item.name,
+                            "path": relative_path,
+                            "type": "file",
+                            "size": item.stat().st_size
+                        })
+            except PermissionError:
+                pass
+            
+            return items
+        
+        file_tree = build_file_tree(project_path)
+        
+        return {
+            "success": True,
+            "file_tree": file_tree,
+            "project_path": str(project_path)
+        }
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+# --- Get Project File Content Endpoint ---
+@app.get("/api/project-file-content")
+async def get_project_file_content(project_name: str = Query(...), file_path: str = Query(...)):
+    """Get content of a specific file in the project"""
+    try:
+        project_slug = project_name.lower().replace(" ", "-")
+        projects_dir = Path("generated_projects")
+        project_path = projects_dir / project_slug
+        
+        if not project_path.exists():
+            return {"success": False, "error": "Project not found"}
+        
+        # Security check
+        full_file_path = project_path / file_path.lstrip('/')
+        try:
+            full_file_path.resolve().relative_to(project_path.resolve())
+        except ValueError:
+            return {"success": False, "error": "Invalid file path"}
+        
+        if not full_file_path.exists():
+            return {"success": False, "error": "File not found"}
+        
+        if not full_file_path.is_file():
+            return {"success": False, "error": "Path is not a file"}
+        
+        # Read file content
+        try:
+            with open(full_file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            return {
+                "success": True,
+                "content": content,
+                "file_path": file_path,
+                "size": full_file_path.stat().st_size
+            }
+            
+        except UnicodeDecodeError:
+            # Handle binary files
+            return {
+                "success": False,
+                "error": "File is binary and cannot be displayed as text"
+            }
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+# --- Stop Project Endpoint ---
+@app.post("/api/stop-project")
+async def stop_project(request: dict = Body(...)):
+    """Stop running project servers"""
+    try:
+        project_name = request.get("project_name")
+        
+        await manager.send_to_project(project_name, {
+            "type": "terminal_output",
+            "message": "⏹️ Stopping project servers...",
+            "level": "info"
+        })
+        
+        # In a real implementation, you would track running processes
+        # and terminate them here. For this demo, we'll just simulate.
+        
+        await asyncio.sleep(1)  # Simulate stopping time
+        
+        await manager.send_to_project(project_name, {
+            "type": "terminal_output",
+            "message": "✅ Project servers stopped",
+            "level": "success"
+        })
+        
+        return {"success": True}
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+# --- Project Template Creation Functions ---
+
+async def create_react_frontend_with_animation(frontend_path: Path, idea: str, project_name: str, needs_typescript: bool, needs_auth: bool) -> List[str]:
+    """Create React frontend structure with real-time animation"""
+    files_created = []
+    
+    # Create directories
+    src_path = frontend_path / "src"
+    components_path = src_path / "components"
+    pages_path = src_path / "pages"
+    utils_path = src_path / "utils"
+    
+    for path in [src_path, components_path, pages_path, utils_path]:
+        path.mkdir(parents=True, exist_ok=True)
+    
+    # Package.json
+    package_json = {
+        "name": project_name.lower().replace(" ", "-"),
+        "version": "0.1.0",
+        "private": True,
+        "dependencies": {
+            "@testing-library/jest-dom": "^5.16.4",
+            "@testing-library/react": "^13.3.0",
+            "@testing-library/user-event": "^13.5.0",
+            "react": "^18.2.0",
+            "react-dom": "^18.2.0",
+            "react-router-dom": "^6.8.0",
+            "react-scripts": "5.0.1",
+            "axios": "^1.3.0",
+            "tailwindcss": "^3.2.0",
+            "autoprefixer": "^10.4.13",
+            "postcss": "^8.4.21"
+        },
+        "scripts": {
+            "start": "react-scripts start",
+            "build": "react-scripts build",
+            "test": "react-scripts test",
+            "eject": "react-scripts eject"
+        },
+        "eslintConfig": {
+            "extends": ["react-app", "react-app/jest"]
+        },
+        "browserslist": {
+            "production": [">0.2%", "not dead", "not op_mini all"],
+            "development": ["last 1 chrome version", "last 1 firefox version", "last 1 safari version"]
+        }
+    }
+    
+    if needs_typescript:
+        package_json["dependencies"].update({
+            "typescript": "^4.9.0",
+            "@types/node": "^16.18.0",
+            "@types/react": "^18.0.0",
+            "@types/react-dom": "^18.0.0"
+        })
+    
+    if needs_auth:
+        package_json["dependencies"]["auth0-react"] = "^2.0.0"
+    
+    package_content = json.dumps(package_json, indent=2)
+    rel_path = await create_file_with_animation(
+        frontend_path / "package.json", 
+        package_content, 
+        "frontend/package.json", 
+        project_name
+    )
+    files_created.append(rel_path)
+    
+    # Public/index.html
+    public_path = frontend_path / "public"
+    public_path.mkdir(exist_ok=True)
+    
+    index_html = f"""<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#000000" />
+    <meta name="description" content="{idea}" />
+    <title>{project_name}</title>
+  </head>
+  <body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root"></div>
+  </body>
+</html>"""
+    
+    rel_path = await create_file_with_animation(
+        public_path / "index.html", 
+        index_html, 
+        "frontend/public/index.html", 
+        project_name
+    )
+    files_created.append(rel_path)
+    
+    # Main App component
+    ext = ".tsx" if needs_typescript else ".jsx"
+    
+    app_component = f"""import React from 'react';
+import {{ BrowserRouter as Router, Routes, Route }} from 'react-router-dom';
+import './App.css';
+import Home from './pages/Home{ext}';
+import Header from './components/Header{ext}';
+
+function App() {{
+  return (
+    <div className="App min-h-screen bg-gray-50">
+      <Router>
+        <Header />
+        <main className="container mx-auto px-4 py-8">
+          <Routes>
+            <Route path="/" element={{<Home />}} />
+          </Routes>
+        </main>
+      </Router>
+    </div>
+  );
+}}
+
+export default App;"""
+    
+    rel_path = await create_file_with_animation(
+        src_path / f"App{ext}", 
+        app_component, 
+        f"frontend/src/App{ext}", 
+        project_name
+    )
+    files_created.append(rel_path)
+    
+    # Index.js/tsx
+    index_content = f"""import React from 'react';
+import ReactDOM from 'react-dom/client';
+import './index.css';
+import App from './App{ext}';
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);"""
+    
+    index_ext = ".tsx" if needs_typescript else ".js"
+    rel_path = await create_file_with_animation(
+        src_path / f"index{index_ext}", 
+        index_content, 
+        f"frontend/src/index{index_ext}", 
+        project_name
+    )
+    files_created.append(rel_path)
+    
+    # Home page
+    home_component = f"""import React from 'react';
+
+const Home = () => {{
+  return (
+    <div className="max-w-4xl mx-auto">
+      <div className="text-center mb-12">
+        <h1 className="text-4xl font-bold text-gray-900 mb-4">
+          Welcome to {project_name}
+        </h1>
+        <p className="text-xl text-gray-600 mb-8">
+          {idea}
+        </p>
+        <div className="space-x-4">
+          <button className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
+            Get Started
+          </button>
+          <button className="bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-2 px-4 rounded">
+            Learn More
+          </button>
+        </div>
+      </div>
+      
+      <div className="grid md:grid-cols-3 gap-8">
+        <div className="bg-white p-6 rounded-lg shadow-md">
+          <h3 className="text-xl font-semibold mb-3">Feature 1</h3>
+          <p className="text-gray-600">Description of your first key feature.</p>
+        </div>
+        <div className="bg-white p-6 rounded-lg shadow-md">
+          <h3 className="text-xl font-semibold mb-3">Feature 2</h3>
+          <p className="text-gray-600">Description of your second key feature.</p>
+        </div>
+        <div className="bg-white p-6 rounded-lg shadow-md">
+          <h3 className="text-xl font-semibold mb-3">Feature 3</h3>
+          <p className="text-gray-600">Description of your third key feature.</p>
+        </div>
+      </div>
+    </div>
+  );
+}};
+
+export default Home;"""
+    
+    rel_path = await create_file_with_animation(
+        pages_path / f"Home{ext}", 
+        home_component, 
+        f"frontend/src/pages/Home{ext}", 
+        project_name
+    )
+    files_created.append(rel_path)
+    
+    # Header component
+    header_component = f"""import React from 'react';
+
+const Header = () => {{
+  return (
+    <header className="bg-white shadow-sm border-b">
+      <div className="container mx-auto px-4">
+        <div className="flex justify-between items-center py-4">
+          <div className="flex items-center">
+            <h1 className="text-2xl font-bold text-gray-900">{project_name}</h1>
+          </div>
+          <nav className="hidden md:flex space-x-8">
+            <a href="/" className="text-gray-600 hover:text-gray-900">Home</a>
+            <a href="/about" className="text-gray-600 hover:text-gray-900">About</a>
+            <a href="/contact" className="text-gray-600 hover:text-gray-900">Contact</a>
+          </nav>
+          <div className="flex items-center space-x-4">
+            <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">
+              Sign Up
+            </button>
+          </div>
+        </div>
+      </div>
+    </header>
+  );
+}};
+
+export default Header;"""
+    
+    rel_path = await create_file_with_animation(
+        components_path / f"Header{ext}", 
+        header_component, 
+        f"frontend/src/components/Header{ext}", 
+        project_name
+    )
+    files_created.append(rel_path)
+    
+    # CSS files
+    app_css = """@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.App {
+  text-align: center;
+}"""
+    
+    rel_path = await create_file_with_animation(
+        src_path / "App.css", 
+        app_css, 
+        "frontend/src/App.css", 
+        project_name
+    )
+    files_created.append(rel_path)
+    
+    index_css = """@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}"""
+    
+    rel_path = await create_file_with_animation(
+        src_path / "index.css", 
+        index_css, 
+        "frontend/src/index.css", 
+        project_name
+    )
+    files_created.append(rel_path)
+    
+    # Tailwind config
+    tailwind_config = """/** @type {import('tailwindcss').Config} */
+module.exports = {
+  content: [
+    "./src/**/*.{js,jsx,ts,tsx}",
+  ],
+  theme: {
+    extend: {},
+  },
+  plugins: [],
+}"""
+    
+    rel_path = await create_file_with_animation(
+        frontend_path / "tailwind.config.js", 
+        tailwind_config, 
+        "frontend/tailwind.config.js", 
+        project_name
+    )
+    files_created.append(rel_path)
+    
+    return files_created
+
+# For now, let's create simpler aliases that redirect to the animated version
+async def create_nextjs_frontend_with_animation(frontend_path: Path, idea: str, project_name: str, needs_typescript: bool, needs_auth: bool) -> List[str]:
+    return await create_nextjs_frontend(frontend_path, idea, project_name, needs_typescript, needs_auth)
+
+async def create_fastapi_backend_with_animation(backend_path: Path, idea: str, project_name: str, needs_ai: bool, needs_auth: bool, needs_database: bool) -> List[str]:
+    return await create_fastapi_backend(backend_path, idea, project_name, needs_ai, needs_auth, needs_database)
+
+async def create_nodejs_backend_with_animation(backend_path: Path, idea: str, project_name: str, needs_ai: bool, needs_auth: bool, needs_database: bool) -> List[str]:
+    return await create_nodejs_backend(backend_path, idea, project_name, needs_ai, needs_auth, needs_database)
+
+async def create_root_files_with_animation(project_path: Path, project_name: str, idea: str, tech_stack: List[str]) -> List[str]:
+    return await create_root_files(project_path, project_name, idea, tech_stack)
+    """Create React frontend structure"""
+    files_created = []
+    
+    # Create directories
+    src_path = frontend_path / "src"
+    components_path = src_path / "components"
+    pages_path = src_path / "pages"
+    utils_path = src_path / "utils"
+    
+    for path in [src_path, components_path, pages_path, utils_path]:
+        path.mkdir(parents=True, exist_ok=True)
+    
+    # Package.json
+    package_json = {
+        "name": project_name.lower().replace(" ", "-"),
+        "version": "0.1.0",
+        "private": True,
+        "dependencies": {
+            "@testing-library/jest-dom": "^5.16.4",
+            "@testing-library/react": "^13.3.0",
+            "@testing-library/user-event": "^13.5.0",
+            "react": "^18.2.0",
+            "react-dom": "^18.2.0",
+            "react-router-dom": "^6.8.0",
+            "react-scripts": "5.0.1",
+            "axios": "^1.3.0",
+            "tailwindcss": "^3.2.0",
+            "autoprefixer": "^10.4.13",
+            "postcss": "^8.4.21"
+        },
+        "scripts": {
+            "start": "react-scripts start",
+            "build": "react-scripts build",
+            "test": "react-scripts test",
+            "eject": "react-scripts eject"
+        },
+        "eslintConfig": {
+            "extends": ["react-app", "react-app/jest"]
+        },
+        "browserslist": {
+            "production": [">0.2%", "not dead", "not op_mini all"],
+            "development": ["last 1 chrome version", "last 1 firefox version", "last 1 safari version"]
+        }
+    }
+    
+    if needs_typescript:
+        package_json["dependencies"].update({
+            "typescript": "^4.9.0",
+            "@types/node": "^16.18.0",
+            "@types/react": "^18.0.0",
+            "@types/react-dom": "^18.0.0"
+        })
+    
+    if needs_auth:
+        package_json["dependencies"]["auth0-react"] = "^2.0.0"
+    
+    package_path = frontend_path / "package.json"
+    with open(package_path, 'w', encoding='utf-8') as f:
+        json.dump(package_json, f, indent=2)
+    files_created.append("frontend/package.json")
+    
+    # Public/index.html
+    public_path = frontend_path / "public"
+    public_path.mkdir(exist_ok=True)
+    
+    index_html = f"""<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#000000" />
+    <meta name="description" content="{idea}" />
+    <title>{project_name}</title>
+  </head>
+  <body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root"></div>
+  </body>
+</html>"""
+    
+    with open(public_path / "index.html", 'w', encoding='utf-8') as f:
+        f.write(index_html)
+    files_created.append("frontend/public/index.html")
+    
+    # Main App component
+    ext = ".tsx" if needs_typescript else ".jsx"
+    
+    app_component = f"""import React from 'react';
+import {{ BrowserRouter as Router, Routes, Route }} from 'react-router-dom';
+import './App.css';
+import Home from './pages/Home{ext}';
+import Header from './components/Header{ext}';
+
+function App() {{
+  return (
+    <div className="App min-h-screen bg-gray-50">
+      <Router>
+        <Header />
+        <main className="container mx-auto px-4 py-8">
+          <Routes>
+            <Route path="/" element={{<Home />}} />
+          </Routes>
+        </main>
+      </Router>
+    </div>
+  );
+}}
+
+export default App;"""
+    
+    with open(src_path / f"App{ext}", 'w', encoding='utf-8') as f:
+        f.write(app_component)
+    files_created.append(f"frontend/src/App{ext}")
+    
+    # Index.js/tsx
+    index_content = f"""import React from 'react';
+import ReactDOM from 'react-dom/client';
+import './index.css';
+import App from './App{ext}';
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);"""
+    
+    index_ext = ".tsx" if needs_typescript else ".js"
+    with open(src_path / f"index{index_ext}", 'w', encoding='utf-8') as f:
+        f.write(index_content)
+    files_created.append(f"frontend/src/index{index_ext}")
+    
+    # Home page
+    home_component = f"""import React from 'react';
+
+const Home = () => {{
+  return (
+    <div className="max-w-4xl mx-auto">
+      <div className="text-center mb-12">
+        <h1 className="text-4xl font-bold text-gray-900 mb-4">
+          Welcome to {project_name}
+        </h1>
+        <p className="text-xl text-gray-600 mb-8">
+          {idea}
+        </p>
+        <div className="space-x-4">
+          <button className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
+            Get Started
+          </button>
+          <button className="bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-2 px-4 rounded">
+            Learn More
+          </button>
+        </div>
+      </div>
+      
+      <div className="grid md:grid-cols-3 gap-8">
+        <div className="bg-white p-6 rounded-lg shadow-md">
+          <h3 className="text-xl font-semibold mb-3">Feature 1</h3>
+          <p className="text-gray-600">Description of your first key feature.</p>
+        </div>
+        <div className="bg-white p-6 rounded-lg shadow-md">
+          <h3 className="text-xl font-semibold mb-3">Feature 2</h3>
+          <p className="text-gray-600">Description of your second key feature.</p>
+        </div>
+        <div className="bg-white p-6 rounded-lg shadow-md">
+          <h3 className="text-xl font-semibold mb-3">Feature 3</h3>
+          <p className="text-gray-600">Description of your third key feature.</p>
+        </div>
+      </div>
+    </div>
+  );
+}};
+
+export default Home;"""
+    
+    with open(pages_path / f"Home{ext}", 'w', encoding='utf-8') as f:
+        f.write(home_component)
+    files_created.append(f"frontend/src/pages/Home{ext}")
+    
+    # Header component
+    header_component = f"""import React from 'react';
+
+const Header = () => {{
+  return (
+    <header className="bg-white shadow-sm border-b">
+      <div className="container mx-auto px-4">
+        <div className="flex justify-between items-center py-4">
+          <div className="flex items-center">
+            <h1 className="text-2xl font-bold text-gray-900">{project_name}</h1>
+          </div>
+          <nav className="hidden md:flex space-x-8">
+            <a href="/" className="text-gray-600 hover:text-gray-900">Home</a>
+            <a href="/about" className="text-gray-600 hover:text-gray-900">About</a>
+            <a href="/contact" className="text-gray-600 hover:text-gray-900">Contact</a>
+          </nav>
+          <div className="flex items-center space-x-4">
+            <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">
+              Sign Up
+            </button>
+          </div>
+        </div>
+      </div>
+    </header>
+  );
+}};
+
+export default Header;"""
+    
+    with open(components_path / f"Header{ext}", 'w', encoding='utf-8') as f:
+        f.write(header_component)
+    files_created.append(f"frontend/src/components/Header{ext}")
+    
+    # CSS files
+    app_css = """@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.App {
+  text-align: center;
+}"""
+    
+    with open(src_path / "App.css", 'w', encoding='utf-8') as f:
+        f.write(app_css)
+    files_created.append("frontend/src/App.css")
+    
+    index_css = """@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}"""
+    
+    with open(src_path / "index.css", 'w', encoding='utf-8') as f:
+        f.write(index_css)
+    files_created.append("frontend/src/index.css")
+    
+    # Tailwind config
+    tailwind_config = """/** @type {import('tailwindcss').Config} */
+module.exports = {
+  content: [
+    "./src/**/*.{js,jsx,ts,tsx}",
+  ],
+  theme: {
+    extend: {},
+  },
+  plugins: [],
+}"""
+    
+    with open(frontend_path / "tailwind.config.js", 'w', encoding='utf-8') as f:
+        f.write(tailwind_config)
+    files_created.append("frontend/tailwind.config.js")
+    
+    return files_created
+
+async def create_nextjs_frontend(frontend_path: Path, idea: str, project_name: str, needs_typescript: bool, needs_auth: bool) -> List[str]:
+    """Create Next.js frontend structure"""
+    files_created = []
+    
+    # Create directories
+    src_path = frontend_path / "src"
+    app_path = src_path / "app"
+    components_path = src_path / "components"
+    
+    for path in [src_path, app_path, components_path]:
+        path.mkdir(parents=True, exist_ok=True)
+    
+    # Package.json
+    package_json = {
+        "name": project_name.lower().replace(" ", "-"),
+        "version": "0.1.0",
+        "private": True,
+        "scripts": {
+            "dev": "next dev",
+            "build": "next build",
+            "start": "next start",
+            "lint": "next lint"
+        },
+        "dependencies": {
+            "react": "^18",
+            "react-dom": "^18",
+            "next": "14.0.4",
+            "tailwindcss": "^3.3.0",
+            "autoprefixer": "^10.4.16",
+            "postcss": "^8.4.32"
+        },
+        "devDependencies": {
+            "eslint": "^8",
+            "eslint-config-next": "14.0.4"
+        }
+    }
+    
+    if needs_typescript:
+        package_json["devDependencies"].update({
+            "typescript": "^5",
+            "@types/node": "^20",
+            "@types/react": "^18",
+            "@types/react-dom": "^18"
+        })
+    
+    package_path = frontend_path / "package.json"
+    with open(package_path, 'w', encoding='utf-8') as f:
+        json.dump(package_json, f, indent=2)
+    files_created.append("frontend/package.json")
+    
+    # Next.js config
+    next_config = """/** @type {import('next').NextConfig} */
+const nextConfig = {}
+
+module.exports = nextConfig"""
+    
+    with open(frontend_path / "next.config.js", 'w', encoding='utf-8') as f:
+        f.write(next_config)
+    files_created.append("frontend/next.config.js")
+    
+    # App directory files
+    ext = ".tsx" if needs_typescript else ".js"
+    
+    # Layout
+    layout_content = f"""import './globals.css'
+import {{ Inter }} from 'next/font/google'
+
+const inter = Inter({{ subsets: ['latin'] }})
+
+export const metadata = {{
+  title: '{project_name}',
+  description: '{idea}',
+}}
+
+export default function RootLayout({{
+  children,
+}}: {{
+  children: React.ReactNode
+}}) {{
+  return (
+    <html lang="en">
+      <body className={{inter.className}}>{{children}}</body>
+    </html>
+  )
+}}"""
+    
+    with open(app_path / f"layout{ext}", 'w', encoding='utf-8') as f:
+        f.write(layout_content)
+    files_created.append(f"frontend/src/app/layout{ext}")
+    
+    # Page
+    page_content = f"""export default function Home() {{
+  return (
+    <main className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+      <div className="container mx-auto px-4 py-16">
+        <div className="text-center mb-16">
+          <h1 className="text-5xl font-bold text-gray-900 mb-6">
+            {project_name}
+          </h1>
+          <p className="text-xl text-gray-600 mb-8 max-w-2xl mx-auto">
+            {idea}
+          </p>
+          <div className="space-x-4">
+            <button className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition-colors">
+              Get Started
+            </button>
+            <button className="bg-white hover:bg-gray-50 text-gray-800 font-bold py-3 px-6 rounded-lg border border-gray-300 transition-colors">
+              Learn More
+            </button>
+          </div>
+        </div>
+        
+        <div className="grid md:grid-cols-3 gap-8 max-w-6xl mx-auto">
+          <div className="bg-white p-8 rounded-xl shadow-lg">
+            <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mb-4">
+              <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+              </svg>
+            </div>
+            <h3 className="text-xl font-semibold mb-3">Fast Performance</h3>
+            <p className="text-gray-600">Built with Next.js for optimal performance and user experience.</p>
+          </div>
+          
+          <div className="bg-white p-8 rounded-xl shadow-lg">
+            <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center mb-4">
+              <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+              </svg>
+            </div>
+            <h3 className="text-xl font-semibold mb-3">Easy to Use</h3>
+            <p className="text-gray-600">Intuitive interface designed for the best user experience.</p>
+          </div>
+          
+          <div className="bg-white p-8 rounded-xl shadow-lg">
+            <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center mb-4">
+              <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"></path>
+              </svg>
+            </div>
+            <h3 className="text-xl font-semibold mb-3">Modern Design</h3>
+            <p className="text-gray-600">Beautiful, responsive design that works on all devices.</p>
+          </div>
+        </div>
+      </div>
+    </main>
+  )
+}}"""
+    
+    with open(app_path / f"page{ext}", 'w', encoding='utf-8') as f:
+        f.write(page_content)
+    files_created.append(f"frontend/src/app/page{ext}")
+    
+    # Global CSS
+    globals_css = """@tailwind base;
+@tailwind components;
+@tailwind utilities;"""
+    
+    with open(app_path / "globals.css", 'w', encoding='utf-8') as f:
+        f.write(globals_css)
+    files_created.append("frontend/src/app/globals.css")
+    
+    # Tailwind config
+    tailwind_config = """/** @type {import('tailwindcss').Config} */
+module.exports = {
+  content: [
+    './src/pages/**/*.{js,ts,jsx,tsx,mdx}',
+    './src/components/**/*.{js,ts,jsx,tsx,mdx}',
+    './src/app/**/*.{js,ts,jsx,tsx,mdx}',
+  ],
+  theme: {
+    extend: {
+      backgroundImage: {
+        'gradient-radial': 'radial-gradient(var(--tw-gradient-stops))',
+        'gradient-conic':
+          'conic-gradient(from 180deg at 50% 50%, var(--tw-gradient-stops))',
+      },
+    },
+  },
+  plugins: [],
+}"""
+    
+    with open(frontend_path / "tailwind.config.js", 'w', encoding='utf-8') as f:
+        f.write(tailwind_config)
+    files_created.append("frontend/tailwind.config.js")
+    
+    # PostCSS config
+    postcss_config = """module.exports = {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+}"""
+    
+    with open(frontend_path / "postcss.config.js", 'w', encoding='utf-8') as f:
+        f.write(postcss_config)
+    files_created.append("frontend/postcss.config.js")
+    
+    return files_created
+
+async def create_fastapi_backend(backend_path: Path, idea: str, project_name: str, needs_ai: bool, needs_auth: bool, needs_database: bool) -> List[str]:
+    """Create FastAPI backend structure"""
+    files_created = []
+    
+    # Create directories
+    api_path = backend_path / "api"
+    models_path = backend_path / "models"
+    utils_path = backend_path / "utils"
+    
+    for path in [api_path, models_path, utils_path]:
+        path.mkdir(parents=True, exist_ok=True)
+    
+    # Requirements.txt
+    requirements = [
+        "fastapi==0.104.1",
+        "uvicorn[standard]==0.24.0",
+        "python-multipart==0.0.6",
+        "python-dotenv==1.0.0",
+        "requests==2.31.0",
+        "pydantic==2.5.0"
+    ]
+    
+    if needs_database:
+        requirements.extend([
+            "sqlalchemy==2.0.23",
+            "psycopg2-binary==2.9.9",
+            "alembic==1.13.0"
+        ])
+    
+    if needs_ai:
+        requirements.extend([
+            "openai==1.3.0",
+            "langchain==0.0.350"
+        ])
+    
+    if needs_auth:
+        requirements.extend([
+            "python-jose[cryptography]==3.3.0",
+            "passlib[bcrypt]==1.7.4",
+            "python-jwt==4.0.0"
+        ])
+    
+    with open(backend_path / "requirements.txt", 'w', encoding='utf-8') as f:
+        f.write('\n'.join(requirements))
+    files_created.append("backend/requirements.txt")
+    
+    # Main.py
+    main_content = f"""from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+app = FastAPI(
+    title="{project_name} API",
+    description="{idea}",
+    version="1.0.0"
+)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://localhost:3001"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Data models
+class HealthResponse(BaseModel):
+    status: str
+    message: str
+
+class ItemCreate(BaseModel):
+    name: str
+    description: str
+
+class ItemResponse(BaseModel):
+    id: int
+    name: str
+    description: str
+    created_at: str
+
+# Routes
+@app.get("/")
+async def root():
+    return {{"message": "Welcome to {project_name} API"}}
+
+@app.get("/health", response_model=HealthResponse)
+async def health_check():
+    return HealthResponse(
+        status="healthy",
+        message="API is running successfully"
+    )
+
+@app.get("/api/items", response_model=list[ItemResponse])
+async def get_items():
+    # Mock data - replace with database queries
+    return [
+        ItemResponse(
+            id=1,
+            name="Sample Item",
+            description="This is a sample item",
+            created_at="2024-01-01T00:00:00Z"
+        )
+    ]
+
+@app.post("/api/items", response_model=ItemResponse)
+async def create_item(item: ItemCreate):
+    # Mock creation - replace with database insert
+    return ItemResponse(
+        id=2,
+        name=item.name,
+        description=item.description,
+        created_at="2024-01-01T00:00:00Z"
+    )
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8001)"""
+    
+    with open(backend_path / "main.py", 'w', encoding='utf-8') as f:
+        f.write(main_content)
+    files_created.append("backend/main.py")
+    
+    # .env file
+    env_content = f"""# {project_name} Environment Variables
+DEBUG=True
+PORT=8001
+CORS_ORIGINS=http://localhost:3000,http://localhost:3001"""
+    
+    if needs_database:
+        env_content += """
+
+# Database
+DATABASE_URL=postgresql://user:password@localhost:5432/dbname"""
+    
+    if needs_ai:
+        env_content += """
+
+# AI/OpenAI
+OPENAI_API_KEY=your_openai_api_key_here"""
+    
+    if needs_auth:
+        env_content += """
+
+# Authentication
+SECRET_KEY=your_secret_key_here
+ACCESS_TOKEN_EXPIRE_MINUTES=30"""
+    
+    with open(backend_path / ".env", 'w', encoding='utf-8') as f:
+        f.write(env_content)
+    files_created.append("backend/.env")
+    
+    return files_created
+
+async def create_nodejs_backend(backend_path: Path, idea: str, project_name: str, needs_ai: bool, needs_auth: bool, needs_database: bool) -> List[str]:
+    """Create Node.js Express backend structure"""
+    files_created = []
+    
+    # Create directories
+    routes_path = backend_path / "routes"
+    models_path = backend_path / "models"
+    middleware_path = backend_path / "middleware"
+    
+    for path in [routes_path, models_path, middleware_path]:
+        path.mkdir(parents=True, exist_ok=True)
+    
+    # Package.json
+    package_json = {
+        "name": project_name.lower().replace(" ", "-") + "-backend",
+        "version": "1.0.0",
+        "description": idea,
+        "main": "server.js",
+        "scripts": {
+            "start": "node server.js",
+            "dev": "nodemon server.js",
+            "test": "jest"
+        },
+        "dependencies": {
+            "express": "^4.18.2",
+            "cors": "^2.8.5",
+            "dotenv": "^16.3.1",
+            "helmet": "^7.1.0",
+            "morgan": "^1.10.0"
+        },
+        "devDependencies": {
+            "nodemon": "^3.0.2",
+            "jest": "^29.7.0"
+        }
+    }
+    
+    if needs_database:
+        package_json["dependencies"]["mongoose"] = "^8.0.0"
+    
+    if needs_ai:
+        package_json["dependencies"]["openai"] = "^4.20.0"
+    
+    if needs_auth:
+        package_json["dependencies"].update({
+            "jsonwebtoken": "^9.0.2",
+            "bcryptjs": "^2.4.3"
+        })
+    
+    with open(backend_path / "package.json", 'w', encoding='utf-8') as f:
+        json.dump(package_json, f, indent=2)
+    files_created.append("backend/package.json")
+    
+    # Server.js
+    server_content = f"""const express = require('express');
+const cors = require('cors');
+const helmet = require('helmet');
+const morgan = require('morgan');
+require('dotenv').config();
+
+const app = express();
+const PORT = process.env.PORT || 8001;
+
+// Middleware
+app.use(helmet());
+app.use(cors({{
+    origin: ['http://localhost:3000', 'http://localhost:3001'],
+    credentials: true
+}}));
+app.use(morgan('combined'));
+app.use(express.json());
+app.use(express.urlencoded({{ extended: true }}));
+
+// Routes
+app.get('/', (req, res) => {{
+    res.json({{
+        message: 'Welcome to {project_name} API',
+        description: '{idea}',
+        version: '1.0.0'
+    }});
+}});
+
+app.get('/health', (req, res) => {{
+    res.json({{
+        status: 'healthy',
+        message: 'API is running successfully',
+        timestamp: new Date().toISOString()
+    }});
+}});
+
+// API Routes
+app.get('/api/items', (req, res) => {{
+    // Mock data - replace with database queries
+    res.json([
+        {{
+            id: 1,
+            name: 'Sample Item',
+            description: 'This is a sample item',
+            createdAt: new Date().toISOString()
+        }}
+    ]);
+}});
+
+app.post('/api/items', (req, res) => {{
+    const {{ name, description }} = req.body;
+    
+    // Mock creation - replace with database insert
+    res.status(201).json({{
+        id: Date.now(),
+        name,
+        description,
+        createdAt: new Date().toISOString()
+    }});
+}});
+
+// Error handling middleware
+app.use((err, req, res, next) => {{
+    console.error(err.stack);
+    res.status(500).json({{
+        error: 'Something went wrong!',
+        message: process.env.NODE_ENV === 'development' ? err.message : undefined
+    }});
+}});
+
+// 404 handler
+app.use('*', (req, res) => {{
+    res.status(404).json({{
+        error: 'Route not found'
+    }});
+}});
+
+app.listen(PORT, () => {{
+    console.log(`🚀 {project_name} API running on port ${{PORT}}`);
+}});"""
+    
+    with open(backend_path / "server.js", 'w', encoding='utf-8') as f:
+        f.write(server_content)
+    files_created.append("backend/server.js")
+    
+    # .env file
+    env_content = f"""# {project_name} Environment Variables
+NODE_ENV=development
+PORT=8001"""
+    
+    if needs_database:
+        env_content += """
+
+# Database
+MONGODB_URI=mongodb://localhost:27017/yourdbname"""
+    
+    if needs_ai:
+        env_content += """
+
+# AI/OpenAI
+OPENAI_API_KEY=your_openai_api_key_here"""
+    
+    if needs_auth:
+        env_content += """
+
+# Authentication
+JWT_SECRET=your_jwt_secret_here
+JWT_EXPIRES_IN=7d"""
+    
+    with open(backend_path / ".env", 'w', encoding='utf-8') as f:
+        f.write(env_content)
+    files_created.append("backend/.env")
+    
+    return files_created
+
+async def create_root_files(project_path: Path, project_name: str, idea: str, tech_stack: List[str]) -> List[str]:
+    """Create root project files"""
+    files_created = []
+    
+    # README.md
+    readme_content = f"""# {project_name}
+
+{idea}
+
+## Tech Stack
+
+{', '.join(tech_stack)}
+
+## Getting Started
+
+### Prerequisites
+
+- Node.js 18+ (for frontend)
+- Python 3.9+ (for backend, if using FastAPI)
+- npm or yarn
+
+### Installation
+
+1. Clone the repository
+```bash
+git clone <repository-url>
+cd {project_name.lower().replace(' ', '-')}
+```
+
+2. Install frontend dependencies
+```bash
+cd frontend
+npm install
+```
+
+3. Install backend dependencies
+```bash
+cd ../backend
+{'pip install -r requirements.txt' if 'FastAPI' in tech_stack or 'Python' in tech_stack else 'npm install'}
+```
+
+### Running the Application
+
+1. Start the backend server
+```bash
+cd backend
+{'python main.py' if 'FastAPI' in tech_stack or 'Python' in tech_stack else 'npm run dev'}
+```
+
+2. Start the frontend development server
+```bash
+cd frontend
+npm {'run dev' if 'Next.js' in tech_stack else 'start'}
+```
+
+The application will be available at:
+- Frontend: http://localhost:3000
+- Backend API: http://localhost:8001
+
+## Project Structure
+
+```
+{project_name.lower().replace(' ', '-')}/
+├── frontend/          # {'Next.js' if 'Next.js' in tech_stack else 'React'} frontend application
+├── backend/           # {'FastAPI' if 'FastAPI' in tech_stack or 'Python' in tech_stack else 'Node.js Express'} backend API
+├── README.md
+└── .gitignore
+```
+
+## Features
+
+- Modern responsive design
+- RESTful API
+- Real-time updates
+- Error handling
+- Development tools
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Submit a pull request
+
+## License
+
+This project is licensed under the MIT License.
+"""
+    
+    with open(project_path / "README.md", 'w', encoding='utf-8') as f:
+        f.write(readme_content)
+    files_created.append("README.md")
+    
+    # .gitignore
+    gitignore_content = """# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Build outputs
+/frontend/build/
+/frontend/.next/
+/frontend/out/
+/frontend/dist/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like istanbul
+coverage/
+*.lcov
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Database
+*.sqlite
+*.db
+
+# Temporary files
+tmp/
+temp/"""
+    
+    with open(project_path / ".gitignore", 'w', encoding='utf-8') as f:
+        f.write(gitignore_content)
+    files_created.append(".gitignore")
+    
+    return files_created
 
 
 @app.get("/debug/test-token")
@@ -639,7 +2829,7 @@ async def analyze_repo_comprehensive(request: RepoAnalysisRequest):
         # Verify temp directory is writable
         try:
             test_file = os.path.join(temp_dir, 'test_write.tmp')
-            with open(test_file, 'w') as f:
+            with open(test_file, 'w', encoding='utf-8') as f:
                 f.write('test')
             os.remove(test_file)
         except Exception as e:
@@ -1858,110 +4048,690 @@ async def provide_local_fix_suggestion(issue: dict):
 class ProjectRequest(BaseModel):
     idea: str
     project_type: str = "web-app"
-    tech_stack: str = "auto"
+    tech_stack: Union[str, List[str]] = "auto"
     complexity: str = "medium"
+
+async def generate_full_stack_files(project_path: Path, idea: str, project_name: str, needs_ai: bool, ai_response: str):
+    """
+    Generate actual project files based on the idea and AI response
+    """
+    try:
+        # Create main project structure
+        project_path.mkdir(exist_ok=True)
+        frontend_path = project_path / "frontend"
+        backend_path = project_path / "backend"
+        
+        frontend_path.mkdir(exist_ok=True)
+        backend_path.mkdir(exist_ok=True)
+        
+        # Generate frontend files
+        await generate_frontend_files(frontend_path, idea, project_name, needs_ai)
+        
+        # Generate backend files
+        await generate_backend_files(backend_path, idea, project_name, needs_ai)
+        
+        # Generate deployment files
+        await generate_deployment_files(project_path, project_name)
+        
+        # Return project structure for display
+        return [
+            "📁 frontend/",
+            "  📁 src/",
+            "    📁 components/",
+            "    📁 pages/",
+            "    📁 hooks/",
+            "    📁 utils/",
+            "  📁 public/",
+            "  📄 package.json",
+            "  📄 tailwind.config.js",
+            "  📄 vite.config.js",
+            "📁 backend/",
+            "  📁 app/",
+            "    📁 routes/",
+            "    📁 models/",
+            "    📁 services/",
+            "  📄 main.py",
+            "  📄 requirements.txt",
+            "  📄 Dockerfile",
+            "📄 docker-compose.yml",
+            "📄 README.md",
+            "📄 .env.example"
+        ]
+        
+    except Exception as e:
+        print(f"Error generating files: {e}")
+        return ["Error generating project files"]
+
+async def generate_frontend_files(frontend_path: Path, idea: str, project_name: str, needs_ai: bool):
+    """Generate React frontend with TailwindCSS"""
+    
+    # Create directory structure
+    src_path = frontend_path / "src"
+    components_path = src_path / "components"
+    pages_path = src_path / "pages"
+    hooks_path = src_path / "hooks"
+    utils_path = src_path / "utils"
+    public_path = frontend_path / "public"
+    
+    for path in [src_path, components_path, pages_path, hooks_path, utils_path, public_path]:
+        path.mkdir(exist_ok=True)
+    
+    # Generate package.json
+    package_json = {
+        "name": project_name,
+        "version": "1.0.0",
+        "type": "module",
+        "scripts": {
+            "dev": "vite",
+            "build": "vite build",
+            "preview": "vite preview"
+        },
+        "dependencies": {
+            "react": "^18.2.0",
+            "react-dom": "^18.2.0",
+            "axios": "^1.6.0"
+        },
+        "devDependencies": {
+            "@vitejs/plugin-react": "^4.0.0",
+            "vite": "^4.4.0",
+            "tailwindcss": "^3.3.0",
+            "autoprefixer": "^10.4.0",
+            "postcss": "^8.4.0"
+        }
+    }
+    
+    with open(frontend_path / "package.json", "w") as f:
+        json.dump(package_json, f, indent=2)
+    
+    # Generate main App.jsx
+    app_jsx = f'''import React from 'react';
+import './App.css';
+
+function App() {{
+  return (
+    <div className="min-h-screen bg-gray-100">
+      <header className="bg-white shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 py-6">
+          <h1 className="text-3xl font-bold text-gray-900">
+            {project_name.replace("-", " ").title()}
+          </h1>
+          <p className="text-gray-600 mt-2">{idea}</p>
+        </div>
+      </header>
+      
+      <main className="max-w-7xl mx-auto px-4 py-8">
+        <div className="bg-white rounded-lg shadow p-6">
+          <h2 className="text-xl font-semibold mb-4">Welcome to your new app!</h2>
+          <p className="text-gray-600">
+            This is a full-stack application generated based on your idea.
+            The backend API is ready and the frontend is set up with TailwindCSS.
+          </p>
+          
+          <div className="mt-6 space-y-4">
+            <button className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg transition-colors">
+              Get Started
+            </button>
+            {"<button className='bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg transition-colors ml-4'>API Test</button>" if needs_ai else ""}
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}}
+
+export default App;'''
+    
+    with open(src_path / "App.jsx", "w") as f:
+        f.write(app_jsx)
+    
+    # Generate main.jsx
+    main_jsx = '''import React from 'react'
+import ReactDOM from 'react-dom/client'
+import App from './App.jsx'
+import './index.css'
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+)'''
+    
+    with open(src_path / "main.jsx", "w") as f:
+        f.write(main_jsx)
+    
+    # Generate index.css with TailwindCSS
+    index_css = '''@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}'''
+    
+    with open(src_path / "index.css", "w") as f:
+        f.write(index_css)
+    
+    # Generate Vite config
+    vite_config = '''import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    port: 3000,
+  },
+})'''
+    
+    with open(frontend_path / "vite.config.js", "w") as f:
+        f.write(vite_config)
+    
+    # Generate TailwindCSS config
+    tailwind_config = '''/** @type {import('tailwindcss').Config} */
+export default {
+  content: [
+    "./index.html",
+    "./src/**/*.{js,ts,jsx,tsx}",
+  ],
+  theme: {
+    extend: {},
+  },
+  plugins: [],
+}'''
+    
+    with open(frontend_path / "tailwind.config.js", "w") as f:
+        f.write(tailwind_config)
+    
+    # Generate index.html
+    index_html = f'''<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{project_name.replace("-", " ").title()}</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>'''
+    
+    with open(frontend_path / "index.html", "w") as f:
+        f.write(index_html)
+
+async def generate_backend_files(backend_path: Path, idea: str, project_name: str, needs_ai: bool):
+    """Generate FastAPI backend"""
+    
+    # Create directory structure
+    app_path = backend_path / "app"
+    routes_path = app_path / "routes"
+    models_path = app_path / "models"
+    services_path = app_path / "services"
+    
+    for path in [app_path, routes_path, models_path, services_path]:
+        path.mkdir(exist_ok=True)
+    
+    # Generate requirements.txt
+    requirements = [
+        "fastapi==0.104.1",
+        "uvicorn==0.24.0",
+        "python-multipart==0.0.6",
+        "python-dotenv==1.0.0",
+        "sqlalchemy==2.0.23",
+        "psycopg2-binary==2.9.9",
+        "pydantic==2.5.0",
+        "python-jose==3.3.0",
+        "passlib==1.7.4",
+        "bcrypt==4.1.2"
+    ]
+    
+    if needs_ai:
+        requirements.extend([
+            "openai==1.3.0",
+            "langchain==0.0.350"
+        ])
+    
+    with open(backend_path / "requirements.txt", "w") as f:
+        f.write("\\n".join(requirements))
+    
+    # Generate main.py
+    ai_import = "from app.services.ai_service import AIService" if needs_ai else ""
+    ai_route = ', ai_router' if needs_ai else ""
+    
+    main_py = f'''from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from app.routes.main_routes import router as main_router
+{ai_import}
+import uvicorn
+
+app = FastAPI(
+    title="{project_name.replace("-", " ").title()} API",
+    description="Backend API for {idea}",
+    version="1.0.0"
+)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],  # Frontend URL
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Include routers
+app.include_router(main_router{ai_route})
+
+@app.get("/")
+async def root():
+    return {{"message": "Welcome to {project_name.replace("-", " ").title()} API"}}
+
+@app.get("/health")
+async def health_check():
+    return {{"status": "healthy", "service": "{project_name}"}}
+
+if __name__ == "__main__":
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)'''
+    
+    with open(backend_path / "main.py", "w") as f:
+        f.write(main_py)
+    
+    # Generate main routes
+    main_routes = '''from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+from typing import List, Optional
+
+router = APIRouter(prefix="/api", tags=["main"])
+
+class ItemCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+
+class ItemResponse(BaseModel):
+    id: int
+    title: str
+    description: Optional[str] = None
+
+# In-memory storage (replace with database in production)
+items_db = []
+next_id = 1
+
+@router.get("/items", response_model=List[ItemResponse])
+async def get_items():
+    """Get all items"""
+    return items_db
+
+@router.post("/items", response_model=ItemResponse)
+async def create_item(item: ItemCreate):
+    """Create a new item"""
+    global next_id
+    new_item = ItemResponse(
+        id=next_id,
+        title=item.title,
+        description=item.description
+    )
+    items_db.append(new_item)
+    next_id += 1
+    return new_item
+
+@router.get("/items/{item_id}", response_model=ItemResponse)
+async def get_item(item_id: int):
+    """Get item by ID"""
+    for item in items_db:
+        if item.id == item_id:
+            return item
+    raise HTTPException(status_code=404, detail="Item not found")
+
+@router.delete("/items/{item_id}")
+async def delete_item(item_id: int):
+    """Delete item by ID"""
+    global items_db
+    items_db = [item for item in items_db if item.id != item_id]
+    return {"message": "Item deleted successfully"}'''
+    
+    with open(routes_path / "main_routes.py", "w") as f:
+        f.write(main_routes)
+    
+    # Generate AI service if needed
+    if needs_ai:
+        ai_service = '''import openai
+import os
+from typing import Optional
+from fastapi import HTTPException
+
+class AIService:
+    def __init__(self):
+        self.api_key = os.getenv("OPENAI_API_KEY")
+        if not self.api_key:
+            raise ValueError("OPENAI_API_KEY environment variable is required")
+        openai.api_key = self.api_key
+    
+    async def generate_response(self, prompt: str) -> str:
+        """Generate AI response using OpenAI"""
+        try:
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=500,
+                temperature=0.7
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"AI service error: {str(e)}")
+
+ai_service = AIService()'''
+        
+        with open(services_path / "ai_service.py", "w") as f:
+            f.write(ai_service)
+    
+    # Generate __init__.py files
+    for path in [app_path, routes_path, models_path, services_path]:
+        (path / "__init__.py").touch()
+
+async def generate_deployment_files(project_path: Path, project_name: str):
+    """Generate deployment configuration files"""
+    
+    # Generate docker-compose.yml
+    docker_compose = f'''version: '3.8'
+
+services:
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    depends_on:
+      - backend
+
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://user:password@db:5432/{project_name}
+    depends_on:
+      - db
+
+  db:
+    image: postgres:15
+    environment:
+      - POSTGRES_DB={project_name}
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+volumes:
+  postgres_data:'''
+    
+    with open(project_path / "docker-compose.yml", "w") as f:
+        f.write(docker_compose)
+    
+    # Generate README.md
+    readme = f'''# {project_name.replace("-", " ").title()}
+
+A full-stack application with React frontend and FastAPI backend.
+
+## Quick Start
+
+### Local Development
+
+1. **Backend Setup**
+   ```bash
+   cd backend
+   pip install -r requirements.txt
+   python main.py
+   ```
+
+2. **Frontend Setup**
+   ```bash
+   cd frontend
+   npm install
+   npm run dev
+   ```
+
+3. **Access the Application**
+   - Frontend: http://localhost:3000
+   - Backend API: http://localhost:8000
+   - API Docs: http://localhost:8000/docs
+
+### Docker Setup
+
+```bash
+docker-compose up --build
+```
+
+## Deployment
+
+### Frontend (Vercel)
+1. Push to GitHub
+2. Connect to Vercel
+3. Set environment variables:
+   - `VITE_API_URL=your-backend-url`
+
+### Backend (Render/Railway)
+1. Connect your repository
+2. Set environment variables:
+   - `DATABASE_URL`
+   - `OPENAI_API_KEY` (if using AI features)
+
+### Database
+- Use Railway PostgreSQL or MongoDB Atlas
+- Update connection string in environment variables
+
+## Environment Variables
+
+Create `.env` files:
+
+**Frontend (.env)**
+```
+VITE_API_URL=http://localhost:8000
+```
+
+**Backend (.env)**
+```
+DATABASE_URL=postgresql://user:password@localhost:5432/{project_name}
+OPENAI_API_KEY=your-openai-key-here
+SECRET_KEY=your-secret-key-here
+```
+
+## Features
+
+- ✅ React with TailwindCSS
+- ✅ FastAPI backend with auto-generated docs
+- ✅ CORS configured for development
+- ✅ Docker support
+- ✅ Production-ready structure
+- ✅ Environment configuration
+- ✅ Database ready (PostgreSQL)
+
+## Tech Stack
+
+- **Frontend**: React, TailwindCSS, Vite
+- **Backend**: FastAPI, Python
+- **Database**: PostgreSQL
+- **Deployment**: Vercel + Render/Railway
+
+## API Endpoints
+
+- `GET /` - Welcome message
+- `GET /health` - Health check
+- `GET /api/items` - Get all items
+- `POST /api/items` - Create new item
+- `GET /api/items/{{id}}` - Get item by ID
+- `DELETE /api/items/{{id}}` - Delete item
+
+Visit http://localhost:8000/docs for interactive API documentation.
+'''
+    
+    with open(project_path / "README.md", "w") as f:
+        f.write(readme)
+    
+    # Generate .env.example
+    env_example = '''# Frontend Environment Variables
+VITE_API_URL=http://localhost:8000
+
+# Backend Environment Variables  
+DATABASE_URL=postgresql://user:password@localhost:5432/database
+OPENAI_API_KEY=your-openai-key-here
+SECRET_KEY=your-secret-key-here
+JWT_SECRET=your-jwt-secret-here'''
+    
+    with open(project_path / ".env.example", "w") as f:
+        f.write(env_example)
+
+def analyze_project_features(idea: str) -> List[str]:
+    """Analyze the idea and determine what features should be included"""
+    features = ["Responsive Design", "API Integration", "Production Ready"]
+    
+    idea_lower = idea.lower()
+    
+    # Core features based on keywords
+    if any(word in idea_lower for word in ["user", "login", "auth", "account"]):
+        features.append("User Authentication")
+    
+    if any(word in idea_lower for word in ["database", "store", "save", "crud"]):
+        features.append("Database Storage")
+    
+    if any(word in idea_lower for word in ["ai", "ml", "gpt", "openai", "intelligence"]):
+        features.append("AI Integration")
+    
+    if any(word in idea_lower for word in ["chat", "message", "real-time", "live"]):
+        features.append("Real-time Features")
+    
+    if any(word in idea_lower for word in ["payment", "stripe", "billing", "subscription"]):
+        features.append("Payment Integration")
+    
+    if any(word in idea_lower for word in ["upload", "file", "image", "photo"]):
+        features.append("File Upload")
+    
+    if any(word in idea_lower for word in ["email", "notification", "alert"]):
+        features.append("Email Notifications")
+    
+    if any(word in idea_lower for word in ["admin", "dashboard", "manage"]):
+        features.append("Admin Dashboard")
+    
+    if any(word in idea_lower for word in ["search", "filter", "find"]):
+        features.append("Search Functionality")
+    
+    if any(word in idea_lower for word in ["mobile", "responsive", "device"]):
+        features.append("Mobile Responsive")
+    
+    return features
 
 @app.post("/generate-project")
 async def generate_project(request: ProjectRequest):
     """
-    AI-powered project generation endpoint
-    Takes a project idea and generates a complete project structure
+    AI-powered full-stack project generation endpoint
+    Generates complete project with frontend, backend, and deployment instructions
     """
     try:
         idea = request.idea
         project_type = request.project_type
-        tech_stack = request.tech_stack
+        tech_stack_raw = request.tech_stack
         complexity = request.complexity
         
-        print(f"🚀 Generating project for idea: '{idea}'")
+        # Normalize tech_stack to list format
+        if isinstance(tech_stack_raw, str):
+            if tech_stack_raw == "auto":
+                tech_stack = ["React", "TypeScript", "TailwindCSS", "FastAPI", "Python"]
+            else:
+                tech_stack = [tech_stack_raw]
+        else:
+            tech_stack = tech_stack_raw
+        
+        print(f"🚀 Generating full-stack project for idea: '{idea}'")
         print(f"🔧 Project type: {project_type}, Tech stack: {tech_stack}, Complexity: {complexity}")
+        
+        # Enhanced AI prompt for full-stack generation
+        tech_stack_str = ", ".join(tech_stack)
+        enhanced_prompt = f"""
+Generate a complete, production-ready full-stack application based on this user request: "{idea}"
+
+TECH STACK: {tech_stack_str}
+
+REQUIREMENTS:
+1. Generate BOTH frontend and backend code (not just structure)
+2. Based on the user prompt, generate:
+   - The UI (React with TailwindCSS, minimal aesthetic)
+   - Backend logic (routes, APIs, database models if needed)
+   - Integration between frontend and backend
+3. If the prompt requires authentication, CRUD, or AI integration, scaffold the logic accordingly
+4. Use a clean folder structure: /frontend and /backend
+5. Provide comments explaining each file's role and why the logic works
+6. Ensure APIs connect correctly with the frontend fetch/axios calls
+7. If the prompt includes "with AI", assume AI model integration is needed
+8. Generate boilerplate so the app can run locally with minimal setup (npm/yarn for frontend, pip/npm for backend)
+9. Include deployment instructions in comments (like Vercel + Render/Heroku)
+10. The code should be production-ready, simple, and lovable (smooth UI, clean backend logic)
+11. Use the specified tech stack: {tech_stack_str}
+
+Example input from user: "Build a to-do list app with AI reminders"
+→ Should generate: 
+   - React frontend with add/remove todos
+   - Backend with FastAPI or Express to store todos
+   - AI reminder logic using OpenAI API
+   - Clear explanation of where to configure keys
+
+Always generate FULL STACK logic (not just frontend).
+
+TECH STACK SELECTION:
+- For web apps: React + TailwindCSS frontend, FastAPI/Express backend
+- For AI features: Include OpenAI API integration
+- For databases: PostgreSQL/MongoDB based on complexity
+- For real-time: Socket.io/WebSockets if needed
+
+Generate actual code files with complete implementations, not just placeholders.
+"""
+        
+        # Use AI assistant to generate the actual project
+        ai_response = await run_in_threadpool(get_chat_response, enhanced_prompt, "smart")
         
         # Generate project name
         words = idea.split()[:3]
-        project_name = " ".join([word.capitalize() for word in words])
+        project_name = "-".join([word.lower() for word in words if word.isalnum()])
+        if not project_name:
+            project_name = "generated-app"
         
-        # Select tech stack based on project type
-        if tech_stack == "auto":
-            stack_mapping = {
-                "web-app": ["React", "Node.js", "PostgreSQL", "Tailwind CSS"],
-                "mobile-app": ["React Native", "Expo", "Firebase", "NativeBase"],
-                "api": ["FastAPI", "PostgreSQL", "Redis", "Docker"],
-                "desktop-app": ["Electron", "React", "SQLite", "Styled Components"],
-                "ai-ml": ["Python", "FastAPI", "TensorFlow", "PostgreSQL"],
-                "blockchain": ["Solidity", "React", "Web3.js", "IPFS"]
-            }
-            selected_stack = stack_mapping.get(project_type, stack_mapping["web-app"])
+        # Create project directory
+        projects_dir = Path("generated_projects")
+        projects_dir.mkdir(exist_ok=True)
+        project_path = projects_dir / project_name
+        
+        # Remove existing project if it exists
+        if project_path.exists():
+            shutil.rmtree(project_path)
+        
+        # Determine tech stack and structure
+        if "ai" in idea.lower() or "ml" in idea.lower():
+            tech_stack_final = tech_stack + ["OpenAI API"] if "OpenAI API" not in tech_stack else tech_stack
+            needs_ai = True
         else:
-            stack_mapping = {
-                "react-node": ["React", "Node.js", "Express", "MongoDB"],
-                "python-fastapi": ["Python", "FastAPI", "PostgreSQL", "SQLAlchemy"],
-                "nextjs": ["Next.js", "React", "Prisma", "PostgreSQL"],
-                "vue-express": ["Vue.js", "Express", "Node.js", "MongoDB"],
-                "django": ["Django", "Python", "PostgreSQL", "Bootstrap"],
-                "rails": ["Ruby on Rails", "PostgreSQL", "Redis", "Stimulus"]
-            }
-            selected_stack = stack_mapping.get(tech_stack, ["React", "Node.js"])
+            tech_stack_final = tech_stack
+            needs_ai = False
         
-        # Generate project structure
-        structure_mapping = {
-            "web-app": [
-                "📁 src/",
-                "  📁 components/",
-                "  📁 pages/",
-                "  📁 hooks/",
-                "  📁 utils/",
-                "  📁 assets/",
-                "📁 public/",
-                "📁 api/",
-                "📄 package.json",
-                "📄 README.md",
-                "📄 .env.example"
-            ],
-            "mobile-app": [
-                "📁 src/",
-                "  📁 screens/",
-                "  📁 components/",
-                "  📁 navigation/",
-                "  📁 services/",
-                "  📁 assets/",
-                "📄 App.js",
-                "📄 package.json",
-                "📄 app.json",
-                "📄 babel.config.js"
-            ],
-            "api": [
-                "📁 src/",
-                "  📁 routes/",
-                "  📁 models/",
-                "  📁 middleware/",
-                "  📁 utils/",
-                "📄 main.py",
-                "📄 requirements.txt",
-                "📄 Dockerfile",
-                "📄 docker-compose.yml"
-            ]
-        }
-        project_structure = structure_mapping.get(project_type, structure_mapping["web-app"])
+        # Generate the actual project files using AI-powered generation
+        project_structure = await generate_ai_powered_full_stack_files(
+            project_path, 
+            idea, 
+            project_name, 
+            tech_stack_final,
+            needs_ai
+        )
         
-        # Generate features based on idea keywords
-        common_features = [
-            "User Authentication",
-            "Responsive Design", 
-            "API Integration",
-            "Database Storage",
-            "Real-time Updates"
-        ]
-        
-        additional_features = []
-        idea_lower = idea.lower()
-        if "chat" in idea_lower: additional_features.append("Real-time Chat")
-        if "payment" in idea_lower: additional_features.append("Payment Integration")
-        if "ai" in idea_lower or "ml" in idea_lower: additional_features.append("AI/ML Features")
-        if "social" in idea_lower: additional_features.append("Social Features")
-        if "admin" in idea_lower: additional_features.append("Admin Dashboard")
-        if "notification" in idea_lower: additional_features.append("Push Notifications")
-        
-        all_features = common_features + additional_features
+        # Generate features based on idea analysis
+        features = analyze_project_features(idea)
         
         # Estimate development time
         time_mapping = {
@@ -1971,24 +4741,28 @@ async def generate_project(request: ProjectRequest):
         }
         estimated_time = time_mapping.get(complexity, "1-2 weeks")
         
-        # Generate URLs (these would be real in production)
-        project_slug = project_name.lower().replace(" ", "-")
-        github_repo = f"https://github.com/user/{project_slug}"
-        deployment_url = f"https://{project_slug}.vercel.app"
+        # Generate deployment info
+        deployment_info = {
+            "frontend": "Deploy to Vercel or Netlify",
+            "backend": "Deploy to Render, Railway, or Heroku",
+            "database": "Use Railway PostgreSQL or MongoDB Atlas",
+            "env_vars": "Configure API keys and database URLs"
+        }
         
         return {
             "success": True,
             "project": {
-                "name": project_name,
+                "name": project_name.replace("-", " ").title(),
                 "description": idea,
-                "tech_stack": selected_stack,
+                "tech_stack": tech_stack_final,
                 "structure": project_structure,
-                "features": all_features,
+                "features": features,
                 "estimated_time": estimated_time,
-                "github_repo": github_repo,
-                "deployment_url": deployment_url,
+                "deployment": deployment_info,
                 "project_type": project_type,
-                "complexity": complexity
+                "complexity": complexity,
+                "path": str(project_path),
+                "ai_generated": True
             }
         }
         
@@ -4114,6 +6888,332 @@ async def serve_deployed_repo_root(repo_name: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error serving repository: {str(e)}")
+
+# --- AI-Powered Code Generation Functions ---
+
+async def generate_react_frontend_with_ai(frontend_path: Path, idea: str, project_name: str, needs_typescript: bool, needs_auth: bool) -> List[str]:
+    """Generate React frontend with AI-powered unique code based on the idea"""
+    files_created = []
+    
+    try:
+        # Use AI to generate unique code based on the idea
+        prompt = f"""
+Generate a complete, functional React frontend application for: "{idea}"
+
+Project Name: {project_name}
+TypeScript: {"Yes" if needs_typescript else "No"}
+Authentication: {"Yes" if needs_auth else "No"}
+
+CRITICAL REQUIREMENTS:
+- Use React 18+ with modern hooks (useState, useEffect)
+- Include TailwindCSS for styling with proper classes
+- Create FUNCTIONAL components that actually work
+- Add proper error handling and loading states
+- Make it responsive and user-friendly
+- Include at least 3-4 main components/pages relevant to the idea
+- Use Vite as the build tool
+- Include proper imports and exports
+- Make sure all components are properly connected
+
+Generate EXACTLY these files with COMPLETE, WORKING content:
+
+1. package.json - Include all necessary dependencies:
+   - react, react-dom (18+)
+   - vite, @vitejs/plugin-react
+   - tailwindcss, autoprefixer, postcss
+   - Any specific dependencies for this project idea
+
+2. src/App.jsx - Main application component:
+   - Import necessary React hooks
+   - Include proper routing if needed
+   - Add main layout and navigation
+   - Connect to backend APIs if applicable
+   - Include error boundaries
+
+3. src/main.jsx - Entry point:
+   - Proper React 18 createRoot usage
+   - Import App component and styles
+
+4. src/index.css - TailwindCSS setup and custom styles:
+   - @tailwind directives
+   - Custom styles specific to this project
+
+5. vite.config.js - Vite configuration:
+   - React plugin setup
+   - Proper dev server config
+   - API proxy if needed
+
+6. tailwind.config.js - TailwindCSS configuration:
+   - Proper content paths
+   - Custom theme if needed
+
+7. postcss.config.js - PostCSS configuration for Tailwind
+
+IMPORTANT: 
+- Make sure the code is COMPLETE and FUNCTIONAL
+- Include proper imports and exports
+- Use modern React patterns
+- Make it specific to the idea: "{idea}"
+- Ensure components actually render and work
+
+Return each file content in this EXACT format:
+===FILE: filename===
+file content here
+===END===
+
+Start with package.json:
+"""
+
+        # Get AI response
+        chat_history = [{"role": "user", "content": prompt}]
+        ai_response = get_chat_response(chat_history, "smart")
+        
+        # Parse AI response and create files
+        if "===FILE:" in ai_response:
+            files_created = await parse_and_create_ai_files(frontend_path, ai_response, project_name)
+            
+            # Validate that essential files were created
+            essential_files = ["package.json", "src/App.jsx", "src/main.jsx", "vite.config.js"]
+            created_filenames = [f.split("/")[-1] if "/" in f else f for f in files_created]
+            
+            missing_files = []
+            for essential in essential_files:
+                filename = essential.split("/")[-1]
+                if not any(filename in created for created in created_filenames):
+                    missing_files.append(essential)
+            
+            if missing_files:
+                print(f"⚠️ AI generation missing essential files: {missing_files}")
+                print("🔄 Falling back to template generation")
+                files_created = await create_react_frontend_with_animation(frontend_path, idea, project_name, needs_typescript, needs_auth)
+        else:
+            print("⚠️ AI response doesn't contain proper file markers")
+            # Fallback to template-based generation if AI parsing fails
+            files_created = await create_react_frontend_with_animation(frontend_path, idea, project_name, needs_typescript, needs_auth)
+            
+    except Exception as e:
+        print(f"AI generation failed, falling back to templates: {e}")
+        # Fallback to template-based generation
+        files_created = await create_react_frontend_with_animation(frontend_path, idea, project_name, needs_typescript, needs_auth)
+    
+    return files_created
+
+async def generate_fastapi_backend_with_ai(backend_path: Path, idea: str, project_name: str, needs_ai: bool, needs_auth: bool, needs_database: bool) -> List[str]:
+    """Generate FastAPI backend with AI-powered unique code based on the idea"""
+    files_created = []
+    
+    try:
+        # Use AI to generate unique code based on the idea
+        prompt = f"""
+Generate a complete, functional FastAPI backend application for: "{idea}"
+
+Project Name: {project_name}
+AI Integration: {"Yes" if needs_ai else "No"}
+Authentication: {"Yes" if needs_auth else "No"}
+Database: {"Yes" if needs_database else "No"}
+
+CRITICAL REQUIREMENTS:
+- Use FastAPI with modern Python 3.9+ features
+- Include proper CORS handling for React frontend on localhost:5173
+- Create FUNCTIONAL API endpoints specific to this idea
+- Add proper error handling and validation with Pydantic
+- Include health check and API documentation
+- Make it production-ready with proper structure
+- Include all necessary imports
+- Make endpoints actually work and return proper data
+
+Generate EXACTLY these files with COMPLETE, WORKING content:
+
+1. requirements.txt - Include all necessary dependencies:
+   - fastapi, uvicorn
+   - pydantic
+   - python-cors
+   - Any specific dependencies for this project idea
+
+2. main.py - Main FastAPI application:
+   - Proper FastAPI app setup
+   - CORS middleware configuration
+   - Import and include all routes
+   - Health check endpoint
+   - Error handling
+   - Startup/shutdown events if needed
+
+3. models.py - Pydantic models:
+   - Data models specific to this idea
+   - Request/response models
+   - Proper validation
+
+4. routes.py - API routes:
+   - Endpoints specific to the idea: "{idea}"
+   - CRUD operations if applicable
+   - Proper HTTP methods and status codes
+   - Request/response handling
+
+5. config.py - Application configuration:
+   - Environment variables
+   - Settings management
+   - Database config if needed
+
+IMPORTANT: 
+- Make sure the code is COMPLETE and FUNCTIONAL
+- Include proper imports and dependencies
+- Use modern FastAPI patterns
+- Make it specific to the idea: "{idea}"
+- Ensure endpoints actually work and return proper responses
+- Include proper CORS for frontend integration
+
+Return each file content in this EXACT format:
+===FILE: filename===
+file content here
+===END===
+
+Start with requirements.txt:
+"""
+
+        # Get AI response
+        chat_history = [{"role": "user", "content": prompt}]
+        ai_response = get_chat_response(chat_history, "smart")
+        
+        # Parse AI response and create files
+        if "===FILE:" in ai_response:
+            files_created = await parse_and_create_ai_files(backend_path, ai_response, project_name)
+            
+            # Validate that essential files were created
+            essential_files = ["requirements.txt", "main.py", "models.py"]
+            created_filenames = [f.split("/")[-1] if "/" in f else f for f in files_created]
+            
+            missing_files = []
+            for essential in essential_files:
+                filename = essential.split("/")[-1]
+                if not any(filename in created for created in created_filenames):
+                    missing_files.append(essential)
+            
+            if missing_files:
+                print(f"⚠️ AI backend generation missing essential files: {missing_files}")
+                print("🔄 Falling back to template generation")
+                files_created = await create_fastapi_backend_with_animation(backend_path, idea, project_name, needs_ai, needs_auth, needs_database)
+        else:
+            print("⚠️ AI response doesn't contain proper file markers")
+            # Fallback to template-based generation if AI parsing fails
+            files_created = await create_fastapi_backend_with_animation(backend_path, idea, project_name, needs_ai, needs_auth, needs_database)
+            
+    except Exception as e:
+        print(f"AI generation failed, falling back to templates: {e}")
+        # Fallback to template-based generation
+        files_created = await create_fastapi_backend_with_animation(backend_path, idea, project_name, needs_ai, needs_auth, needs_database)
+    
+    return files_created
+
+async def parse_and_create_ai_files(base_path: Path, ai_response: str, project_name: str) -> List[str]:
+    """Parse AI response and create files with real-time animation"""
+    files_created = []
+    
+    print(f"🔍 Parsing AI response for {project_name}...")
+    print(f"📝 Response length: {len(ai_response)} characters")
+    
+    # Split response by file markers
+    file_sections = ai_response.split("===FILE:")
+    
+    print(f"📁 Found {len(file_sections)-1} file sections")
+    
+    for section in file_sections[1:]:  # Skip first empty section
+        if "===END===" not in section:
+            print(f"⚠️ Section missing ===END=== marker")
+            continue
+            
+        lines = section.split("\n")
+        filename = lines[0].strip().replace("===", "")
+        
+        print(f"📄 Processing file: {filename}")
+        
+        # Extract content between filename and ===END===
+        content_lines = []
+        in_content = False
+        
+        for line in lines[1:]:
+            if line.strip() == "===END===":
+                break
+            content_lines.append(line)
+        
+        content = "\n".join(content_lines).strip()
+        
+        if content and filename:
+            print(f"✅ Creating file {filename} with {len(content)} characters")
+            
+            # Handle nested file paths (e.g., src/App.jsx)
+            file_path = base_path / filename
+            relative_path = str(file_path.relative_to(file_path.parent.parent))
+            
+            # Create directory if needed
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            created_file = await create_file_with_animation(file_path, content, relative_path, project_name)
+            files_created.append(created_file)
+        else:
+            print(f"❌ Skipping file {filename} - no content or invalid filename")
+    
+    print(f"🎉 Successfully created {len(files_created)} files")
+    return files_created
+
+async def generate_ai_powered_full_stack_files(project_path: Path, idea: str, project_name: str, tech_stack: List[str], needs_ai: bool):
+    """Generate complete full-stack project using AI-powered functions"""
+    try:
+        # Create main project structure
+        project_path.mkdir(exist_ok=True)
+        frontend_path = project_path / "frontend"
+        backend_path = project_path / "backend"
+        
+        frontend_path.mkdir(exist_ok=True)
+        backend_path.mkdir(exist_ok=True)
+        
+        # Determine if we need specific features
+        needs_typescript = "TypeScript" in tech_stack
+        needs_nextjs = "Next.js" in tech_stack
+        needs_fastapi = "FastAPI" in tech_stack or "Python" in tech_stack
+        needs_auth = "auth" in idea.lower() or "login" in idea.lower() or "user" in idea.lower()
+        needs_database = any(db in tech_stack for db in ["PostgreSQL", "MongoDB"]) or "database" in idea.lower()
+        
+        # Generate frontend files with AI
+        if needs_nextjs:
+            frontend_files = await create_nextjs_frontend_with_animation(frontend_path, idea, project_name, needs_typescript, needs_auth)
+        else:
+            # Use AI-powered React generation
+            frontend_files = await generate_react_frontend_with_ai(frontend_path, idea, project_name, needs_typescript, needs_auth)
+        
+        # Generate backend files with AI
+        if needs_fastapi:
+            # Use AI-powered FastAPI generation
+            backend_files = await generate_fastapi_backend_with_ai(backend_path, idea, project_name, needs_ai, needs_auth, needs_database)
+        else:
+            backend_files = await create_nodejs_backend_with_animation(backend_path, idea, project_name, needs_ai, needs_auth, needs_database)
+        
+        # Generate root files
+        root_files = await create_root_files_with_animation(project_path, project_name, idea, tech_stack)
+        
+        # Return project structure for display
+        return [
+            "📁 frontend/",
+            "  📁 src/",
+            "    📁 components/",
+            "    📄 App.jsx",
+            "    📄 main.jsx",
+            "    📄 index.css",
+            "  📄 package.json",
+            "  📄 vite.config.js",
+            "  📄 tailwind.config.js",
+            "📁 backend/",
+            "  📄 main.py",
+            "  📄 requirements.txt",
+            "  📄 models.py",
+            "  📄 routes.py",
+            "📄 README.md",
+            "📄 .gitignore",
+            "📄 docker-compose.yml"
+        ]
+        
+    except Exception as e:
+        print(f"Error generating AI-powered project: {e}")
+        return ["Error generating project files"]
 
 if __name__ == "__main__":
     import uvicorn

@@ -1,305 +1,660 @@
-import React, { useState, useRef, useEffect } from 'react';
-import PageWrapper from './PageWrapper';
-import usePreventZoom from './usePreventZoom';
+import React, { useState, useRef, useEffect } from "react";
+import PageWrapper from "./PageWrapper";
+import usePreventZoom from "./usePreventZoom";
+import MonacoProjectEditor from "./MonacoProjectEditor";
+import "./MonacoProjectEditor.css";
 
-// --- Sub-component: Custom Select Dropdown ---
-const CustomSelect = ({ options, value, onChange, disabled }) => {
-    const [isOpen, setIsOpen] = useState(false);
-    const wrapperRef = useRef(null);
-
-    useEffect(() => {
-        const handleClickOutside = (event) => {
-            if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
-                setIsOpen(false);
-            }
-        };
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, []);
-
-    const handleSelect = (optionValue) => {
-        onChange(optionValue);
-        setIsOpen(false);
-    };
-
-    const selectedOption = options.find(opt => opt.value === value);
-
-    return (
-        <div className="custom-select-wrapper" ref={wrapperRef}>
-            <button className={`select-trigger ${isOpen ? 'open' : ''}`} onClick={() => setIsOpen(!isOpen)} disabled={disabled}>
-                <span>{selectedOption?.label || 'Select...'}</span>
-                <svg className={`chevron ${isOpen ? 'open' : ''}`} width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M6 9L12 15L18 9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
-            </button>
-            {isOpen && (
-                <div className="select-options">
-                    {options.map(option => (
-                        <div key={option.value} className="select-option" onClick={() => handleSelect(option.value)}>
-                            <strong>{option.label}</strong>
-                            {option.description && <span className="option-description">{option.description}</span>}
-                        </div>
-                    ))}
-                </div>
-            )}
-        </div>
-    );
-};
-
-
-// --- Main Page Component ---
 const ProjectBuilder = () => {
-    usePreventZoom();
-    const [projectIdea, setProjectIdea] = useState('');
-    const [isBuilding, setIsBuilding] = useState(false);
-    const [buildProgress, setBuildProgress] = useState([]);
-    const [generatedProject, setGeneratedProject] = useState(null);
-    const [techStack, setTechStack] = useState('auto');
-    const [projectType, setProjectType] = useState('web-app');
-    const [complexity, setComplexity] = useState('medium');
-    const [fileTree, setFileTree] = useState([]);
-    const [selectedFile, setSelectedFile] = useState(null);
-    const [fileContent, setFileContent] = useState('');
-    const textareaRef = useRef(null);
+  usePreventZoom();
+  const [projectIdea, setProjectIdea] = useState("");
+  const [isBuilding, setIsBuilding] = useState(false);
+  const [buildProgress, setBuildProgress] = useState([]);
+  const [generatedProject, setGeneratedProject] = useState(null);
+  const [showMonacoEditor, setShowMonacoEditor] = useState(false);
+  const [fileTree, setFileTree] = useState([]);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [fileContent, setFileContent] = useState("");
+  const [isRecording, setIsRecording] = useState(false);
+  const [selectedImages, setSelectedImages] = useState([]);
+  const textareaRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
 
-    useEffect(() => {
-        if (textareaRef.current) {
-            textareaRef.current.style.height = 'auto';
-            textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
-        }
-    }, [projectIdea]);
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+    }
+  }, [projectIdea]);
 
-    const buildProject = async () => {
-        if (!projectIdea.trim()) return;
-        setIsBuilding(true);
-        setBuildProgress([]);
-        setGeneratedProject(null);
+  const handleVoiceRecording = async () => {
+    if (!isRecording) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mediaRecorder = new MediaRecorder(stream);
+        mediaRecorderRef.current = mediaRecorder;
         
-        const steps = [
-            '[INFO] Analyzing project requirements...',
-            '[INFO] Selecting optimal tech stack...',
-            '[INFO] Creating project structure...',
-            '[INFO] Generating core components...',
-            '[INFO] Configuring build tools...',
-            '[INFO] Installing dependencies...',
-        ];
-        let currentProgress = ['[INIT] Starting project generation...'];
-        setBuildProgress(currentProgress);
+        const audioChunks = [];
+        mediaRecorder.addEventListener("dataavailable", (event) => {
+          audioChunks.push(event.data);
+        });
+        
+        mediaRecorder.addEventListener("stop", async () => {
+          const audioBlob = new Blob(audioChunks, { type: "audio/wav" });
+          // Convert speech to text (would need speech recognition API)
+          // For demo purposes, append "[Voice Input]" to the text
+          setProjectIdea(prev => prev + (prev ? " " : "") + "[Voice Input - Speech recognition would convert this to text]");
+          stream.getTracks().forEach(track => track.stop());
+        });
+        
+        mediaRecorder.start();
+        setIsRecording(true);
+      } catch (error) {
+        console.error("Error accessing microphone:", error);
+        alert("Unable to access microphone. Please ensure microphone permissions are granted.");
+      }
+    } else {
+      if (mediaRecorderRef.current) {
+        mediaRecorderRef.current.stop();
+        setIsRecording(false);
+      }
+    }
+  };
 
-        for (const step of steps) {
-            await new Promise(res => setTimeout(res, 800 + Math.random() * 400));
-            currentProgress = [...currentProgress, step];
-            setBuildProgress(currentProgress);
-        }
-
-        try {
-            const response = await fetch('http://localhost:8000/generate-project', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ idea: projectIdea, project_type: projectType, tech_stack: techStack, complexity }),
-            });
-            const data = await response.json();
-            if (!data.success) throw new Error(data.error || 'Project generation failed');
-            
-            setGeneratedProject(data.project);
-            setBuildProgress(prev => [...prev, '[OK] Project generation complete!']);
-
-            const treeRes = await fetch(`http://localhost:8000/project-file-tree?project_name=${encodeURIComponent(data.project.name)}`);
-            const treeData = await treeRes.json();
-            if (treeData.success) setFileTree(treeData.tree || []);
-
-        } catch (error) {
-            setBuildProgress(prev => [...prev, `[ERROR] ${error.message}`]);
-        } finally {
-            setIsBuilding(false);
-        }
-    };
-
-    const resetBuilder = () => {
-        setProjectIdea('');
-        setBuildProgress([]);
-        setGeneratedProject(null);
-        setFileTree([]);
-        setSelectedFile(null);
-        setFileContent('');
-        setIsBuilding(false);
-    };
-
-    const handleFileClick = async (file) => {
-        if (file.type === 'dir') return;
-        setSelectedFile(file.path);
-        setFileContent('Loading file content...');
-        try {
-            const res = await fetch(`http://localhost:8000/project-file-content?project_name=${encodeURIComponent(generatedProject.name)}&file_path=${encodeURIComponent(file.path)}`);
-            const data = await res.json();
-            setFileContent(data.content || 'Error: Could not load file content.');
-        } catch (error) {
-            setFileContent('Error: Could not connect to the server.');
-        }
-    };
-
-    const projectTypeOptions = [
-        { value: "web-app", label: "Web Application", description: "Interactive sites and dashboards." },
-        { value: "api", label: "API Service", description: "Backend for mobile or web clients." },
-        { value: "mobile-app", label: "Mobile App", description: "iOS & Android applications." },
-    ];
-    const techStackOptions = [
-        { value: "auto", label: "Auto-select", description: "Let the AI choose the best stack." },
-        { value: "react-node", label: "React + Node.js", description: "Popular for modern web apps." },
-        { value: "python-fastapi", label: "Python + FastAPI", description: "Ideal for data-intensive APIs." },
-    ];
-    const complexityOptions = [
-        { value: "simple", label: "Simple", description: "A minimal viable product (MVP)." },
-        { value: "medium", label: "Medium", description: "A well-featured standard application." },
-        { value: "complex", label: "Complex", description: "Enterprise-grade with scaling." },
-    ];
+  const handleImageUpload = (event) => {
+    const files = Array.from(event.target.files);
+    const imageFiles = files.filter(file => file.type.startsWith('image/'));
     
-    return (
-        <PageWrapper>
-            <style>{`
-                :root {
-                    --bg-black: #000000; --card-bg: rgba(10, 10, 10, 0.5); --card-border: rgba(255, 255, 255, 0.1);
-                    --card-border-hover: rgba(255, 255, 255, 0.3); --text-primary: #f5f5f5; --text-secondary: #bbbbbb;
-                }
-                .project-builder-page { background: transparent; color: var(--text-primary); min-height: 100vh; font-family: sans-serif; }
-                .layout-container { max-width: 1200px; margin: 0 auto; padding: 0 2rem 4rem 2rem; }
-                
-                .hero-section { text-align: center; padding: 4rem 1rem 3rem 1rem; }
-                .hero-title { font-size: 3.5rem; font-weight: 700; margin: 0; letter-spacing: -2px; color: var(--text-primary); }
-                .hero-subtitle { color: var(--text-secondary); margin: 1rem auto 0 auto; font-size: 1.1rem; max-width: 650px; line-height: 1.6; }
+    setSelectedImages(prev => [...prev, ...imageFiles]);
+    
+    // For demo purposes, add image descriptions to the text
+    const imageDescriptions = imageFiles.map(file => `[Image: ${file.name}]`).join(" ");
+    setProjectIdea(prev => prev + (prev ? " " : "") + imageDescriptions);
+  };
 
-                .card { width: 100%; box-sizing: border-box; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 1rem; padding: 2rem; margin-bottom: 2rem; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); transition: all 0.3s ease; }
-                .card:hover { border-color: var(--card-border-hover); box-shadow: 0 0 25px rgba(255, 255, 255, 0.08); }
-                .card h3 { font-size: 1rem; font-weight: 500; color: var(--text-secondary); margin: 0 0 1.5rem 0; text-transform: uppercase; letter-spacing: 1px; }
+  const removeImage = (index) => {
+    setSelectedImages(prev => prev.filter((_, i) => i !== index));
+  };
 
-                .idea-input { width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.2); border: 1px solid var(--card-border); color: var(--text-primary); border-radius: 0.75rem; padding: 1rem; font-size: 1.1rem; line-height: 1.6; resize: none; min-height: 80px; }
-                .idea-input:focus { border-color: var(--text-primary); outline: none; }
-                
-                .options-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.5rem; margin: 1.5rem 0; }
-                .form-label { display: block; font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 0.5rem; }
-                
-                .btn { width: 100%; background: var(--text-primary); border: 1px solid var(--text-primary); color: var(--bg-black); padding: 0.75rem; border-radius: 0.5rem; font-weight: 600; cursor: pointer; transition: all 0.3s; display: flex; align-items: center; justify-content: center; gap: 0.5rem; }
-                .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-                .btn:hover:not(:disabled) { box-shadow: 0 0 20px rgba(255, 255, 255, 0.2); transform: translateY(-2px); }
-                .btn-secondary { background: transparent; color: var(--text-secondary); border: 1px solid var(--card-border); }
-                .btn-secondary:hover:not(:disabled) { border-color: var(--text-primary); color: var(--text-primary); }
-                
-                .terminal { background: #000; border: 1px solid var(--card-border); border-radius: 0.5rem; padding: 1.5rem; margin-top: 1.5rem; height: 250px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 0.9rem; }
-                .terminal-line { line-height: 1.6; color: var(--text-secondary); }
-                .terminal-line .log-prefix { display: inline-block; margin-right: 0.75rem; color: var(--text-primary); font-weight: 600; }
-                
-                .results-grid { display: grid; grid-template-columns: 300px 1fr; gap: 2rem; }
-                @media (max-width: 1024px) { .results-grid { grid-template-columns: 1fr; } }
-                
-                .file-tree { max-height: 600px; overflow-y: auto; }
-                .file-item { padding: 0.4rem 0.5rem; cursor: pointer; border-radius: 0.25rem; font-size: 0.9rem; word-break: break-all; }
-                .file-item:hover { background: rgba(255,255,255,0.1); }
-                .file-item.selected { background: rgba(255,255,255,0.15); color: var(--text-primary); font-weight: 500; }
-                
-                .code-editor { background: #000; border: 1px solid var(--card-border); border-radius: 0.5rem; padding: 1.5rem; height: 600px; overflow: auto; font-family: 'Courier New', monospace; font-size: 0.9rem; white-space: pre-wrap; }
-                
-                .tech-stack { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-                .tech-item { background: rgba(255,255,255,0.1); color: var(--text-secondary); padding: 0.2rem 0.6rem; border-radius: 1rem; font-size: 0.75rem; font-weight: 600; }
-                
-                /* Custom Select Styles */
-                .custom-select-wrapper { position: relative; width: 100%; }
-                .select-trigger { width: 100%; box-sizing: border-box; display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.2); border: 1px solid var(--card-border); color: var(--text-primary); border-radius: 0.5rem; padding: 0.75rem 1rem; font-size: 1rem; text-align: left; cursor: pointer; transition: border-color 0.2s; }
-                .select-trigger.open, .select-trigger:hover { border-color: var(--card-border-hover); }
-                .chevron { transition: transform 0.2s ease; color: var(--text-secondary); } .chevron.open { transform: rotate(180deg); }
-                .select-options { position: absolute; top: calc(100% + 8px); left: 0; right: 0; background: var(--card-bg); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid var(--card-border-hover); border-radius: 0.75rem; z-index: 10; max-height: 220px; overflow-y: auto; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2); animation: dropdown-fade-in 0.2s ease-out; }
-                .select-option { padding: 1rem; cursor: pointer; } .select-option:hover { background: rgba(255, 255, 255, 0.08); }
-                .select-option:not(:last-child) { border-bottom: 1px solid var(--card-border); }
-                .select-option strong { color: var(--text-primary); }
-                .option-description { display: block; font-size: 0.8rem; color: var(--text-primary); opacity: 0.7; margin-top: 0.25rem; }
-                @keyframes dropdown-fade-in { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
-            `}</style>
+  const buildProject = async () => {
+    if (!projectIdea.trim()) return;
+    setIsBuilding(true);
+    setBuildProgress([]);
+    setGeneratedProject(null);
+
+    const steps = [
+      "[INFO] Analyzing project requirements...",
+      "[INFO] Generating full-stack architecture...",
+      "[INFO] Creating React frontend with TailwindCSS...",
+      "[INFO] Setting up FastAPI backend...",
+      "[INFO] Configuring database models...",
+      "[INFO] Implementing API endpoints...",
+      "[INFO] Adding authentication logic...",
+      "[INFO] Setting up deployment configurations...",
+      "[INFO] Generating production-ready code...",
+    ];
+    let currentProgress = ["[INIT] Starting full-stack project generation..."];
+    setBuildProgress(currentProgress);
+
+    for (const step of steps) {
+      await new Promise((res) => setTimeout(res, 800 + Math.random() * 400));
+      currentProgress = [...currentProgress, step];
+      setBuildProgress(currentProgress);
+    }
+
+    try {
+      // Prepare the request payload
+      const payload = {
+        idea: projectIdea,
+        project_type: "web-app",
+        tech_stack: ["React", "TypeScript", "TailwindCSS", "FastAPI", "Python"],
+        complexity: "medium"
+      };
+
+      // Add image context if images are selected
+      if (selectedImages.length > 0) {
+        payload.context = `Project includes ${selectedImages.length} reference image(s): ${selectedImages.map(img => img.name).join(", ")}`;
+      }
+
+      const response = await fetch("http://localhost:8000/generate-project", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json();
+      if (!data.success) throw new Error(data.error || "Project generation failed");
+
+      setGeneratedProject(data.project);
+      setBuildProgress((prev) => [...prev, "[OK] Full-stack project generation complete!"]);
+      setBuildProgress((prev) => [...prev, "[INFO] Frontend: React + TailwindCSS ready"]);
+      setBuildProgress((prev) => [...prev, "[INFO] Backend: FastAPI + PostgreSQL configured"]);
+      setBuildProgress((prev) => [...prev, "[INFO] Deployment: Ready for Vercel + Render"]);
+      setBuildProgress((prev) => [...prev, "[INFO] Opening Monaco Editor..."]);
+
+      // Auto-open Monaco Editor
+      setTimeout(() => {
+        setShowMonacoEditor(true);
+      }, 1000);
+
+      const treeRes = await fetch(
+        `http://localhost:8000/project-file-tree?project_name=${encodeURIComponent(
+          data.project.name
+        )}`
+      );
+      const treeData = await treeRes.json();
+      if (treeData.success) setFileTree(treeData.tree || []);
+    } catch (error) {
+      setBuildProgress((prev) => [...prev, `[ERROR] ${error.message}`]);
+    } finally {
+      setIsBuilding(false);
+    }
+  };
+
+  const resetBuilder = () => {
+    setProjectIdea("");
+    setBuildProgress([]);
+    setGeneratedProject(null);
+    setFileTree([]);
+    setSelectedFile(null);
+    setFileContent("");
+    setIsBuilding(false);
+    setShowMonacoEditor(false);
+    setSelectedImages([]);
+  };
+
+  const handleFileClick = async (file) => {
+    if (file.type === "dir") return;
+    setSelectedFile(file.path);
+    setFileContent("Loading file content...");
+    try {
+      const res = await fetch(
+        `http://localhost:8000/project-file-content?project_name=${encodeURIComponent(
+          generatedProject.name
+        )}&file_path=${encodeURIComponent(file.path)}`
+      );
+      const data = await res.json();
+      setFileContent(data.content || "Error: Could not load file content.");
+    } catch (error) {
+      setFileContent("Error: Could not connect to the server.");
+    }
+  };
+
+  return (
+    <PageWrapper>
+      <style>{`
+        :root {
+          --bg-black: #0a0a0a;
+          --card-bg: rgba(255, 255, 255, 0.04);
+          --card-border: rgba(255, 255, 255, 0.08);
+          --text-primary: #ffffff;
+          --text-secondary: #a1a1a1;
+          --accent: #4ade80;
+        }
+        .project-builder-page {
+          background: var(--bg-black);
+          color: var(--text-primary);
+          min-height: 100vh;
+          font-family: "Inter", sans-serif;
+        }
+        .layout-container {
+          max-width: 900px;
+          margin: 0 auto;
+          padding: 4rem 2rem;
+        }
+        .hero-section { text-align: center; margin-bottom: 4rem; }
+        .hero-title { font-size: 3rem; font-weight: 700; margin: 0; }
+                .hero-subtitle {
+          font-size: 1.2rem;
+          color: var(--text-secondary);
+          margin-bottom: 2rem;
+          line-height: 1.6;
+        }
+
+        .features-info {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+          gap: 1rem;
+          margin-bottom: 2rem;
+          padding: 1.5rem;
+          background: rgba(255, 255, 255, 0.05);
+          border-radius: 1rem;
+          border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .feature-item {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+          font-size: 0.95rem;
+          color: var(--text-primary);
+        }
+
+        .feature-icon {
+          font-size: 1.2rem;
+          opacity: 0.8;
+        }
+
+        .main-input-card {
+          background: var(--card-bg);
+          border: 1px solid var(--card-border);
+          border-radius: 1.5rem;
+          padding: 0;
+          margin-bottom: 2rem;
+          box-shadow: 0 8px 30px rgba(0,0,0,0.2);
+          transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+          overflow: hidden;
+        }
+        .main-input-card:hover {
+          transform: translateY(-5px);
+          box-shadow: 0 8px 32px 0 rgba(255, 255, 255, 0.1);
+          border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .main-input-card:focus-within {
+          outline: none;
+          border: 1px solid rgba(255, 255, 255, 0.3);
+          box-shadow: 0 8px 32px 0 rgba(255, 255, 255, 0.15);
+        }
+
+        .card {
+          background: var(--card-bg);
+          border: 1px solid var(--card-border);
+          border-radius: 1rem;
+          padding: 2rem;
+          margin-bottom: 2rem;
+          box-shadow: 0 8px 30px rgba(0,0,0,0.2);
+          transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+        }
+        .card:hover {
+          transform: translateY(-5px);
+          box-shadow: 0 8px 32px 0 rgba(255, 255, 255, 0.1);
+          border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .card:focus {
+          outline: none;
+          border: 1px solid rgba(255, 255, 255, 0.3);
+          box-shadow: 0 8px 32px 0 rgba(255, 255, 255, 0.15);
+        }
+
+        .idea-input {
+          width: 100%;
+          background: transparent;
+          border: none;
+          color: var(--text-primary);
+          font-size: 1.1rem;
+          padding: 1.5rem 2rem;
+          resize: none;
+          min-height: 120px;
+          line-height: 1.6;
+        }
+        .idea-input:focus { outline: none; }
+        .idea-input::placeholder {
+          color: var(--text-secondary);
+          opacity: 0.7;
+        }
+
+        .btn {
+          margin-top: 2rem;
+          background: #ffffff;
+          border: none;
+          color: #000000;
+          padding: 0.9rem 2rem;
+          border-radius: 999px;
+          font-weight: 600;
+          cursor: pointer;
+          font-size: 1rem;
+          transition: all 0.3s;
+        }
+        .btn:hover:not(:disabled) { opacity: 0.9; transform: translateY(-2px); }
+        .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+        .terminal {
+          margin-top: 2rem;
+          background: #111;
+          border-radius: 0.75rem;
+          padding: 1.25rem;
+          font-family: "JetBrains Mono", monospace;
+          font-size: 0.9rem;
+          max-height: 250px;
+          overflow-y: auto;
+        }
+        .terminal-line { margin-bottom: 0.5rem; color: var(--text-secondary); }
+        .terminal-line .log-prefix { color: var(--accent); margin-right: 0.5rem; }
+
+        .results-grid {
+          display: grid;
+          grid-template-columns: 280px 1fr;
+          gap: 1.5rem;
+        }
+        @media (max-width: 900px) { .results-grid { grid-template-columns: 1fr; } }
+
+        .file-tree { max-height: 600px; overflow-y: auto; }
+        .file-item { padding: 0.4rem; cursor: pointer; border-radius: 0.25rem; }
+        .file-item:hover { background: rgba(255,255,255,0.08); }
+        .file-item.selected { background: rgba(74, 222, 128, 0.15); color: var(--accent); }
+
+        .code-editor {
+          background: #111;
+          border-radius: 0.75rem;
+          padding: 1rem;
+          height: 600px;
+          overflow: auto;
+          font-family: "JetBrains Mono", monospace;
+          font-size: 0.9rem;
+          white-space: pre-wrap;
+        }
+
+        .tech-stack {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.5rem;
+          margin-top: 1rem;
+        }
+        .tech-item {
+          background: rgba(74, 222, 128, 0.15);
+          color: var(--accent);
+          padding: 0.25rem 0.75rem;
+          border-radius: 999px;
+          font-size: 0.8rem;
+          font-weight: 600;
+        }
+
+        .input-container {
+          display: flex;
+          align-items: flex-end;
+          background: transparent;
+          border-top: 1px solid var(--card-border);
+          padding: 1rem 1.5rem;
+          gap: 0.75rem;
+        }
+        
+        .input-wrapper {
+          flex: 1;
+        }
+        
+        .input-controls {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+        }
+
+        .media-btn {
+          background: rgba(255, 255, 255, 0.08);
+          border: 1px solid rgba(255, 255, 255, 0.15);
+          color: var(--text-secondary);
+          padding: 0.75rem;
+          border-radius: 0.75rem;
+          cursor: pointer;
+          font-size: 1.1rem;
+          transition: all 0.2s ease;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 44px;
+          height: 44px;
+          white-space: nowrap;
+        }
+        .media-btn:hover { 
+          background: rgba(255, 255, 255, 0.12); 
+          color: var(--text-primary);
+          transform: translateY(-1px);
+        }
+        .media-btn:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+          transform: none;
+        }
+        .media-btn.recording { 
+          background: rgba(220, 38, 38, 0.15); 
+          border-color: rgba(220, 38, 38, 0.3);
+          color: #dc2626; 
+          border-color: #dc2626;
+          animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+          0% { opacity: 1; }
+          50% { opacity: 0.7; }
+          100% { opacity: 1; }
+        }
+
+        @media (max-width: 768px) {
+          .input-container {
+            flex-direction: column;
+            align-items: stretch;
+            gap: 1rem;
+          }
+          
+          .input-controls {
+            justify-content: center;
+          }
+          
+          .media-btn {
+            font-size: 0.9rem;
+            padding: 0.5rem 1rem;
+          }
+        }
+
+        .image-preview {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.5rem;
+          margin-top: 1rem;
+        }
+        .image-item {
+          position: relative;
+          background: rgba(255, 255, 255, 0.1);
+          padding: 0.5rem;
+          border-radius: 0.5rem;
+          font-size: 0.85rem;
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+        }
+        .remove-image {
+          background: #dc2626;
+          border: none;
+          color: white;
+          border-radius: 50%;
+          width: 20px;
+          height: 20px;
+          cursor: pointer;
+          font-size: 12px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .hidden { display: none; }
+      `}</style>
+
+      <div className="project-builder-page">
+        <div className="layout-container">
+          <div className="hero-section">
+            <h1 className="hero-title">AI Project Builder</h1>
+            <p className="hero-subtitle">
+              Generate complete full-stack applications with React, FastAPI, and deployment-ready code.
+            </p>
             
-            <div className="project-builder-page">
-                <div className="layout-container">
-                    <div className="hero-section">
-                        <h1 className="hero-title">AI Project Builder</h1>
-                        <p className="hero-subtitle">Describe the application you want to build. Our AI will generate a complete project structure, code, dependencies, and deployment configuration.</p>
-                    </div>
-
-                    {!generatedProject ? (
-                        <div className="card">
-                            <textarea
-                                ref={textareaRef}
-                                value={projectIdea}
-                                onChange={(e) => setProjectIdea(e.target.value)}
-                                placeholder="e.g., A minimalist blog built with Next.js and Tailwind CSS, deployed on Vercel..."
-                                className="idea-input"
-                                disabled={isBuilding}
-                            />
-                            <div className="options-grid">
-                                <div className="option-group">
-                                    <label className="form-label">Project Type</label>
-                                    <CustomSelect options={projectTypeOptions} value={projectType} onChange={setProjectType} disabled={isBuilding} />
-                                </div>
-                                <div className="option-group">
-                                    <label className="form-label">Tech Stack</label>
-                                    <CustomSelect options={techStackOptions} value={techStack} onChange={setTechStack} disabled={isBuilding} />
-                                </div>
-                                <div className="option-group">
-                                    <label className="form-label">Complexity</label>
-                                    <CustomSelect options={complexityOptions} value={complexity} onChange={setComplexity} disabled={isBuilding} />
-                                </div>
-                            </div>
-                            <button onClick={buildProject} disabled={isBuilding || !projectIdea.trim()} className="btn">
-                                {isBuilding ? 'Building Project...' : 'Build with AI'}
-                            </button>
-                            {buildProgress.length > 0 && (
-                                <div className="terminal">
-                                    {buildProgress.map((log, index) => (
-                                        <div key={index} className="terminal-line">
-                                            <span className="log-prefix">[{log.match(/^\[(.*?)\]/)?.[1] || 'INFO'}]</span>
-                                            {log.replace(/^\[.*?\]\s/, '')}
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                    ) : (
-                        <div className="card">
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
-                                <div>
-                                    <h2 style={{ margin: '0 0 0.5rem 0', color: 'var(--text-primary)', fontSize: '1.8rem' }}>{generatedProject.name}</h2>
-                                    <p style={{ margin: 0, color: 'var(--text-secondary)' }}>{generatedProject.description}</p>
-                                </div>
-                                <button onClick={resetBuilder} className="btn btn-secondary" style={{width: 'auto'}}>Build Another Project</button>
-                            </div>
-                            
-                            <div className="results-grid">
-                                <div className="file-tree-container">
-                                    <h3>File Structure</h3>
-                                    <div className="file-tree card" style={{padding: '1rem'}}>
-                                        {fileTree.map((file, idx) => (
-                                            <div key={idx} className={`file-item ${selectedFile === file.path ? 'selected' : ''}`} onClick={() => handleFileClick(file)}>
-                                                {file.path}
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                                <div className="code-viewer-container">
-                                    <h3>Code Viewer</h3>
-                                    <div className="code-editor">
-                                        {selectedFile ? fileContent : "Select a file to view its code."}
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <div style={{ marginTop: '2rem' }}>
-                                <h3>Tech Stack</h3>
-                                <div className="tech-stack">
-                                    {generatedProject.tech_stack.map((tech, index) => <span key={index} className="tech-item">{tech}</span>)}
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                </div>
+            <div className="features-info">
+              <div className="feature-item">
+                <span className="feature-icon">⚛️</span>
+                <span>React + TailwindCSS Frontend</span>
+              </div>
+              <div className="feature-item">
+                <span className="feature-icon">🔗</span>
+                <span>FastAPI Backend + Database</span>
+              </div>
+              <div className="feature-item">
+                <span className="feature-icon">🤖</span>
+                <span>AI Integration Ready</span>
+              </div>
+              <div className="feature-item">
+                <span className="feature-icon">🚀</span>
+                <span>Production Deployment</span>
+              </div>
             </div>
-        </PageWrapper>
-    );
+          </div>
+
+          {!generatedProject ? (
+            <div className="main-input-card">
+              <textarea
+                ref={textareaRef}
+                value={projectIdea}
+                onChange={(e) => setProjectIdea(e.target.value)}
+                placeholder="Build a todo app with AI reminders, or create a blog with user auth..."
+                className="idea-input"
+                disabled={isBuilding}
+              />
+              
+              <div className="input-container">
+                <div className="input-controls">
+                  <button
+                    onClick={handleVoiceRecording}
+                    disabled={isBuilding}
+                    className={`media-btn ${isRecording ? 'recording' : ''}`}
+                    title={isRecording ? "Stop Recording" : "Voice Input"}
+                  >
+                    {isRecording ? (
+                      <>🔴</>
+                    ) : (
+                      <>🎤</>
+                    )}
+                  </button>
+                  
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isBuilding}
+                    className="media-btn"
+                    title="Add Images"
+                  >
+                    📷
+                  </button>
+                  
+                  <button
+                    onClick={buildProject}
+                    disabled={isBuilding || !projectIdea.trim()}
+                    className="btn"
+                  >
+                    {isBuilding ? "Building..." : "Build with AI"}
+                  </button>
+                </div>
+                
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={handleImageUpload}
+                  className="hidden"
+                />
+              </div>
+
+              {selectedImages.length > 0 && (
+                <div className="image-preview">
+                  {selectedImages.map((image, index) => (
+                    <div key={index} className="image-item">
+                      📷 {image.name}
+                      <button
+                        onClick={() => removeImage(index)}
+                        className="remove-image"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {buildProgress.length > 0 && (
+                <div className="terminal">
+                  {buildProgress.map((log, index) => (
+                    <div key={index} className="terminal-line">
+                      <span className="log-prefix">
+                        [{log.match(/^\[(.*?)\]/)?.[1] || "INFO"}]
+                      </span>
+                      {log.replace(/^\[.*?\]\s/, "")}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="card">
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  marginBottom: "1rem",
+                  flexWrap: "wrap",
+                  gap: "1rem",
+                }}
+              >
+                <div>
+                  <h2 style={{ margin: 0 }}>{generatedProject.name}</h2>
+                  <p style={{ color: "var(--text-secondary)" }}>
+                    {generatedProject.description}
+                  </p>
+                </div>
+                <div className="enhanced-actions">
+                  <button
+                    onClick={() => setShowMonacoEditor(true)}
+                    className="btn monaco-btn"
+                    style={{ background: "#007acc", color: "#fff", marginRight: "1rem" }}
+                  >
+                    🚀 Open in Monaco Editor
+                  </button>
+                  <button
+                    onClick={resetBuilder}
+                    className="btn"
+                    style={{ background: "#222", color: "#fff" }}
+                  >
+                    Build Another
+                  </button>
+                </div>
+              </div>
+
+              <div className="results-grid">
+                <div className="file-tree card" style={{ padding: "1rem" }}>
+                  {fileTree.map((file, idx) => (
+                    <div
+                      key={idx}
+                      className={`file-item ${
+                        selectedFile === file.path ? "selected" : ""
+                      }`}
+                      onClick={() => handleFileClick(file)}
+                    >
+                      {file.path}
+                    </div>
+                  ))}
+                </div>
+                <div className="code-editor">
+                  {selectedFile ? fileContent : "Select a file to view its code."}
+                </div>
+              </div>
+
+              <div style={{ marginTop: "2rem" }}>
+                <h3>Tech Stack</h3>
+                <div className="tech-stack">
+                  {generatedProject.tech_stack.map((tech, index) => (
+                    <span key={index} className="tech-item">
+                      {tech}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+      
+      {/* Monaco Editor Modal */}
+      {showMonacoEditor && generatedProject && (
+        <MonacoProjectEditor
+          project={generatedProject}
+          onClose={() => setShowMonacoEditor(false)}
+        />
+      )}
+    </PageWrapper>
+  );
 };
 
 export default ProjectBuilder;

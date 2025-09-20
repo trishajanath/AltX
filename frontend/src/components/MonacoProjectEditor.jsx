@@ -1,0 +1,1114 @@
+import React, { useState, useEffect, useRef } from 'react';
+import MonacoEditor from '@monaco-editor/react';
+
+const MonacoProjectEditor = ({ project, onClose }) => {
+  const [fileTree, setFileTree] = useState([]);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [fileContents, setFileContents] = useState({});
+  const [terminalOutput, setTerminalOutput] = useState([]);
+  const [isRunning, setIsRunning] = useState(false);
+  const [isBuilding, setIsBuilding] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [terminalCollapsed, setTerminalCollapsed] = useState(false);
+  const [activeTab, setActiveTab] = useState('files');
+  const [openTabs, setOpenTabs] = useState([]);
+  const [errors, setErrors] = useState([]);
+  const [currentDirectory, setCurrentDirectory] = useState('/');
+  const [isCreatingProject, setIsCreatingProject] = useState(false);
+  const [showChat, setShowChat] = useState(false);
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatInput, setChatInput] = useState('');
+  const [isAiThinking, setIsAiThinking] = useState(false);
+  const [layoutMode, setLayoutMode] = useState('editor'); // 'editor', 'preview', 'chat', 'split'
+  const editorRef = useRef(null);
+  const chatEndRef = useRef(null);
+  const terminalRef = useRef(null);
+  const wsRef = useRef(null);
+
+  useEffect(() => {
+    if (project?.name) {
+      initializeProject();
+      setupWebSocket();
+    }
+    
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+    };
+  }, [project]);
+
+  const setupWebSocket = () => {
+    try {
+      const ws = new WebSocket(`ws://localhost:8000/ws/project/${project.name}`);
+      wsRef.current = ws;
+      
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        
+        switch (data.type) {
+          case 'terminal_output':
+            addTerminalOutput(data.message, data.level || 'info');
+            break;
+          case 'file_changed':
+            if (data.file_path && fileContents[data.file_path]) {
+              reloadFile(data.file_path);
+            }
+            break;
+          case 'error_detected':
+            setErrors(prev => [...prev, data.error]);
+            addTerminalOutput(`❌ Error: ${data.error.message}`, 'error');
+            break;
+          case 'preview_ready':
+            setPreviewUrl(data.url);
+            addTerminalOutput(`🌐 Preview available: ${data.url}`, 'success');
+            break;
+          case 'file_creation_start':
+            addTerminalOutput(data.message, 'info');
+            setIsCreatingProject(true);
+            break;
+          case 'file_created':
+            // Add file to file tree (will trigger re-render)
+            loadProjectFiles();
+            addTerminalOutput(`📄 Created ${data.file_path}`, 'info');
+            break;
+          case 'file_content_update':
+            // Show real-time typing effect in Monaco Editor
+            if (data.file_path && selectedFile === data.file_path) {
+              setFileContents(prev => ({
+                ...prev,
+                [data.file_path]: data.content
+              }));
+            }
+            // Auto-open first created file
+            if (data.file_path && !selectedFile && data.content) {
+              setSelectedFile(data.file_path);
+              setFileContents(prev => ({
+                ...prev,
+                [data.file_path]: data.content
+              }));
+            }
+            break;
+          case 'file_creation_complete':
+            addTerminalOutput(data.message, 'success');
+            setIsCreatingProject(false);
+            loadProjectFiles(); // Refresh file tree
+            break;
+        }
+      };
+      
+      ws.onopen = () => {
+        addTerminalOutput('🔗 Connected to project server', 'success');
+      };
+      
+      ws.onclose = () => {
+        addTerminalOutput('🔌 Disconnected from project server', 'warning');
+      };
+    } catch (error) {
+      addTerminalOutput(`❌ WebSocket connection failed: ${error.message}`, 'error');
+    }
+  };
+
+  const initializeProject = async () => {
+    addTerminalOutput('🚀 Initializing project workspace...', 'info');
+    
+    try {
+      // Create project structure
+      await createProjectStructure();
+      
+      // Load file tree
+      await loadProjectFiles();
+      
+      // Install dependencies
+      await installDependencies();
+      
+      addTerminalOutput('✅ Project initialized successfully!', 'success');
+    } catch (error) {
+      addTerminalOutput(`❌ Project initialization failed: ${error.message}`, 'error');
+    }
+  };
+
+  const createProjectStructure = async () => {
+    addTerminalOutput('📁 Creating project structure...', 'info');
+    
+    try {
+      const response = await fetch('/api/create-project-structure', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_name: project.name,
+          idea: project.description,
+          tech_stack: project.tech_stack
+        })
+      });
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        addTerminalOutput('✅ Project structure created', 'success');
+        
+        // Log created files
+        data.files_created?.forEach(file => {
+          addTerminalOutput(`📄 Created: ${file}`, 'info');
+        });
+      } else {
+        throw new Error(data.error);
+      }
+    } catch (error) {
+      addTerminalOutput(`❌ Failed to create structure: ${error.message}`, 'error');
+      throw error;
+    }
+  };
+
+  const loadProjectFiles = async () => {
+    try {
+      const response = await fetch(`/api/project-file-tree?project_name=${encodeURIComponent(project.name)}`);
+      const data = await response.json();
+      
+      if (data.success && data.file_tree) {
+        setFileTree(data.file_tree);
+        
+        // Auto-open main files
+        const mainFiles = ['App.jsx', 'index.html', 'main.py', 'package.json', 'README.md'];
+        for (const mainFile of mainFiles) {
+          const foundFile = findFileInTree(data.file_tree, mainFile);
+          if (foundFile) {
+            await openFile(foundFile);
+            break;
+          }
+        }
+      } else {
+        addTerminalOutput(`❌ Failed to load files: ${data.error}`, 'error');
+      }
+    } catch (error) {
+      addTerminalOutput(`❌ Error loading project: ${error.message}`, 'error');
+    }
+  };
+
+  const installDependencies = async () => {
+    addTerminalOutput('📦 Installing dependencies...', 'info');
+    
+    try {
+      const response = await fetch('/api/install-dependencies', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_name: project.name,
+          tech_stack: project.tech_stack
+        })
+      });
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        addTerminalOutput('✅ Dependencies installed successfully', 'success');
+      } else {
+        addTerminalOutput(`⚠️ Dependency installation issues: ${data.error}`, 'warning');
+      }
+    } catch (error) {
+      addTerminalOutput(`❌ Failed to install dependencies: ${error.message}`, 'error');
+    }
+  };
+
+  const findFileInTree = (tree, fileName) => {
+    if (!tree || !Array.isArray(tree)) return null;
+    
+    for (const item of tree) {
+      if (item.type === 'file' && item.name === fileName) {
+        return item;
+      }
+      if (item.type === 'dir' && item.children) {
+        const found = findFileInTree(item.children, fileName);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+
+  const openFile = async (file) => {
+    if (file.type !== 'file') return;
+
+    try {
+      const response = await fetch(`/api/project-file-content?project_name=${encodeURIComponent(project.name)}&file_path=${encodeURIComponent(file.path)}`);
+      const data = await response.json();
+      
+      if (data.success) {
+        setFileContents(prev => ({
+          ...prev,
+          [file.path]: data.content
+        }));
+        
+        setSelectedFile(file);
+        
+        // Add to open tabs if not already open
+        if (!openTabs.find(tab => tab.path === file.path)) {
+          setOpenTabs(prev => [...prev, file]);
+        }
+        
+        addTerminalOutput(`📄 Opened: ${file.path}`, 'info');
+      } else {
+        addTerminalOutput(`❌ Failed to open ${file.path}: ${data.error}`, 'error');
+      }
+    } catch (error) {
+      addTerminalOutput(`❌ Error opening file: ${error.message}`, 'error');
+    }
+  };
+
+  const saveFile = async (filePath, content) => {
+    try {
+      const response = await fetch('/api/save-project-file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_name: project.name,
+          file_path: filePath,
+          content: content
+        })
+      });
+      
+      const data = await response.json();
+      if (data.success) {
+        addTerminalOutput(`💾 Saved: ${filePath}`, 'success');
+        
+        setFileContents(prev => ({
+          ...prev,
+          [filePath]: content
+        }));
+        
+        // Auto-check for errors after save
+        setTimeout(() => checkForErrors(), 1000);
+      } else {
+        addTerminalOutput(`❌ Failed to save ${filePath}: ${data.error}`, 'error');
+      }
+    } catch (error) {
+      addTerminalOutput(`❌ Error saving file: ${error.message}`, 'error');
+    }
+  };
+
+  const runProject = async () => {
+    if (isRunning) return;
+    
+    setIsRunning(true);
+    setIsBuilding(true);
+    addTerminalOutput('🚀 Building and starting project...', 'info');
+    
+    try {
+      const response = await fetch('/api/run-project', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_name: project.name,
+          tech_stack: project.tech_stack
+        })
+      });
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        addTerminalOutput('✅ Project started successfully!', 'success');
+        if (data.preview_url) {
+          setPreviewLoading(true);
+          setPreviewUrl(data.preview_url);
+        }
+        setIsBuilding(false);
+        
+        // Start monitoring
+        startErrorMonitoring();
+      } else {
+        addTerminalOutput(`❌ Failed to start project: ${data.error}`, 'error');
+        setIsBuilding(false);
+        
+        // Try to auto-fix build errors
+        if (data.errors && data.errors.length > 0) {
+          await autoFixErrors(data.errors);
+        }
+      }
+    } catch (error) {
+      addTerminalOutput(`❌ Error running project: ${error.message}`, 'error');
+      setIsBuilding(false);
+    } finally {
+      setIsRunning(false);
+    }
+  };
+
+  const stopProject = async () => {
+    try {
+      const response = await fetch('/api/stop-project', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_name: project.name
+        })
+      });
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        addTerminalOutput('🛑 Project stopped', 'info');
+        setPreviewUrl(null);
+        setPreviewLoading(false);
+        setIsBuilding(false);
+      }
+    } catch (error) {
+      addTerminalOutput(`❌ Error stopping project: ${error.message}`, 'error');
+    }
+  };
+
+  // AI Chat Functions
+  const sendChatMessage = async () => {
+    if (!chatInput.trim() || isAiThinking) return;
+    
+    const userMessage = {
+      role: 'user',
+      content: chatInput.trim(),
+      timestamp: new Date().toLocaleTimeString()
+    };
+    
+    setChatMessages(prev => [...prev, userMessage]);
+    setChatInput('');
+    setIsAiThinking(true);
+    
+    try {
+      const response = await fetch('/api/ai-chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_name: project.name,
+          message: userMessage.content,
+          file_context: selectedFile ? {
+            path: selectedFile.path,
+            content: fileContents[selectedFile.path] || ''
+          } : null,
+          file_tree: fileTree
+        })
+      });
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        const aiMessage = {
+          role: 'assistant',
+          content: data.response,
+          timestamp: new Date().toLocaleTimeString(),
+          actions: data.actions || []
+        };
+        
+        setChatMessages(prev => [...prev, aiMessage]);
+        
+        // Apply any file changes suggested by AI
+        if (data.file_changes) {
+          await applyAiFileChanges(data.file_changes);
+        }
+      } else {
+        const errorMessage = {
+          role: 'assistant',
+          content: `Sorry, I encountered an error: ${data.error}`,
+          timestamp: new Date().toLocaleTimeString(),
+          isError: true
+        };
+        setChatMessages(prev => [...prev, errorMessage]);
+      }
+    } catch (error) {
+      const errorMessage = {
+        role: 'assistant',
+        content: `Sorry, I couldn't process your request: ${error.message}`,
+        timestamp: new Date().toLocaleTimeString(),
+        isError: true
+      };
+      setChatMessages(prev => [...prev, errorMessage]);
+    }
+    
+    setIsAiThinking(false);
+  };
+
+  const applyAiFileChanges = async (fileChanges) => {
+    for (const change of fileChanges) {
+      if (change.type === 'modify' && change.path && change.content) {
+        // Update file content in editor
+        setFileContents(prev => ({
+          ...prev,
+          [change.path]: change.content
+        }));
+        
+        // Save the file
+        await saveFile(change.path, change.content);
+        
+        addTerminalOutput(`✏️ AI updated file: ${change.path}`, 'success');
+      } else if (change.type === 'create' && change.path && change.content) {
+        // Create new file
+        await createNewFile(change.path, change.content);
+        addTerminalOutput(`📝 AI created file: ${change.path}`, 'success');
+      }
+    }
+    
+    // Refresh file tree to show changes
+    await loadProjectFiles();
+  };
+
+  const createNewFile = async (filePath, content) => {
+    try {
+      const response = await fetch('/api/create-file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_name: project.name,
+          file_path: filePath,
+          content: content
+        })
+      });
+      
+      if (response.ok) {
+        // Add to file contents
+        setFileContents(prev => ({
+          ...prev,
+          [filePath]: content
+        }));
+      }
+    } catch (error) {
+      addTerminalOutput(`❌ Error creating file: ${error.message}`, 'error');
+    }
+  };
+
+  const autoFixErrors = async (errorList) => {
+    addTerminalOutput('🔧 Auto-fixing detected errors...', 'info');
+    
+    try {
+      const response = await fetch('/api/auto-fix-errors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_name: project.name,
+          errors: errorList,
+          tech_stack: project.tech_stack
+        })
+      });
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        addTerminalOutput('✅ Errors fixed automatically!', 'success');
+        
+        // Reload modified files
+        if (data.files_modified) {
+          for (const filePath of data.files_modified) {
+            await reloadFile(filePath);
+          }
+        }
+        
+        // Try running again after a delay
+        setTimeout(() => {
+          addTerminalOutput('🔄 Retrying project build...', 'info');
+          runProject();
+        }, 2000);
+      } else {
+        addTerminalOutput(`❌ Auto-fix failed: ${data.error}`, 'error');
+        addTerminalOutput('💡 Please fix errors manually', 'info');
+      }
+    } catch (error) {
+      addTerminalOutput(`❌ Auto-fix error: ${error.message}`, 'error');
+    }
+  };
+
+  const checkForErrors = async () => {
+    try {
+      const response = await fetch(`/api/check-project-errors?project_name=${encodeURIComponent(project.name)}`);
+      const data = await response.json();
+      
+      if (data.errors && data.errors.length > 0) {
+        setErrors(data.errors);
+        
+        if (data.errors.length > 0) {
+          addTerminalOutput(`⚠️ ${data.errors.length} errors detected`, 'warning');
+        }
+      } else {
+        setErrors([]);
+      }
+    } catch (error) {
+      console.error('Error checking for errors:', error);
+    }
+  };
+
+  const startErrorMonitoring = () => {
+    const interval = setInterval(checkForErrors, 3000);
+    return () => clearInterval(interval);
+  };
+
+  const reloadFile = async (filePath) => {
+    try {
+      const response = await fetch(`/api/project-file-content?project_name=${encodeURIComponent(project.name)}&file_path=${encodeURIComponent(filePath)}`);
+      const data = await response.json();
+      
+      if (data.success) {
+        setFileContents(prev => ({
+          ...prev,
+          [filePath]: data.content
+        }));
+        
+        addTerminalOutput(`🔄 Reloaded: ${filePath}`, 'info');
+      }
+    } catch (error) {
+      addTerminalOutput(`❌ Error reloading file: ${error.message}`, 'error');
+    }
+  };
+
+  const executeTerminalCommand = async (command) => {
+    addTerminalOutput(`$ ${command}`, 'command');
+    
+    try {
+      const response = await fetch('/api/execute-command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_name: project.name,
+          command: command,
+          working_directory: currentDirectory
+        })
+      });
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        addTerminalOutput(data.output, 'output');
+        
+        // Update current directory if cd command
+        if (command.startsWith('cd ')) {
+          setCurrentDirectory(data.working_directory || currentDirectory);
+        }
+      } else {
+        addTerminalOutput(data.error, 'error');
+      }
+    } catch (error) {
+      addTerminalOutput(`Error: ${error.message}`, 'error');
+    }
+  };
+
+  const addTerminalOutput = (message, type = 'info') => {
+    const timestamp = new Date().toLocaleTimeString();
+    setTerminalOutput(prev => [...prev, {
+      message,
+      type,
+      timestamp,
+      id: Date.now() + Math.random()
+    }]);
+    
+    // Auto-scroll terminal
+    setTimeout(() => {
+      if (terminalRef.current) {
+        terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
+      }
+    }, 100);
+  };
+
+  const closeTab = (tabToClose) => {
+    setOpenTabs(prev => prev.filter(tab => tab.path !== tabToClose.path));
+    
+    if (selectedFile?.path === tabToClose.path) {
+      const remainingTabs = openTabs.filter(tab => tab.path !== tabToClose.path);
+      setSelectedFile(remainingTabs.length > 0 ? remainingTabs[0] : null);
+    }
+  };
+
+  const getFileLanguage = (fileName) => {
+    const ext = fileName.split('.').pop().toLowerCase();
+    const languageMap = {
+      'js': 'javascript',
+      'jsx': 'javascript',
+      'ts': 'typescript',
+      'tsx': 'typescript',
+      'py': 'python',
+      'html': 'html',
+      'css': 'css',
+      'scss': 'scss',
+      'json': 'json',
+      'md': 'markdown',
+      'yml': 'yaml',
+      'yaml': 'yaml',
+      'dockerfile': 'dockerfile',
+      'env': 'shell',
+      'gitignore': 'ignore',
+      'vue': 'vue'
+    };
+    return languageMap[ext] || 'plaintext';
+  };
+
+  const getFileIcon = (fileName) => {
+    const ext = fileName.split('.').pop().toLowerCase();
+    const iconMap = {
+      'js': '🟨',
+      'jsx': '⚛️',
+      'ts': '🔷',
+      'tsx': '⚛️',
+      'py': '🐍',
+      'html': '🌐',
+      'css': '🎨',
+      'scss': '🎨',
+      'json': '📄',
+      'md': '📝',
+      'yml': '⚙️',
+      'yaml': '⚙️',
+      'dockerfile': '🐳',
+      'gitignore': '📋',
+      'env': '🔐',
+      'vue': '💚'
+    };
+    return iconMap[ext] || '📄';
+  };
+
+  const renderFileTree = (items, level = 0) => {
+    if (!items || !Array.isArray(items)) return null;
+    
+    return items.map(item => (
+      <div key={item.path} style={{ marginLeft: `${level * 16}px` }}>
+        <div 
+          className={`file-tree-item ${item.type} ${selectedFile?.path === item.path ? 'selected' : ''}`}
+          onClick={() => item.type === 'file' ? openFile(item) : null}
+        >
+          <span className="file-icon">
+            {item.type === 'directory' ? '📁' : getFileIcon(item.name)}
+          </span>
+          <span className="file-name">{item.name}</span>
+        </div>
+        
+        {item.type === 'directory' && item.children && (
+          <div className="file-tree-children">
+            {renderFileTree(item.children, level + 1)}
+          </div>
+        )}
+      </div>
+    ));
+  };
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === 's') {
+          e.preventDefault();
+          if (selectedFile) {
+            const content = fileContents[selectedFile.path] || '';
+            saveFile(selectedFile.path, content);
+          }
+        }
+      }
+      
+      if (e.key === 'F5') {
+        e.preventDefault();
+        runProject();
+      }
+      
+      if (e.key === 'Escape' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        stopProject();
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedFile, fileContents]);
+
+  return (
+    <div className="monaco-project-editor">
+      {/* Header */}
+      <div className="editor-header">
+        <div className="editor-title">
+          <span className="project-icon">🚀</span>
+          <span className="project-name">{project.name}</span>
+          <span className="project-type">({project.tech_stack?.join(', ') || 'Mixed'})</span>
+          {isBuilding && <span className="building-indicator">⚡ Building...</span>}
+        </div>
+        
+        <div className="editor-actions">
+          {/* Layout Toggle Buttons */}
+          <div className="layout-toggles">
+            <button 
+              className={`btn-layout-toggle ${layoutMode === 'editor' ? 'active' : ''}`}
+              onClick={() => setLayoutMode('editor')}
+              title="Editor Only"
+            >
+              📝
+            </button>
+            <button 
+              className={`btn-layout-toggle ${layoutMode === 'chat' ? 'active' : ''}`}
+              onClick={() => setLayoutMode('chat')}
+              title="AI Chat"
+            >
+              🤖
+            </button>
+            <button 
+              className={`btn-layout-toggle ${layoutMode === 'preview' ? 'active' : ''}`}
+              onClick={() => setLayoutMode('preview')}
+              title="Preview Only"
+              disabled={!previewUrl}
+            >
+              🌐
+            </button>
+            <button 
+              className={`btn-layout-toggle ${layoutMode === 'split' ? 'active' : ''}`}
+              onClick={() => setLayoutMode('split')}
+              title="Split View"
+            >
+              ⚡
+            </button>
+          </div>
+
+          <button 
+            className="btn-editor-action" 
+            onClick={runProject}
+            disabled={isRunning || isBuilding}
+            title="Run Project (F5)"
+          >
+            {isBuilding ? '⚡' : isRunning ? '⏳' : '▶️'} 
+            {isBuilding ? 'Building' : 'Run'}
+          </button>
+          
+          {previewUrl && (
+            <button 
+              className="btn-editor-action preview"
+              onClick={() => window.open(previewUrl, '_blank')}
+              title="Open Preview"
+            >
+              🌐 Preview
+            </button>
+          )}
+          
+          {(isRunning || previewUrl) && (
+            <button 
+              className="btn-editor-action stop"
+              onClick={stopProject}
+              title="Stop Project (Ctrl+Esc)"
+            >
+              🛑 Stop
+            </button>
+          )}
+          
+          <button 
+            className="btn-editor-action close"
+            onClick={onClose}
+            title="Close Editor"
+          >
+            ✕
+          </button>
+        </div>
+      </div>
+
+      {/* Main Layout */}
+      <div className="editor-layout">
+        {/* Sidebar */}
+        <div className={`editor-sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
+          <div className="sidebar-header">
+            <div className="sidebar-tabs">
+              <button 
+                className={`sidebar-tab ${activeTab === 'files' ? 'active' : ''}`}
+                onClick={() => setActiveTab('files')}
+              >
+                📁 Files
+              </button>
+              <button 
+                className={`sidebar-tab ${activeTab === 'errors' ? 'active' : ''}`}
+                onClick={() => setActiveTab('errors')}
+              >
+                ⚠️ Problems ({errors.length})
+              </button>
+            </div>
+            
+            <button 
+              className="sidebar-toggle"
+              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            >
+              {sidebarCollapsed ? '▶️' : '◀️'}
+            </button>
+          </div>
+          
+          <div className="sidebar-content">
+            {activeTab === 'files' && (
+              <div className="file-tree">
+                {fileTree && fileTree.length > 0 ? renderFileTree(fileTree) : (
+                  <div className="loading-files">Loading project files...</div>
+                )}
+              </div>
+            )}
+            
+            {activeTab === 'errors' && (
+              <div className="errors-panel">
+                {errors.length === 0 ? (
+                  <div className="no-errors">✅ No problems detected</div>
+                ) : (
+                  errors.map((error, index) => (
+                    <div key={index} className="error-item" onClick={() => {
+                      // Jump to error location
+                      if (error.file) {
+                        const file = findFileInTree(fileTree, error.file);
+                        if (file) openFile(file);
+                      }
+                    }}>
+                      <div className="error-severity">{error.severity === 'error' ? '❌' : '⚠️'}</div>
+                      <div className="error-details">
+                        <div className="error-message">{error.message}</div>
+                        <div className="error-location">{error.file}:{error.line}</div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Editor Area */}
+        <div className="editor-main">
+          {/* Tab Bar */}
+          {openTabs.length > 0 && (
+            <div className="editor-tabs">
+              {openTabs.map(tab => (
+                <div 
+                  key={tab.path}
+                  className={`editor-tab ${selectedFile?.path === tab.path ? 'active' : ''}`}
+                  onClick={() => setSelectedFile(tab)}
+                >
+                  <span className="tab-icon">{getFileIcon(tab.name)}</span>
+                  <span className="tab-name">{tab.name}</span>
+                  <button 
+                    className="tab-close"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      closeTab(tab);
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          
+          {/* Dynamic Content Container */}
+          <div className={`editor-content-container layout-${layoutMode}`}>
+            {/* Chat Panel */}
+            {(layoutMode === 'chat' || layoutMode === 'split') && (
+              <div className="chat-container">
+                <div className="chat-header">
+                  <span className="chat-title">🤖 AI Assistant</span>
+                </div>
+                <div className="chat-messages">
+                  {chatMessages.map((message, index) => (
+                    <div key={index} className={`chat-message ${message.role} ${message.isError ? 'error' : ''}`}>
+                      <div className="message-header">
+                        <span className="message-role">
+                          {message.role === 'user' ? '👤' : '🤖'} 
+                          {message.role === 'user' ? 'You' : 'AI Assistant'}
+                        </span>
+                        <span className="message-time">{message.timestamp}</span>
+                      </div>
+                      <div className="message-content">{message.content}</div>
+                      {message.actions && message.actions.length > 0 && (
+                        <div className="message-actions">
+                          {message.actions.map((action, actionIndex) => (
+                            <button key={actionIndex} className="action-button">
+                              {action.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {isAiThinking && (
+                    <div className="chat-message assistant thinking">
+                      <div className="message-header">
+                        <span className="message-role">🤖 AI Assistant</span>
+                      </div>
+                      <div className="message-content">
+                        <div className="thinking-indicator">
+                          <span>🧠</span> Thinking...
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  <div ref={chatEndRef} />
+                </div>
+                <div className="chat-input-container">
+                  <input
+                    type="text"
+                    className="chat-input"
+                    placeholder="Ask AI to modify your code..."
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && sendChatMessage()}
+                    disabled={isAiThinking}
+                  />
+                  <button 
+                    className="chat-send"
+                    onClick={sendChatMessage}
+                    disabled={!chatInput.trim() || isAiThinking}
+                  >
+                    📤
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Monaco Editor */}
+            {(layoutMode === 'editor' || layoutMode === 'split') && (
+              <div className={`monaco-container ${
+                layoutMode === 'split' ? 'split-mode' : 'full-width'
+              }`}>
+                {selectedFile ? (
+                  <MonacoEditor
+                    ref={editorRef}
+                    height="100%"
+                    language={getFileLanguage(selectedFile.name)}
+                    value={fileContents[selectedFile.path] || ''}
+                    onChange={(value) => {
+                      setFileContents(prev => ({
+                        ...prev,
+                        [selectedFile.path]: value
+                      }));
+                    }}
+                    theme="vs-dark"
+                    options={{
+                      fontSize: 14,
+                      minimap: { enabled: true },
+                      automaticLayout: true,
+                      lineNumbers: 'on',
+                      renderWhitespace: 'selection',
+                      folding: true,
+                      bracketPairColorization: { enabled: true },
+                      autoIndent: 'full',
+                      formatOnType: true,
+                      formatOnPaste: true,
+                      quickSuggestions: true,
+                      parameterHints: { enabled: true },
+                      suggestOnTriggerCharacters: true,
+                      acceptSuggestionOnEnter: 'on',
+                      tabCompletion: 'on',
+                      wordBasedSuggestions: true
+                    }}
+                  />
+                ) : (
+                  <div className="no-file-selected">
+                    <div className="welcome-screen">
+                      <h2>🚀 {project.name}</h2>
+                      <p>AI-generated {project.tech_stack?.join(' + ') || 'web'} application</p>
+                      <p>Select a file from the tree to start editing</p>
+                      
+                      <div className="quick-actions">
+                        <button onClick={runProject} className="btn-welcome" disabled={isBuilding}>
+                          {isBuilding ? '⚡ Building...' : '▶️ Run Project'}
+                        </button>
+                        {previewUrl && (
+                          <button 
+                            onClick={() => window.open(previewUrl, '_blank')}
+                            className="btn-welcome"
+                          >
+                            🌐 Open Preview
+                          </button>
+                        )}
+                      </div>
+                      
+                      <div className="keyboard-shortcuts">
+                        <h4>Keyboard Shortcuts:</h4>
+                        <div>Ctrl+S - Save file</div>
+                        <div>F5 - Run project</div>
+                        <div>Ctrl+Esc - Stop project</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Preview Panel */}
+            {(layoutMode === 'preview' || (layoutMode === 'split' && previewUrl)) && previewUrl && (
+              <div className="preview-container">
+                <div className="preview-header">
+                  <span className="preview-title">🌐 Live Preview</span>
+                  <div className="preview-actions">
+                    <button 
+                      onClick={() => window.open(previewUrl, '_blank')}
+                      className="btn-preview-action"
+                      title="Open in new tab"
+                    >
+                      ↗️
+                    </button>
+                    <button 
+                      onClick={() => document.getElementById('preview-iframe')?.contentWindow?.location.reload()}
+                      className="btn-preview-action"
+                      title="Refresh preview"
+                    >
+                      🔄
+                    </button>
+                  </div>
+                </div>
+                <div className="preview-content">
+                  {previewLoading && (
+                    <div className="preview-loading">
+                      <div>🔄 Loading preview...</div>
+                    </div>
+                  )}
+                  <iframe
+                    id="preview-iframe"
+                    src={previewUrl}
+                    className="preview-iframe"
+                    title="Application Preview"
+                    sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups"
+                    onLoad={() => setPreviewLoading(false)}
+                    onError={() => setPreviewLoading(false)}
+                    style={{ display: previewLoading ? 'none' : 'block' }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Terminal */}
+      <div className={`editor-terminal ${terminalCollapsed ? 'collapsed' : ''}`}>
+        <div className="terminal-header">
+          <span className="terminal-title">🖥️ Terminal - {currentDirectory}</span>
+          <div className="terminal-actions">
+            <button 
+              className="terminal-action"
+              onClick={() => setTerminalOutput([])}
+              title="Clear terminal"
+            >
+              🗑️
+            </button>
+            <button 
+              className="terminal-toggle"
+              onClick={() => setTerminalCollapsed(!terminalCollapsed)}
+            >
+              {terminalCollapsed ? '⬆️' : '⬇️'}
+            </button>
+          </div>
+        </div>
+        
+        <div className="terminal-content" ref={terminalRef}>
+          {terminalOutput.map(output => (
+            <div key={output.id} className={`terminal-line ${output.type}`}>
+              <span className="terminal-timestamp">[{output.timestamp}]</span>
+              <span className="terminal-message">{output.message}</span>
+            </div>
+          ))}
+        </div>
+        
+        <div className="terminal-input">
+          <span className="terminal-prompt">{currentDirectory}$</span>
+          <input 
+            type="text"
+            placeholder="Type command and press Enter..."
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && e.target.value.trim()) {
+                executeTerminalCommand(e.target.value);
+                e.target.value = '';
+              }
+            }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default MonacoProjectEditor;
