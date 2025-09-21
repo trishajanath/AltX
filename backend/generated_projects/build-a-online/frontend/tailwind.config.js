@@ -1,4 +1,3 @@
-```javascript
 /** @type {import('tailwindcss').Config} */
 export default {
   content: [
@@ -8,15 +7,15 @@ export default {
   theme: {
     extend: {
       colors: {
-        'brand-primary': '#1a1a1a',
-        'brand-secondary': '#4f4f4f',
-        'brand-accent': '#3b82f6',
+        'brand-primary': '#1DB954',
+        'brand-dark': '#121212',
+        'brand-light': '#282828',
+        'brand-gray': '#B3B3B3',
       },
       fontFamily: {
-        'sans': ['Inter', 'sans-serif'],
-      }
+        sans: ['"Inter"', 'sans-serif'],
+      },
     },
   },
   plugins: [],
 }
-```

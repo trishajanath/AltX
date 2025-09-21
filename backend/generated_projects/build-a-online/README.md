@@ -1,6 +1,6 @@
 # build-a-online
 
-build a online marketplace for clothes 
+build a online web music player
 
 ## Tech Stack
 

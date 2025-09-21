@@ -1,31 +1,28 @@
-```python
 import os
-from pydantic_settings import BaseSettings
 from typing import List
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     """
-    Application configuration settings.
-    Uses Pydantic's BaseSettings to automatically load from environment variables.
+    Application settings management.
+    
+    Uses pydantic-settings to load configuration from environment variables
+    or default values. This provides a single source of truth for configuration.
     """
-    # Application metadata
-    PROJECT_NAME: str = "Clothify Marketplace API"
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding='utf-8', extra='ignore')
+
+    PROJECT_NAME: str = "MelodyStream API"
+    PROJECT_VERSION: str = "1.0.0"
     API_V1_STR: str = "/api/v1"
-    VERSION: str = "0.1.0"
-    DESCRIPTION: str = "API for an online marketplace for clothes."
 
     # CORS (Cross-Origin Resource Sharing) settings
-    # This allows the React frontend running on localhost:5173 to communicate with the API
-    BACKEND_CORS_ORIGINS: List[str] = [
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
+    # This is a critical security feature for frontend applications.
+    # It specifies which origins are allowed to access the API.
+    ALLOWED_ORIGINS: List[str] = [
+        "http://localhost:5173",  # React default
+        "http://localhost:3000",  # Another common frontend port
     ]
 
-    class Config:
-        # The .env file will be used to load environment variables
-        case_sensitive = True
-        env_file = ".env"
-
-# Instantiate the settings object that will be used throughout the application
+# Instantiate the settings class.
+# This object will be imported and used throughout the application.
 settings = Settings()
-```

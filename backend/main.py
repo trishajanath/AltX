@@ -119,6 +119,20 @@ async def get_project_file_tree(project_name: str = Query(...)):
         if not project_path.exists():
             return {"success": False, "error": "Project not found"}
         
+        # Validate and fix critical files before running
+        await manager.send_to_project(project_name, {
+            "type": "terminal_output",
+            "message": "🔍 Validating project files...",
+            "level": "info"
+        })
+        ok = await validate_and_fix_project_files(project_path, project_name)
+        if not ok:
+            await manager.send_to_project(project_name, {
+                "type": "terminal_output",
+                "message": "❌ Validation failed. Cannot start project.",
+                "level": "error"
+            })
+            return {"success": False, "error": "Validation failed"}
         def build_tree(path: Path, relative_path: str = ""):
             items = []
             try:
@@ -161,26 +175,26 @@ async def get_project_file_content(project_name: str = Query(...), file_path: st
     try:
         projects_dir = Path("generated_projects")
         project_path = projects_dir / project_name.lower().replace(" ", "-")
-        
+
         if not project_path.exists():
             return {"success": False, "error": "Project not found"}
-        
+
         # Clean the file path and resolve it safely
         clean_file_path = file_path.lstrip('/')
         full_file_path = project_path / clean_file_path
-        
+
         # Security check: ensure the path is within the project directory
         try:
             full_file_path.resolve().relative_to(project_path.resolve())
         except ValueError:
             return {"success": False, "error": "Invalid file path"}
-        
+
         if not full_file_path.exists():
             return {"success": False, "error": "File not found"}
-        
+
         if full_file_path.is_dir():
             return {"success": False, "error": "Path is a directory"}
-        
+
         # Read file content
         try:
             with open(full_file_path, 'r', encoding='utf-8') as f:
@@ -188,9 +202,9 @@ async def get_project_file_content(project_name: str = Query(...), file_path: st
         except UnicodeDecodeError:
             # Handle binary files
             content = f"[Binary file: {full_file_path.name}]"
-        
+
         return {"success": True, "content": content}
-        
+
     except Exception as e:
         print(f"Error reading file content: {e}")
         return {"success": False, "error": str(e)}
@@ -335,61 +349,51 @@ async def create_project_structure(request: dict = Body(...)):
         return {"success": False, "error": str(e)}
 
 async def analyze_tech_stack_for_idea(idea: str) -> List[str]:
-    """Use AI to determine the best tech stack for the project idea"""
+    """Determine the best tech stack for the project idea - ALWAYS React + FastAPI"""
     try:
-        analysis_prompt = f"""
-        Analyze this project idea and recommend the best modern tech stack: "{idea}"
+        # ALWAYS use React + FastAPI + Vite stack for consistency
+        base_stack = ["React", "FastAPI", "Vite", "TailwindCSS", "Python"]
         
-        Consider:
-        - Project complexity and requirements
-        - Modern best practices
-        - Development speed
-        - Scalability needs
-        - If it mentions AI/ML features
-        - If it needs real-time features
-        - If it needs authentication
-        - If it needs a database
+        # Add additional technologies based on the idea requirements
+        additional_tech = []
         
-        Return ONLY a JSON array of technologies, for example:
-        ["React", "TypeScript", "Node.js", "Express", "PostgreSQL", "TailwindCSS"]
+        # AI/ML features
+        if any(keyword in idea.lower() for keyword in ["ai", "ml", "openai", "gpt", "chatbot", "predict"]):
+            additional_tech.extend(["OpenAI API", "AI Integration"])
         
-        Choose from these options:
-        Frontend: React, Vue.js, Next.js, TypeScript, TailwindCSS, Material-UI
-        Backend: Node.js, Express, FastAPI, Python, Django
-        Database: PostgreSQL, MongoDB, Redis
-        AI/ML: OpenAI API, TensorFlow, PyTorch
-        Real-time: Socket.io, WebSockets
-        Auth: NextAuth.js, Auth0, JWT
-        """
+        # Database needs
+        if any(keyword in idea.lower() for keyword in ["database", "store", "save", "data", "crud", "persistent"]):
+            additional_tech.append("SQLite")  # Start with SQLite for simplicity
         
-        response = await run_in_threadpool(get_chat_response, analysis_prompt, "smart")
+        # Authentication needs
+        if any(keyword in idea.lower() for keyword in ["auth", "login", "user", "signup", "account"]):
+            additional_tech.extend(["JWT", "Authentication"])
         
-        # Extract JSON from response
-        import json
-        import re
+        # Real-time features
+        if any(keyword in idea.lower() for keyword in ["chat", "live", "real-time", "websocket", "notification"]):
+            additional_tech.extend(["WebSockets", "Real-time"])
         
-        # Find JSON array in response
-        json_match = re.search(r'\[.*?\]', response, re.DOTALL)
-        if json_match:
-            tech_stack = json.loads(json_match.group())
-            return tech_stack[:8]  # Limit to 8 technologies
+        # Advanced UI needs
+        if any(keyword in idea.lower() for keyword in ["dashboard", "chart", "graph", "analytics", "admin"]):
+            additional_tech.extend(["Charts", "Dashboard"])
         
-        # Fallback tech stack
-        return ["React", "TypeScript", "Node.js", "Express", "PostgreSQL", "TailwindCSS"]
+        # Combine base stack with additional technologies (limit to 8 total)
+        final_stack = base_stack + additional_tech
+        return final_stack[:8]
         
     except Exception as e:
         print(f"Error analyzing tech stack: {e}")
-        # Default modern stack
-        return ["React", "TypeScript", "Node.js", "Express", "PostgreSQL", "TailwindCSS"]
+        # Default to React + FastAPI stack
+        return ["React", "FastAPI", "Vite", "TailwindCSS", "Python"]
 
 async def create_complete_project_structure(project_path: Path, idea: str, project_name: str, tech_stack: List[str]) -> List[str]:
-    """Create complete project with all necessary files and real-time visualization"""
+    """Create complete project with all necessary files and real-time visualization - ALWAYS React + FastAPI"""
     files_created = []
     
     # Send initial progress
     await manager.send_to_project(project_name, {
         "type": "file_creation_start",
-        "message": "🏗️ Starting project creation...",
+        "message": "🏗️ Starting AI-powered project creation...",
         "total_files": 15  # Estimated number of files
     })
     
@@ -403,48 +407,428 @@ async def create_complete_project_structure(project_path: Path, idea: str, proje
     # Send directory creation update
     await manager.send_to_project(project_name, {
         "type": "terminal_output",
-        "message": "📁 Created project directories",
+        "message": "📁 Created React + FastAPI project directories",
         "level": "info"
     })
     
-    # Determine if we need specific features
-    needs_typescript = "TypeScript" in tech_stack
-    needs_nextjs = "Next.js" in tech_stack
-    needs_fastapi = "FastAPI" in tech_stack or "Python" in tech_stack
-    needs_ai = any(ai in tech_stack for ai in ["OpenAI API", "TensorFlow", "PyTorch"]) or "ai" in idea.lower()
-    needs_auth = "auth" in idea.lower() or "login" in idea.lower() or "user" in idea.lower()
-    needs_database = any(db in tech_stack for db in ["PostgreSQL", "MongoDB"]) or "database" in idea.lower()
+    # Determine features needed from the idea and tech stack
+    needs_ai = any(ai in tech_stack for ai in ["OpenAI API", "AI Integration"]) or any(keyword in idea.lower() for keyword in ["ai", "gpt", "chatbot", "ml"])
+    needs_auth = any(auth in tech_stack for auth in ["JWT", "Authentication"]) or any(keyword in idea.lower() for keyword in ["auth", "login", "user", "signup"])
+    needs_database = any(db in tech_stack for db in ["SQLite", "PostgreSQL", "MongoDB"]) or any(keyword in idea.lower() for keyword in ["database", "store", "save", "data"])
     
-    # Create frontend files with AI-generated content
-    if needs_nextjs:
-        frontend_files = await create_nextjs_frontend_with_animation(frontend_path, idea, project_name, needs_typescript, needs_auth)
-    else:
-        # Use AI-powered React generation instead of templates
-        frontend_files = await generate_react_frontend_with_ai(frontend_path, idea, project_name, needs_typescript, needs_auth)
+    # ALWAYS create React frontend with AI-generated content (no Next.js)
+    await manager.send_to_project(project_name, {
+        "type": "status",
+        "phase": "frontend",
+        "message": "🎨 Generating React frontend with Vite..."
+    })
     
+    frontend_files = await generate_react_frontend_with_ai(frontend_path, idea, project_name, False, needs_auth)
     files_created.extend(frontend_files)
     
-    # Create backend files with AI-generated content  
-    if needs_fastapi:
-        # Use AI-powered FastAPI generation instead of templates
-        backend_files = await generate_fastapi_backend_with_ai(backend_path, idea, project_name, needs_ai, needs_auth, needs_database)
-    else:
-        backend_files = await create_nodejs_backend_with_animation(backend_path, idea, project_name, needs_ai, needs_auth, needs_database)
+    # ALWAYS create FastAPI backend with AI-generated content
+    await manager.send_to_project(project_name, {
+        "type": "status", 
+        "phase": "backend",
+        "message": "⚡ Generating FastAPI backend..."
+    })
     
+    backend_files = await generate_fastapi_backend_with_ai(backend_path, idea, project_name, needs_ai, needs_auth, needs_database)
     files_created.extend(backend_files)
     
     # Create root files with real-time updates
-    root_files = await create_root_files_with_animation(project_path, project_name, idea, tech_stack)
+    await manager.send_to_project(project_name, {
+        "type": "status",
+        "phase": "config",
+        "message": "📄 Creating configuration files..."
+    })
+    
+    root_files = await create_root_files_with_animation(project_path, project_name, idea, ["React", "FastAPI", "Vite", "TailwindCSS"])
     files_created.extend(root_files)
     
     # Send completion
     await manager.send_to_project(project_name, {
         "type": "file_creation_complete",
-        "message": f"✅ Project creation complete! Created {len(files_created)} files",
+        "message": f"✅ React + FastAPI project created! Generated {len(files_created)} files with AI",
         "files_created": files_created
     })
     
     return files_created
+
+# --- Sandboxed Preview Endpoint ---
+@app.get("/api/sandbox-preview/{project_name}")
+async def get_sandbox_preview(project_name: str):
+    """Generate a sandboxed HTML preview that runs React code directly in the browser"""
+    try:
+        project_slug = project_name.lower().replace(" ", "-")
+        projects_dir = Path("generated_projects")
+        project_path = projects_dir / project_slug
+        frontend_path = project_path / "frontend"
+        
+        if not frontend_path.exists():
+            raise HTTPException(status_code=404, detail="Project frontend not found")
+        
+        # Read the main files
+        files_content = {}
+        
+        # Essential files to bundle
+        essential_files = [
+            "src/App.jsx",
+            "src/main.jsx", 
+            "src/index.css",
+            "package.json"
+        ]
+        
+        # Read additional component files
+        src_components_path = frontend_path / "src" / "components"
+        if src_components_path.exists():
+            for comp_file in src_components_path.glob("*.jsx"):
+                essential_files.append(f"src/components/{comp_file.name}")
+        
+        for file_path in essential_files:
+            full_path = frontend_path / file_path
+            if full_path.exists():
+                try:
+                    content = full_path.read_text(encoding='utf-8')
+                    files_content[file_path] = content
+                except Exception as e:
+                    print(f"Error reading {file_path}: {e}")
+                    files_content[file_path] = f"// Error reading file: {e}"
+        
+        # Generate the sandbox HTML
+        sandbox_html = generate_sandbox_html(files_content, project_name)
+        
+        return HTMLResponse(content=sandbox_html)
+        
+    except Exception as e:
+        error_html = f"""
+        <html>
+            <body style="font-family: Arial; padding: 20px; background: #1e1e1e; color: #fff;">
+                <h2>Preview Error</h2>
+                <p>Failed to generate preview: {str(e)}</p>
+                <p>Make sure your project has been built successfully.</p>
+            </body>
+        </html>
+        """
+        return HTMLResponse(content=error_html, status_code=500)
+
+def generate_sandbox_html(files_content: dict, project_name: str) -> str:
+    """Generate a complete HTML page that runs React code in the browser"""
+    
+    # Extract main app content
+    app_jsx = files_content.get("src/App.jsx", "")
+    main_jsx = files_content.get("src/main.jsx", "")
+    index_css = files_content.get("src/index.css", "")
+    
+    # Extract component files
+    components_code = ""
+    for file_path, content in files_content.items():
+        if file_path.startswith("src/components/") and file_path.endswith(".jsx"):
+            component_name = file_path.split("/")[-1].replace(".jsx", "")
+            components_code += f"// {component_name}\n{content}\n\n"
+    
+    return f"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{project_name} - Live Preview</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        {index_css}
+        body {{ margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif; }}
+        #root {{ width: 100%; height: 100vh; }}
+        .error-boundary {{ 
+            padding: 20px; 
+            background: #fee; 
+            border: 1px solid #fcc; 
+            border-radius: 4px; 
+            margin: 20px;
+            color: #c33;
+        }}
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    
+    <script type="text/babel">
+        const {{ useState, useEffect, useCallback, useMemo, useRef }} = React;
+        
+        // Error Boundary Component
+        class ErrorBoundary extends React.Component {{
+            constructor(props) {{
+                super(props);
+                this.state = {{ hasError: false, error: null }};
+            }}
+            
+            static getDerivedStateFromError(error) {{
+                return {{ hasError: true, error }};
+            }}
+            
+            componentDidCatch(error, errorInfo) {{
+                console.error('React Error:', error, errorInfo);
+            }}
+            
+            render() {{
+                if (this.state.hasError) {{
+                    return (
+                        <div className="error-boundary">
+                            <h2>Something went wrong in the preview</h2>
+                            <details>
+                                <summary>Error details</summary>
+                                <pre>{{this.state.error?.toString()}}</pre>
+                            </details>
+                        </div>
+                    );
+                }}
+                return this.props.children;
+            }}
+        }}
+        
+        // Mock API calls for demo purposes
+        const mockFetch = (url, options) => {{
+            console.log('Mock API call to:', url);
+            return Promise.resolve({{
+                ok: true,
+                json: () => Promise.resolve({{ message: 'Mock API response', data: [] }})
+            }});
+        }};
+        
+        // Replace fetch with mock for demo
+        window.fetch = mockFetch;
+        
+        {components_code}
+        
+        {app_jsx}
+        
+        // Render the app
+        try {{
+            const root = ReactDOM.createRoot(document.getElementById('root'));
+            root.render(
+                React.createElement(ErrorBoundary, null,
+                    React.createElement(App)
+                )
+            );
+        }} catch (error) {{
+            console.error('Failed to render app:', error);
+            document.getElementById('root').innerHTML = `
+                <div class="error-boundary">
+                    <h2>Failed to render the application</h2>
+                    <p>${{error.message}}</p>
+                    <p>Check the console for more details.</p>
+                </div>
+            `;
+        }}
+    </script>
+</body>
+</html>
+    """
+
+# --- Lovable-style Orchestrator: Build With AI ---
+@app.post("/api/build-with-ai")
+async def build_with_ai(request: dict = Body(...)):
+    """One-click flow: create -> install -> validate/fix -> run -> preview"""
+    try:
+        project_name = request.get("project_name")
+        idea = request.get("idea") or ""
+        tech_stack = request.get("tech_stack", [])
+
+        if not project_name:
+            raise HTTPException(status_code=400, detail="project_name is required")
+
+        # 1) Create structure
+        await manager.send_to_project(project_name, {
+            "type": "status",
+            "phase": "create",
+            "message": "Creating project structure with AI..."
+        })
+
+        create_resp = await create_project_structure({
+            "project_name": project_name,
+            "idea": idea,
+            "tech_stack": tech_stack
+        })
+        if not create_resp.get("success"):
+            return create_resp
+
+        project_slug = project_name.lower().replace(" ", "-")
+        projects_dir = Path("generated_projects")
+        project_path = projects_dir / project_slug
+
+        # 2) Install dependencies (frontend/backend if present)
+        await manager.send_to_project(project_name, {
+            "type": "status",
+            "phase": "install",
+            "message": "Installing dependencies..."
+        })
+
+        await install_dependencies_endpoint({
+            "project_name": project_name,
+            "tech_stack": tech_stack
+        })
+
+        # 3) Validate and auto-fix in a short loop
+        await manager.send_to_project(project_name, {
+            "type": "status",
+            "phase": "validate",
+            "message": "Validating project for errors..."
+        })
+
+        # First pass validation
+        await validate_and_fix_project_files(project_path, project_name)
+        check1 = await check_project_errors(project_name)
+        if not check1.get("success"):
+            return check1
+
+        errors = check1.get("errors", [])
+        if errors:
+            await manager.send_to_project(project_name, {
+                "type": "status",
+                "phase": "fix",
+                "message": f"Auto-fixing {len(errors)} issues..."
+            })
+            await auto_fix_errors({
+                "project_name": project_name,
+                "errors": errors,
+                "tech_stack": tech_stack
+            })
+            # Re-validate once more
+            check2 = await check_project_errors(project_name)
+            errors = check2.get("errors", []) if check2.get("success") else errors
+
+        # 4) Run project (frontend + optional backend)
+        await manager.send_to_project(project_name, {
+            "type": "status",
+            "phase": "run",
+            "message": "Starting development servers..."
+        })
+
+        run_resp = await run_project({
+            "project_name": project_name,
+            "tech_stack": tech_stack
+        })
+
+        preview_url = run_resp.get("preview_url") if isinstance(run_resp, dict) else None
+        if preview_url:
+            await manager.send_to_project(project_name, {
+                "type": "preview_ready",
+                "url": preview_url
+            })
+
+        # 5) Final status
+        await manager.send_to_project(project_name, {
+            "type": "status",
+            "phase": "ready",
+            "message": "✅ Build complete. Live preview is ready.",
+            "preview_url": preview_url,
+            "errors_remaining": errors
+        })
+
+        return {
+            "success": True,
+            "preview_url": preview_url,
+            "errors": errors
+        }
+
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+# --- AI Apply Changes Endpoint ---
+@app.post("/api/ai-apply-changes")
+async def ai_apply_changes(request: dict = Body(...)):
+    """Apply AI-suggested changes to project files, validate, and optionally rerun."""
+    try:
+        project_name = request.get("project_name")
+        edits = request.get("edits", [])  # List[{file_path, content}]
+        re_run = bool(request.get("re_run", False))
+        tech_stack = request.get("tech_stack", [])
+
+        if not project_name:
+            raise HTTPException(status_code=400, detail="project_name is required")
+        if not isinstance(edits, list) or not edits:
+            raise HTTPException(status_code=400, detail="No edits provided")
+
+        # Resolve project path
+        project_slug = project_name.lower().replace(" ", "-")
+        projects_dir = Path("generated_projects")
+        project_path = projects_dir / project_slug
+        if not project_path.exists():
+            return {"success": False, "error": "Project not found"}
+
+        # Apply edits safely
+        files_modified = []
+        for edit in edits:
+            file_path = (edit.get("file_path") or "").lstrip("/")
+            content = edit.get("content", "")
+            if not file_path:
+                continue
+            target = project_path / file_path
+            # Ensure path is within project
+            try:
+                target.resolve().relative_to(project_path.resolve())
+            except Exception:
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            cleaned = _clean_ai_generated_content(content, target.name)
+            with open(target, 'w', encoding='utf-8', newline='\n') as f:
+                f.write(cleaned)
+            files_modified.append(file_path)
+            await manager.send_to_project(project_name, {
+                "type": "file_changed",
+                "file_path": file_path,
+                "message": f"✍️ Updated {file_path}"
+            })
+
+        # Validate and fix critical files
+        await manager.send_to_project(project_name, {
+            "type": "status",
+            "phase": "validate",
+            "message": "Validating updates..."
+        })
+        await validate_and_fix_project_files(project_path, project_name)
+        check = await check_project_errors(project_name)
+        remaining_errors = check.get("errors", []) if check.get("success") else []
+
+        # Optionally rerun project
+        preview_url = None
+        if re_run:
+            await manager.send_to_project(project_name, {
+                "type": "status",
+                "phase": "run",
+                "message": "Restarting development servers..."
+            })
+            run_resp = await run_project({
+                "project_name": project_name,
+                "tech_stack": tech_stack
+            })
+            if isinstance(run_resp, dict):
+                preview_url = run_resp.get("preview_url")
+                if preview_url:
+                    await manager.send_to_project(project_name, {"type": "preview_ready", "url": preview_url})
+
+        await manager.send_to_project(project_name, {
+            "type": "status",
+            "phase": "ready",
+            "message": "✅ Changes applied",
+            "preview_url": preview_url,
+            "errors_remaining": remaining_errors
+        })
+
+        return {
+            "success": True,
+            "files_modified": files_modified,
+            "preview_url": preview_url,
+            "errors": remaining_errors
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 async def simulate_typing_effect(project_name: str, file_path: str, content: str, delay_per_char: float = 0.01):
     """Simulate typing effect by sending content in chunks"""
@@ -467,6 +851,39 @@ async def simulate_typing_effect(project_name: str, file_path: str, content: str
         # Small delay for typing effect
         await asyncio.sleep(delay_per_char * len(line))
 
+def _strip_code_fences(text: str) -> str:
+    """Remove ```...``` fences from AI outputs if present."""
+    try:
+        t = text.strip()
+        # Match fenced block optionally with language like ```json
+        m = re.match(r"^```(?:\w+)?\s*([\s\S]*?)\s*```$", t)
+        return m.group(1).strip() if m else t
+    except Exception:
+        return text
+
+def _clean_ai_generated_content(content: str, filename: str) -> str:
+    """Normalize AI-generated content by stripping BOM/code fences and validating JSON."""
+    try:
+        cleaned = content.lstrip('\ufeff')
+        cleaned = _strip_code_fences(cleaned)
+
+        # If it's a JSON file, try to extract a strict JSON object/array and pretty print
+        if filename.lower().endswith('.json'):
+            start = cleaned.find('{')
+            end = cleaned.rfind('}')
+            candidate = cleaned[start:end+1] if start != -1 and end != -1 and start < end else cleaned
+            try:
+                obj = json.loads(candidate)
+                cleaned = json.dumps(obj, indent=2)
+            except Exception:
+                # Attempt to remove trailing commas and retry
+                tmp = re.sub(r",\s*([}\]])", r"\1", candidate)
+                obj = json.loads(tmp)
+                cleaned = json.dumps(obj, indent=2)
+        return cleaned
+    except Exception:
+        return content
+
 async def create_file_with_animation(file_path: Path, content: str, relative_path: str, project_name: str) -> str:
     """Create a file with real-time typing animation"""
     
@@ -480,33 +897,105 @@ async def create_file_with_animation(file_path: Path, content: str, relative_pat
     # Create directory if needed
     file_path.parent.mkdir(parents=True, exist_ok=True)
     
+    # Normalize AI content (especially for JSON and fenced blocks)
+    final_content = _clean_ai_generated_content(content, file_path.name)
+    
+    # If JSON, re-validate and pretty print; provide fallback for package.json
+    if file_path.suffix.lower() == ".json":
+        try:
+            obj = json.loads(final_content)
+            final_content = json.dumps(obj, indent=2)
+        except Exception as e:
+            print(f"Invalid JSON for {relative_path}: {e}")
+            if file_path.name == "package.json":
+                # Minimal safe fallback
+                final_content = json.dumps({
+                    "name": Path(project_name).name.lower().replace(" ", "-"),
+                    "version": "1.0.0",
+                    "private": True,
+                    "type": "module",
+                    "scripts": {"dev": "vite", "build": "vite build", "preview": "vite preview"},
+                    "dependencies": {"react": "^18.2.0", "react-dom": "^18.2.0"},
+                    "devDependencies": {"vite": "^4.4.0", "@vitejs/plugin-react": "^4.0.0"}
+                }, indent=2)
+
     # Send file creation start
     await manager.send_to_project(project_name, {
         "type": "file_created",
         "file_path": relative_path,
         "file_type": "file",
-        "size": len(content)
+        "size": len(final_content)
     })
     
     # Simulate typing effect for code files
-    if any(relative_path.endswith(ext) for ext in ['.jsx', '.tsx', '.js', '.ts', '.py', '.css', '.html']):
-        await simulate_typing_effect(project_name, relative_path, content, 0.005)
+    if any(relative_path.endswith(ext) for ext in ['.jsx', '.tsx', '.js', '.ts', '.py', '.css', '.html', '.json']):
+        await simulate_typing_effect(project_name, relative_path, final_content, 0.005)
     else:
         # For non-code files, just send the complete content
         await manager.send_to_project(project_name, {
             "type": "file_content_update",
             "file_path": relative_path,
-            "content": content,
+            "content": final_content,
             "is_complete": True
         })
     
     # Write the actual file
-    with open(file_path, 'w', encoding='utf-8') as f:
-        f.write(content)
+    with open(file_path, 'w', encoding='utf-8', newline='\n') as f:
+        f.write(final_content)
     
     await asyncio.sleep(0.1)  # Brief pause between files
     
     return relative_path
+
+async def validate_and_fix_project_files(project_path: Path, project_name: str) -> bool:
+    """Validate and fix critical project files like frontend/package.json before running."""
+    try:
+        frontend_path = project_path / "frontend"
+        package_json_path = frontend_path / "package.json"
+
+        if not frontend_path.exists():
+            return True  # Nothing to validate
+
+        if package_json_path.exists():
+            try:
+                raw = package_json_path.read_text(encoding='utf-8', errors='ignore')
+                cleaned = _clean_ai_generated_content(raw, 'package.json')
+                obj = json.loads(cleaned)
+                # Optionally ensure minimal required fields
+                if "name" not in obj:
+                    obj["name"] = project_name.lower().replace(" ", "-")
+                package_json_path.write_text(json.dumps(obj, indent=2), encoding='utf-8', newline='\n')
+                return True
+            except Exception as e:
+                print(f"Repairing package.json due to error: {e}")
+                fallback = {
+                    "name": project_name.lower().replace(" ", "-"),
+                    "version": "1.0.0",
+                    "private": True,
+                    "type": "module",
+                    "scripts": {"dev": "vite", "build": "vite build", "preview": "vite preview"},
+                    "dependencies": {"react": "^18.2.0", "react-dom": "^18.2.0"},
+                    "devDependencies": {"vite": "^4.4.0", "@vitejs/plugin-react": "^4.0.0"}
+                }
+                package_json_path.write_text(json.dumps(fallback, indent=2), encoding='utf-8', newline='\n')
+                return True
+        else:
+            # Create a minimal package.json
+            minimal = {
+                "name": project_name.lower().replace(" ", "-"),
+                "version": "1.0.0",
+                "private": True,
+                "type": "module",
+                "scripts": {"dev": "vite", "build": "vite build", "preview": "vite preview"},
+                "dependencies": {"react": "^18.2.0", "react-dom": "^18.2.0"},
+                "devDependencies": {"vite": "^4.4.0", "@vitejs/plugin-react": "^4.0.0"}
+            }
+            frontend_path.mkdir(parents=True, exist_ok=True)
+            package_json_path.write_text(json.dumps(minimal, indent=2), encoding='utf-8', newline='\n')
+            return True
+    except Exception as e:
+        print(f"validate_and_fix_project_files error: {e}")
+        return False
 
 # --- File Save Endpoint ---
 @app.post("/api/save-project-file")
@@ -642,10 +1131,13 @@ async def install_dependencies(request: dict = Body(...)):
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+# Preserve a stable reference to the endpoint function before any later helper redefinitions
+install_dependencies_endpoint = install_dependencies
+
 # --- Run Project Endpoint ---
 @app.post("/api/run-project")
 async def run_project(request: dict = Body(...)):
-    """Build and run the project"""
+    """Build and run the project using sandboxed preview"""
     try:
         project_name = request.get("project_name")
         tech_stack = request.get("tech_stack", [])
@@ -657,97 +1149,63 @@ async def run_project(request: dict = Body(...)):
         if not project_path.exists():
             return {"success": False, "error": "Project not found"}
         
-        # Start frontend dev server
+        # Check if frontend exists
         frontend_path = project_path / "frontend"
-        backend_path = project_path / "backend"
+        if not frontend_path.exists():
+            return {"success": False, "error": "Frontend not found"}
         
-        preview_urls = []
+        await manager.send_to_project(project_name, {
+            "type": "terminal_output", 
+            "message": "🚀 Preparing sandboxed preview...",
+            "level": "info"
+        })
         
-        # Start frontend
-        if frontend_path.exists():
+        # Generate sandbox preview URL
+        sandbox_url = f"http://localhost:8000/api/sandbox-preview/{project_slug}"
+        
+        # Validate that essential files exist
+        essential_files = ["src/App.jsx", "src/main.jsx"]
+        missing_files = []
+        for file_path in essential_files:
+            if not (frontend_path / file_path).exists():
+                missing_files.append(file_path)
+        
+        if missing_files:
             await manager.send_to_project(project_name, {
                 "type": "terminal_output",
-                "message": "🚀 Starting frontend server...",
-                "level": "info"
+                "message": f"⚠️ Missing essential files: {', '.join(missing_files)}",
+                "level": "warning"
             })
-            
-            try:
-                # Use npm run dev or npm start
-                start_command = "npm run dev" if "Next.js" in tech_stack else "npm start"
-                
-                process = await asyncio.create_subprocess_shell(
-                    start_command,
-                    cwd=frontend_path,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
-                )
-                
-                # Give it a moment to start
-                await asyncio.sleep(3)
-                
-                if process.returncode is None:  # Still running
-                    preview_urls.append("http://localhost:3000")
-                    await manager.send_to_project(project_name, {
-                        "type": "terminal_output",
-                        "message": "✅ Frontend server started on http://localhost:3000",
-                        "level": "success"
-                    })
-                    
-                    await manager.send_to_project(project_name, {
-                        "type": "preview_ready",
-                        "url": "http://localhost:3000"
-                    })
-                
-            except Exception as e:
-                await manager.send_to_project(project_name, {
-                    "type": "terminal_output",
-                    "message": f"❌ Frontend start failed: {str(e)}",
-                    "level": "error"
-                })
         
-        # Start backend if FastAPI
-        if backend_path.exists() and "FastAPI" in tech_stack:
-            await manager.send_to_project(project_name, {
-                "type": "terminal_output",
-                "message": "🔗 Starting backend server...",
-                "level": "info"
-            })
-            
-            try:
-                process = await asyncio.create_subprocess_shell(
-                    "python main.py",
-                    cwd=backend_path,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
-                )
-                
-                await asyncio.sleep(2)
-                
-                if process.returncode is None:
-                    await manager.send_to_project(project_name, {
-                        "type": "terminal_output",
-                        "message": "✅ Backend server started on http://localhost:8001",
-                        "level": "success"
-                    })
-                
-            except Exception as e:
-                await manager.send_to_project(project_name, {
-                    "type": "terminal_output",
-                    "message": f"❌ Backend start failed: {str(e)}",
-                    "level": "error"
-                })
+        await manager.send_to_project(project_name, {
+            "type": "terminal_output",
+            "message": "✅ Sandbox preview ready!",
+            "level": "info"
+        })
+        
+        # Send preview ready signal
+        await manager.send_to_project(project_name, {
+            "type": "preview_ready",
+            "url": sandbox_url
+        })
         
         return {
             "success": True,
-            "preview_url": preview_urls[0] if preview_urls else None,
-            "urls": preview_urls
+            "preview_url": sandbox_url,
+            "message": "Sandbox preview is ready",
+            "type": "sandbox"
         }
         
     except Exception as e:
+        await manager.send_to_project(project_name, {
+            "type": "terminal_output",
+            "message": f"❌ Failed to start preview: {str(e)}",
+            "level": "error"
+        })
         return {"success": False, "error": str(e)}
 
-# --- Error Checking Endpoint ---
-@app.get("/api/check-project-errors")
+# --- Stop Project Endpoint ---
+@app.post("/api/stop-project")
 async def check_project_errors(project_name: str = Query(...)):
     """Check for errors in the project"""
     try:
@@ -764,13 +1222,42 @@ async def check_project_errors(project_name: str = Query(...)):
         frontend_path = project_path / "frontend"
         if frontend_path.exists():
             # Check package.json exists
-            if not (frontend_path / "package.json").exists():
+            pkg_path = frontend_path / "package.json"
+            if not pkg_path.exists():
                 errors.append({
                     "severity": "error",
                     "message": "Missing package.json",
                     "file": "frontend/package.json",
                     "line": 1
                 })
+            else:
+                try:
+                    raw = pkg_path.read_text(encoding="utf-8", errors="ignore")
+                    cleaned = _clean_ai_generated_content(raw, "package.json")
+                    pkg = json.loads(cleaned)
+                    scripts = (pkg.get("scripts") or {}) if isinstance(pkg, dict) else {}
+                    if not isinstance(scripts, dict):
+                        errors.append({
+                            "severity": "error",
+                            "message": "Invalid scripts section in package.json",
+                            "file": "frontend/package.json",
+                            "line": 1
+                        })
+                    else:
+                        if not ("dev" in scripts or "start" in scripts):
+                            errors.append({
+                                "severity": "error",
+                                "message": "Missing dev/start script in package.json",
+                                "file": "frontend/package.json",
+                                "line": 1
+                            })
+                except Exception as e:
+                    errors.append({
+                        "severity": "error",
+                        "message": f"Invalid JSON in package.json: {str(e)}",
+                        "file": "frontend/package.json",
+                        "line": 1
+                    })
             
             # Check for syntax errors in JS/JSX files
             for file in frontend_path.rglob("*.js*"):
@@ -826,9 +1313,10 @@ async def auto_fix_errors(request: dict = Body(...)):
                     "version": "1.0.0",
                     "private": True,
                     "scripts": {
-                        "dev": "next dev" if "Next.js" in tech_stack else "react-scripts start",
-                        "build": "next build" if "Next.js" in tech_stack else "react-scripts build",
-                        "start": "next start" if "Next.js" in tech_stack else "react-scripts start"
+                        "dev": "next dev" if "Next.js" in tech_stack else "vite",
+                        "build": "next build" if "Next.js" in tech_stack else "vite build",
+                        "preview": "vite preview --port 5173" if "Next.js" not in tech_stack else "next start",
+                        "start": "next start" if "Next.js" in tech_stack else "vite"
                     },
                     "dependencies": {
                         "react": "^18.2.0",
@@ -839,7 +1327,11 @@ async def auto_fix_errors(request: dict = Body(...)):
                 if "Next.js" in tech_stack:
                     package_json["dependencies"]["next"] = "^14.0.0"
                 else:
-                    package_json["dependencies"]["react-scripts"] = "^5.0.1"
+                    # Prefer Vite defaults; dev deps installed separately during scaffold
+                    package_json.setdefault("devDependencies", {})
+                    package_json["devDependencies"].update({
+                        "vite": "^5.0.0"
+                    })
                 
                 if "TypeScript" in tech_stack:
                     package_json["dependencies"]["typescript"] = "^5.0.0"
@@ -857,6 +1349,72 @@ async def auto_fix_errors(request: dict = Body(...)):
                     "message": "✅ Created package.json",
                     "level": "success"
                 })
+            elif "Invalid JSON in package.json" in error.get("message", ""):
+                # Try to clean and rewrite package.json
+                pkg_path = project_path / "frontend" / "package.json"
+                if pkg_path.exists():
+                    try:
+                        raw = pkg_path.read_text(encoding="utf-8", errors="ignore")
+                        cleaned = _clean_ai_generated_content(raw, "package.json")
+                        pkg = json.loads(cleaned)
+                        with open(pkg_path, 'w', encoding='utf-8') as f:
+                            json.dump(pkg, f, indent=2)
+                        files_modified.append("frontend/package.json")
+                        await manager.send_to_project(project_name, {
+                            "type": "terminal_output",
+                            "message": "🧹 Cleaned invalid JSON in package.json",
+                            "level": "success"
+                        })
+                    except Exception:
+                        # Fallback to minimal vite-based package
+                        fallback = {
+                            "name": project_slug,
+                            "version": "1.0.0",
+                            "private": True,
+                            "scripts": {"dev": "vite", "build": "vite build", "preview": "vite preview --port 5173", "start": "vite"}
+                        }
+                        with open(pkg_path, 'w', encoding='utf-8') as f:
+                            json.dump(fallback, f, indent=2)
+                        files_modified.append("frontend/package.json")
+                        await manager.send_to_project(project_name, {
+                            "type": "terminal_output",
+                            "message": "✅ Replaced invalid package.json with a safe default",
+                            "level": "warning"
+                        })
+            elif "Missing dev/start script" in error.get("message", "") or "Invalid scripts section in package.json" in error.get("message", ""):
+                pkg_path = project_path / "frontend" / "package.json"
+                if pkg_path.exists():
+                    try:
+                        raw = pkg_path.read_text(encoding="utf-8", errors="ignore")
+                        cleaned = _clean_ai_generated_content(raw, "package.json")
+                        pkg = json.loads(cleaned)
+                        if not isinstance(pkg, dict):
+                            pkg = {}
+                        scripts = pkg.get("scripts") or {}
+                        if not isinstance(scripts, dict):
+                            scripts = {}
+                        # Heuristic: use vite if dependency present, else next if Next.js in stack
+                        deps = pkg.get("dependencies", {}) or {}
+                        use_vite = "vite" in (pkg.get("devDependencies", {}) or {}) or "vite" in deps
+                        if "Next.js" in tech_stack:
+                            scripts.update({"dev": "next dev", "build": "next build", "start": "next start"})
+                        elif use_vite or True:
+                            scripts.update({"dev": "vite", "build": "vite build", "preview": "vite preview --port 5173", "start": "vite"})
+                        pkg["scripts"] = scripts
+                        with open(pkg_path, 'w', encoding='utf-8') as f:
+                            json.dump(pkg, f, indent=2)
+                        files_modified.append("frontend/package.json")
+                        await manager.send_to_project(project_name, {
+                            "type": "terminal_output",
+                            "message": "🔧 Added missing scripts to package.json",
+                            "level": "success"
+                        })
+                    except Exception as e:
+                        await manager.send_to_project(project_name, {
+                            "type": "terminal_output",
+                            "message": f"⚠️ Could not update scripts in package.json: {str(e)}",
+                            "level": "warning"
+                        })
         
         return {
             "success": True,
@@ -6938,65 +7496,97 @@ async def generate_react_frontend_with_ai(frontend_path: Path, idea: str, projec
     files_created = []
     
     try:
+        # Analyze the idea to determine specific features and components needed
+        components_needed = []
+        api_endpoints = []
+        special_features = []
+        
+        # Determine what components to create based on the idea
+        if any(keyword in idea.lower() for keyword in ["todo", "task", "list", "manage"]):
+            components_needed.extend(["TaskList", "TaskItem", "AddTaskForm"])
+            api_endpoints.extend(["/api/tasks", "/api/tasks/{id}"])
+        
+        if any(keyword in idea.lower() for keyword in ["ecommerce", "shop", "store", "product", "cart"]):
+            components_needed.extend(["ProductGrid", "ProductCard", "Cart", "Checkout"])
+            api_endpoints.extend(["/api/products", "/api/cart", "/api/orders"])
+        
+        if any(keyword in idea.lower() for keyword in ["blog", "article", "post", "content"]):
+            components_needed.extend(["PostList", "PostCard", "PostEditor", "CommentSection"])
+            api_endpoints.extend(["/api/posts", "/api/comments"])
+        
+        if any(keyword in idea.lower() for keyword in ["chat", "message", "conversation"]):
+            components_needed.extend(["ChatWindow", "MessageList", "MessageInput"])
+            api_endpoints.extend(["/api/messages", "/api/chat"])
+            special_features.append("websocket")
+        
+        if any(keyword in idea.lower() for keyword in ["dashboard", "analytics", "chart", "data"]):
+            components_needed.extend(["Dashboard", "Chart", "StatCard", "DataTable"])
+            api_endpoints.extend(["/api/analytics", "/api/stats"])
+        
+        if any(keyword in idea.lower() for keyword in ["social", "profile", "user", "follow"]):
+            components_needed.extend(["Profile", "UserCard", "Feed", "Followers"])
+            api_endpoints.extend(["/api/users", "/api/profile", "/api/feed"])
+        
+        # Default components if none detected
+        if not components_needed:
+            components_needed = ["MainContent", "ActionForm", "ItemList"]
+            api_endpoints = ["/api/data", "/api/create"]
+        
         # Use AI to generate unique code based on the idea
         prompt = f"""
 Generate a complete, functional React frontend application for: "{idea}"
 
 Project Name: {project_name}
-TypeScript: {"Yes" if needs_typescript else "No"}
 Authentication: {"Yes" if needs_auth else "No"}
 
+SPECIFIC FEATURES DETECTED:
+- Components needed: {', '.join(components_needed)}
+- API endpoints to integrate: {', '.join(api_endpoints)}
+- Special features: {', '.join(special_features) if special_features else 'None'}
+
 CRITICAL REQUIREMENTS:
-- Use React 18+ with modern hooks (useState, useEffect)
-- Include TailwindCSS for styling with proper classes
-- Create FUNCTIONAL components that actually work
+- Use React 18+ with modern hooks (useState, useEffect, useCallback)
+- Include TailwindCSS for modern, responsive styling
+- Create FUNCTIONAL components that actually work and make API calls
 - Add proper error handling and loading states
-- Make it responsive and user-friendly
-- Include at least 3-4 main components/pages relevant to the idea
-- Use Vite as the build tool
+- Make it responsive and user-friendly for mobile/desktop
+- Include the components identified above that are relevant to "{idea}"
+- Use Vite as the build tool with fast HMR
 - Include proper imports and exports
 - Make sure all components are properly connected
+- Add realistic sample data and interactions
+- Include modern UI patterns (cards, modals, forms, etc.)
+
+UNIQUE REQUIREMENTS for "{idea}":
+- Customize colors, icons, and layout to match the app's purpose
+- Add specific functionality that makes sense for this particular idea
+- Include relevant form fields, data displays, and user interactions
+- Use appropriate icons and visual elements
+- Make the UI feel purposeful and tailored to the use case
 
 Generate EXACTLY these files with COMPLETE, WORKING content:
 
-1. package.json - Include all necessary dependencies:
-   - react, react-dom (18+)
-   - vite, @vitejs/plugin-react
-   - tailwindcss, autoprefixer, postcss
-   - Any specific dependencies for this project idea
+1. package.json - Include all necessary dependencies for this specific project
+2. src/App.jsx - Main application with custom layout for "{idea}"
+3. src/main.jsx - Entry point with React 18 setup
+4. src/index.css - TailwindCSS + custom styles for this app
+5. vite.config.js - Vite configuration optimized for React
+6. tailwind.config.js - TailwindCSS with custom theme if needed
+7. postcss.config.js - PostCSS configuration
 
-2. src/App.jsx - Main application component:
-   - Import necessary React hooks
-   - Include proper routing if needed
-   - Add main layout and navigation
-   - Connect to backend APIs if applicable
-   - Include error boundaries
-
-3. src/main.jsx - Entry point:
-   - Proper React 18 createRoot usage
-   - Import App component and styles
-
-4. src/index.css - TailwindCSS setup and custom styles:
-   - @tailwind directives
-   - Custom styles specific to this project
-
-5. vite.config.js - Vite configuration:
-   - React plugin setup
-   - Proper dev server config
-   - API proxy if needed
-
-6. tailwind.config.js - TailwindCSS configuration:
-   - Proper content paths
-   - Custom theme if needed
-
-7. postcss.config.js - PostCSS configuration for Tailwind
+ADDITIONAL COMPONENT FILES (create 2-3 relevant to the idea):
+- Create component files in src/components/ that match the detected components above
+- Each component should be functional and include proper React patterns
+- Include realistic sample data and state management
+- Add proper TypeScript types if needed
 
 IMPORTANT: 
-- Make sure the code is COMPLETE and FUNCTIONAL
-- Include proper imports and exports
-- Use modern React patterns
-- Make it specific to the idea: "{idea}"
-- Ensure components actually render and work
+- Make the app UNIQUE and SPECIFIC to "{idea}" - not generic
+- Include proper error handling and loading states
+- Use modern React patterns (functional components, hooks)
+- Make it production-ready with proper code structure
+- Ensure all imports/exports work correctly
+- Add comments explaining the logic
 
 Return each file content in this EXACT format:
 ===FILE: filename===
@@ -7045,6 +7635,47 @@ async def generate_fastapi_backend_with_ai(backend_path: Path, idea: str, projec
     files_created = []
     
     try:
+        # Analyze the idea to determine specific API endpoints and models needed
+        api_routes = []
+        data_models = []
+        special_deps = []
+        
+        # Determine what APIs to create based on the idea
+        if any(keyword in idea.lower() for keyword in ["todo", "task", "list", "manage"]):
+            api_routes.extend(["GET /api/tasks", "POST /api/tasks", "PUT /api/tasks/{id}", "DELETE /api/tasks/{id}"])
+            data_models.extend(["Task", "TaskCreate", "TaskUpdate"])
+        
+        if any(keyword in idea.lower() for keyword in ["ecommerce", "shop", "store", "product", "cart"]):
+            api_routes.extend(["GET /api/products", "GET /api/products/{id}", "POST /api/cart", "POST /api/orders"])
+            data_models.extend(["Product", "CartItem", "Order", "OrderCreate"])
+        
+        if any(keyword in idea.lower() for keyword in ["blog", "article", "post", "content"]):
+            api_routes.extend(["GET /api/posts", "POST /api/posts", "GET /api/posts/{id}", "POST /api/comments"])
+            data_models.extend(["Post", "PostCreate", "Comment", "CommentCreate"])
+        
+        if any(keyword in idea.lower() for keyword in ["chat", "message", "conversation"]):
+            api_routes.extend(["GET /api/messages", "POST /api/messages", "WebSocket /ws/chat"])
+            data_models.extend(["Message", "MessageCreate", "ChatRoom"])
+            special_deps.extend(["websockets"])
+        
+        if any(keyword in idea.lower() for keyword in ["user", "auth", "login", "signup"]):
+            api_routes.extend(["POST /api/auth/login", "POST /api/auth/signup", "GET /api/users/me"])
+            data_models.extend(["User", "UserCreate", "UserLogin", "Token"])
+            special_deps.extend(["python-jose[cryptography]", "passlib[bcrypt]"])
+        
+        if any(keyword in idea.lower() for keyword in ["ai", "gpt", "openai", "chatbot", "ml"]):
+            api_routes.extend(["POST /api/ai/chat", "POST /api/ai/generate"])
+            data_models.extend(["AIRequest", "AIResponse", "ChatMessage"])
+            special_deps.extend(["openai", "langchain"])
+        
+        if any(keyword in idea.lower() for keyword in ["database", "store", "save", "crud"]):
+            special_deps.extend(["sqlalchemy", "databases", "asyncpg"])
+        
+        # Default routes if none detected
+        if not api_routes:
+            api_routes = ["GET /api/items", "POST /api/items", "GET /api/health"]
+            data_models = ["Item", "ItemCreate"]
+        
         # Use AI to generate unique code based on the idea
         prompt = f"""
 Generate a complete, functional FastAPI backend application for: "{idea}"
@@ -7054,55 +7685,46 @@ AI Integration: {"Yes" if needs_ai else "No"}
 Authentication: {"Yes" if needs_auth else "No"}
 Database: {"Yes" if needs_database else "No"}
 
+SPECIFIC FEATURES DETECTED:
+- API Routes needed: {', '.join(api_routes)}
+- Data Models needed: {', '.join(data_models)}
+- Special Dependencies: {', '.join(special_deps) if special_deps else 'None'}
+
 CRITICAL REQUIREMENTS:
-- Use FastAPI with modern Python 3.9+ features
-- Include proper CORS handling for React frontend on localhost:5173
-- Create FUNCTIONAL API endpoints specific to this idea
-- Add proper error handling and validation with Pydantic
-- Include health check and API documentation
-- Make it production-ready with proper structure
-- Include all necessary imports
-- Make endpoints actually work and return proper data
+- Use FastAPI with modern Python 3.9+ features and async/await
+- Include proper CORS handling for React frontend on localhost:5173 (Vite default)
+- Create FUNCTIONAL API endpoints specific to "{idea}"
+- Add proper error handling and validation with Pydantic models
+- Include health check and automatic API documentation
+- Make it production-ready with proper code structure
+- Include all necessary imports and dependencies
+- Make endpoints actually work and return realistic data
+- Add proper status codes (200, 201, 404, 422, etc.)
+- Include realistic sample data for development
+
+UNIQUE REQUIREMENTS for "{idea}":
+- Customize data models to match the specific domain (e.g., Task, Product, Post, etc.)
+- Add business logic that makes sense for this particular idea
+- Include proper validation rules and error messages
+- Add realistic default data or mock data for testing
+- Use appropriate field types and constraints
 
 Generate EXACTLY these files with COMPLETE, WORKING content:
 
-1. requirements.txt - Include all necessary dependencies:
-   - fastapi, uvicorn
-   - pydantic
-   - python-cors
-   - Any specific dependencies for this project idea
-
-2. main.py - Main FastAPI application:
-   - Proper FastAPI app setup
-   - CORS middleware configuration
-   - Import and include all routes
-   - Health check endpoint
-   - Error handling
-   - Startup/shutdown events if needed
-
-3. models.py - Pydantic models:
-   - Data models specific to this idea
-   - Request/response models
-   - Proper validation
-
-4. routes.py - API routes:
-   - Endpoints specific to the idea: "{idea}"
-   - CRUD operations if applicable
-   - Proper HTTP methods and status codes
-   - Request/response handling
-
-5. config.py - Application configuration:
-   - Environment variables
-   - Settings management
-   - Database config if needed
+1. requirements.txt - Include all necessary dependencies for this specific project
+2. main.py - Main FastAPI application with proper setup and routing
+3. models.py - Pydantic models specific to "{idea}" 
+4. routes.py - API routes with business logic for "{idea}"
+5. config.py - Application configuration and settings
+6. database.py - Database setup if needed (SQLite/PostgreSQL)
 
 IMPORTANT: 
-- Make sure the code is COMPLETE and FUNCTIONAL
-- Include proper imports and dependencies
-- Use modern FastAPI patterns
-- Make it specific to the idea: "{idea}"
-- Ensure endpoints actually work and return proper responses
-- Include proper CORS for frontend integration
+- Make the API UNIQUE and SPECIFIC to "{idea}" - not generic
+- Include proper imports and all dependencies
+- Use modern FastAPI patterns and best practices
+- Ensure all endpoints work and return proper responses
+- Include realistic sample data and proper error handling
+- Add comments explaining the business logic
 
 Return each file content in this EXACT format:
 ===FILE: filename===
@@ -7198,7 +7820,7 @@ async def parse_and_create_ai_files(base_path: Path, ai_response: str, project_n
     return files_created
 
 async def generate_ai_powered_full_stack_files(project_path: Path, idea: str, project_name: str, tech_stack: List[str], needs_ai: bool):
-    """Generate complete full-stack project using AI-powered functions"""
+    """Generate complete full-stack project using AI-powered functions - ALWAYS FastAPI + React"""
     try:
         # Create main project structure
         project_path.mkdir(exist_ok=True)
@@ -7208,29 +7830,34 @@ async def generate_ai_powered_full_stack_files(project_path: Path, idea: str, pr
         frontend_path.mkdir(exist_ok=True)
         backend_path.mkdir(exist_ok=True)
         
-        # Determine if we need specific features
-        needs_typescript = "TypeScript" in tech_stack
-        needs_nextjs = "Next.js" in tech_stack
-        needs_fastapi = "FastAPI" in tech_stack or "Python" in tech_stack
-        needs_auth = "auth" in idea.lower() or "login" in idea.lower() or "user" in idea.lower()
-        needs_database = any(db in tech_stack for db in ["PostgreSQL", "MongoDB"]) or "database" in idea.lower()
+        # Determine features needed from the idea
+        needs_auth = "auth" in idea.lower() or "login" in idea.lower() or "user" in idea.lower() or "signup" in idea.lower()
+        needs_database = any(keyword in idea.lower() for keyword in ["database", "store", "save", "data", "crud", "create", "update", "delete"])
+        needs_real_time = any(keyword in idea.lower() for keyword in ["chat", "live", "real-time", "notification", "websocket"])
+        needs_ai_integration = any(keyword in idea.lower() for keyword in ["ai", "chatbot", "gpt", "openai", "ml", "machine learning", "predict"])
         
-        # Generate frontend files with AI
-        if needs_nextjs:
-            frontend_files = await create_nextjs_frontend_with_animation(frontend_path, idea, project_name, needs_typescript, needs_auth)
-        else:
-            # Use AI-powered React generation
-            frontend_files = await generate_react_frontend_with_ai(frontend_path, idea, project_name, needs_typescript, needs_auth)
+        # Send status update
+        await manager.send_to_project(project_name, {
+            "type": "status",
+            "phase": "generate",
+            "message": f"🎨 Generating unique React frontend for: {idea}"
+        })
         
-        # Generate backend files with AI
-        if needs_fastapi:
-            # Use AI-powered FastAPI generation
-            backend_files = await generate_fastapi_backend_with_ai(backend_path, idea, project_name, needs_ai, needs_auth, needs_database)
-        else:
-            backend_files = await create_nodejs_backend_with_animation(backend_path, idea, project_name, needs_ai, needs_auth, needs_database)
+        # ALWAYS use AI-powered React generation (no Next.js)
+        frontend_files = await generate_react_frontend_with_ai(frontend_path, idea, project_name, False, needs_auth)
+        
+        # Send status update
+        await manager.send_to_project(project_name, {
+            "type": "status", 
+            "phase": "generate",
+            "message": f"⚡ Generating FastAPI backend with custom logic for: {idea}"
+        })
+        
+        # ALWAYS use AI-powered FastAPI generation
+        backend_files = await generate_fastapi_backend_with_ai(backend_path, idea, project_name, needs_ai_integration, needs_auth, needs_database)
         
         # Generate root files
-        root_files = await create_root_files_with_animation(project_path, project_name, idea, tech_stack)
+        root_files = await create_root_files_with_animation(project_path, project_name, idea, ["React", "FastAPI", "Vite", "TailwindCSS"])
         
         # Return project structure for display
         return [

@@ -82,33 +82,41 @@ const ProjectBuilder = () => {
     setBuildProgress([]);
     setGeneratedProject(null);
 
-    const steps = [
-      "[INFO] Analyzing project requirements...",
-      "[INFO] Generating full-stack architecture...",
-      "[INFO] Creating React frontend with TailwindCSS...",
-      "[INFO] Setting up FastAPI backend...",
-      "[INFO] Configuring database models...",
-      "[INFO] Implementing API endpoints...",
-      "[INFO] Adding authentication logic...",
-      "[INFO] Setting up deployment configurations...",
-      "[INFO] Generating production-ready code...",
-    ];
-    let currentProgress = ["[INIT] Starting full-stack project generation..."];
-    setBuildProgress(currentProgress);
-
-    for (const step of steps) {
-      await new Promise((res) => setTimeout(res, 800 + Math.random() * 400));
-      currentProgress = [...currentProgress, step];
-      setBuildProgress(currentProgress);
-    }
+    // Generate a unique project name
+    const projectName = `app-${Date.now()}`;
+    
+    // Setup WebSocket connection for real-time updates
+    const ws = new WebSocket(`ws://localhost:8000/ws/project/${projectName}`);
+    
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      
+      switch (data.type) {
+        case 'status':
+          setBuildProgress(prev => [...prev, `[${data.phase?.toUpperCase()}] ${data.message}`]);
+          break;
+        case 'terminal_output':
+          setBuildProgress(prev => [...prev, `[${data.level?.toUpperCase()}] ${data.message}`]);
+          break;
+        case 'preview_ready':
+          setBuildProgress(prev => [...prev, `[SUCCESS] 🌐 Live preview ready: ${data.url}`]);
+          // Auto-open Monaco Editor with preview
+          setTimeout(() => {
+            setShowMonacoEditor(true);
+          }, 500);
+          break;
+        case 'file_created':
+          setBuildProgress(prev => [...prev, `[FILE] ✓ Created ${data.file_path}`]);
+          break;
+      }
+    };
 
     try {
-      // Prepare the request payload
+      // Use the new AI-powered React + FastAPI generation
       const payload = {
+        project_name: projectName,
         idea: projectIdea,
-        project_type: "web-app",
-        tech_stack: ["React", "TypeScript", "TailwindCSS", "FastAPI", "Python"],
-        complexity: "medium"
+        tech_stack: ["React", "FastAPI", "Vite", "TailwindCSS"]
       };
 
       // Add image context if images are selected
@@ -116,65 +124,39 @@ const ProjectBuilder = () => {
         payload.context = `Project includes ${selectedImages.length} reference image(s): ${selectedImages.map(img => img.name).join(", ")}`;
       }
 
-      const response = await fetch("http://localhost:8000/generate-project", {
+      setBuildProgress(["[INIT] 🤖 Starting AI-powered React + FastAPI generation..."]);
+
+      const response = await fetch("http://localhost:8000/api/build-with-ai", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
+      
       const data = await response.json();
-      if (!data.success) throw new Error(data.error || "Project generation failed");
-
-      setGeneratedProject(data.project);
-      setBuildProgress((prev) => [...prev, "[OK] Full-stack project generation complete!"]);
-      setBuildProgress((prev) => [...prev, "[INFO] Frontend: React + TailwindCSS ready"]);
-      setBuildProgress((prev) => [...prev, "[INFO] Backend: FastAPI + PostgreSQL configured"]);
-      setBuildProgress((prev) => [...prev, "[INFO] Deployment: Ready for Vercel + Render"]);
-
-      // Check if auto-run is enabled in response
-      if (data.auto_run && data.auto_run.enabled) {
-        setAutoRunEnabled(true);
-        setBuildProgress((prev) => [...prev, "[INFO] Auto-run enabled - Opening Monaco Editor..."]);
-        setBuildProgress((prev) => [...prev, "[INFO] Loading project file tree..."]);
-        
-        // Auto-open Monaco Editor
-        setTimeout(() => {
-          setShowMonacoEditor(true);
-        }, 1000);
-
-        // Auto-start project after a delay
-        if (data.auto_run.auto_start_project) {
-          setTimeout(async () => {
-            setBuildProgress((prev) => [...prev, "[INFO] Auto-starting project..."]);
-            try {
-              const runResponse = await fetch("http://localhost:8001/api/run-project", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ project_name: data.project.name }),
-              });
-              const runData = await runResponse.json();
-              if (runData.success) {
-                setBuildProgress((prev) => [...prev, "[SUCCESS] Project started automatically!"]);
-                setBuildProgress((prev) => [...prev, "[INFO] Live preview available"]);
-              }
-            } catch (error) {
-              setBuildProgress((prev) => [...prev, `[WARNING] Auto-start failed: ${error.message}`]);
-            }
-          }, 3000);
-        }
-      } else {
-        setBuildProgress((prev) => [...prev, "[INFO] Opening Monaco Editor..."]);
-        setTimeout(() => {
-          setShowMonacoEditor(true);
-        }, 1000);
+      
+      if (!data.success) {
+        throw new Error(data.error || "Build failed");
       }
 
-      const treeRes = await fetch(
-        `http://localhost:8001/api/project-file-tree?project_name=${encodeURIComponent(
-          data.project.name
-        )}`
-      );
-      const treeData = await treeRes.json();
-      if (treeData.success) setFileTree(treeData.tree || []);
+      // Set the generated project data
+      setGeneratedProject({
+        name: projectName,
+        idea: projectIdea,
+        tech_stack: payload.tech_stack,
+        preview_url: data.preview_url
+      });
+
+      // Load file tree
+      try {
+        const treeRes = await fetch(
+          `http://localhost:8000/api/project-file-tree?project_name=${encodeURIComponent(projectName)}`
+        );
+        const treeData = await treeRes.json();
+        if (treeData.success) setFileTree(treeData.tree || []);
+      } catch (error) {
+        console.error("Failed to load file tree:", error);
+      }
+
     } catch (error) {
       setBuildProgress((prev) => [...prev, `[ERROR] ${error.message}`]);
     } finally {
@@ -200,7 +182,7 @@ const ProjectBuilder = () => {
     setFileContent("Loading file content...");
     try {
       const res = await fetch(
-        `http://localhost:8000/project-file-content?project_name=${encodeURIComponent(
+        `http://localhost:8000/api/project-file-content?project_name=${encodeURIComponent(
           generatedProject.name
         )}&file_path=${encodeURIComponent(file.path)}`
       );

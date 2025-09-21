@@ -1,7 +1,24 @@
 import React, { useState, useEffect, useRef } from 'react';
 import MonacoEditor from '@monaco-editor/react';
 
-// Inline styles - moved from MonacoProjectEditor.css
+// Add CSS animations for live generation
+const styleSheet = document.createElement('style');
+styleSheet.textContent = `
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+`;
+if (!document.head.querySelector('[data-monaco-animations]')) {
+  styleSheet.setAttribute('data-monaco-animations', 'true');
+  document.head.appendChild(styleSheet);
+}
+
+// Inline styles - simplified for new layout
 const styles = {
   monacoProjectEditor: {
     position: 'fixed',
@@ -16,6 +33,8 @@ const styles = {
     display: 'flex',
     flexDirection: 'column'
   },
+  
+  // Header styles
   editorHeader: {
     background: '#2d2d30',
     borderBottom: '1px solid #3e3e42',
@@ -48,87 +67,78 @@ const styles = {
   buildingIndicator: {
     color: '#ffcc02',
     fontSize: '12px',
-    background: 'rgba(255, 204, 2, 0.1)',
-    padding: '2px 6px',
-    borderRadius: '4px',
-    animation: 'pulse 1.5s infinite'
+    marginLeft: '8px',
+    animation: 'pulse 2s infinite'
   },
   editorActions: {
     display: 'flex',
-    gap: '8px'
-  },
-  layoutToggles: {
-    display: 'flex',
-    gap: '4px',
-    marginRight: '12px',
-    padding: '4px',
-    background: '#2d2d30',
-    borderRadius: '6px'
-  },
-  btnLayoutToggle: {
-    background: 'transparent',
-    border: 'none',
-    color: '#cccccc',
-    padding: '6px 10px',
-    borderRadius: '4px',
-    cursor: 'pointer',
-    fontSize: '14px',
-    transition: 'all 0.2s'
-  },
-  btnLayoutToggleActive: {
-    background: '#0e639c',
-    color: 'white'
+    gap: '8px',
+    alignItems: 'center'
   },
   btnEditorAction: {
     background: '#0e639c',
-    color: 'white',
+    color: '#ffffff',
     border: 'none',
     padding: '6px 12px',
     borderRadius: '4px',
     cursor: 'pointer',
     fontSize: '12px',
-    transition: 'all 0.2s',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '4px'
+    fontWeight: 500,
+    transition: 'background 0.2s'
   },
   btnEditorActionPreview: {
     background: '#16825d'
   },
   btnEditorActionStop: {
-    background: '#d73027'
+    background: '#c5524a'
   },
   btnEditorActionClose: {
     background: '#c5524a'
   },
-  editorLayout: {
+  
+  // New layout styles
+  newEditorLayout: {
     flex: 1,
     display: 'flex',
     overflow: 'hidden'
   },
-  editorSidebar: {
-    width: '320px',
+  
+  // Chat panel (left side)
+  chatPanel: {
+    width: '400px',
+    minWidth: '300px',
+    maxWidth: '500px',
     background: '#252526',
     borderRight: '1px solid #3e3e42',
     display: 'flex',
     flexDirection: 'column',
-    transition: 'width 0.3s ease'
+    resize: 'horizontal',
+    overflow: 'auto'
   },
-  editorSidebarCollapsed: {
-    width: '48px'
+  
+  // Right panel (preview or code)
+  rightPanel: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+    background: '#1e1e1e'
   },
-  sidebarHeader: {
+  
+  rightPanelHeader: {
     background: '#2d2d30',
     borderBottom: '1px solid #3e3e42',
-    padding: '8px',
+    padding: '8px 16px',
     display: 'flex',
     justifyContent: 'space-between',
-    alignItems: 'center'
+    alignItems: 'center',
+    height: '40px'
   },
+  
   sidebarTabs: {
     display: 'flex',
     gap: '4px'
   },
+  
   sidebarTab: {
     background: 'transparent',
     color: '#cccccc',
@@ -139,283 +149,149 @@ const styles = {
     fontSize: '11px',
     transition: 'all 0.2s'
   },
+  
   sidebarTabActive: {
     background: '#094771',
     color: '#ffffff'
   },
-  sidebarToggle: {
+  
+  viewToggleButtons: {
+    display: 'flex',
+    gap: '4px'
+  },
+  
+  viewToggleButton: {
     background: 'transparent',
     color: '#cccccc',
-    border: 'none',
+    border: '1px solid #3e3e42',
+    padding: '6px 12px',
     cursor: 'pointer',
-    padding: '4px',
     borderRadius: '4px',
+    fontSize: '12px',
     transition: 'all 0.2s'
   },
-  sidebarContent: {
+  
+  viewToggleButtonActive: {
+    background: '#094771',
+    color: '#ffffff',
+    borderColor: '#094771'
+  },
+  
+  rightPanelContent: {
+    flex: 1,
+    overflow: 'hidden'
+  },
+  
+  // Chat styles
+  chatContainer: {
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%'
+  },
+  
+  chatMessages: {
     flex: 1,
     overflowY: 'auto',
-    padding: '8px'
+    padding: '16px',
+    gap: '16px',
+    display: 'flex',
+    flexDirection: 'column'
   },
+  
+  chatMessage: {
+    maxWidth: '80%',
+    padding: '12px 16px',
+    borderRadius: '12px',
+    fontSize: '14px',
+    lineHeight: 1.4
+  },
+  
+  chatMessageUser: {
+    background: '#094771',
+    color: '#ffffff',
+    alignSelf: 'flex-end',
+    marginLeft: 'auto'
+  },
+  
+  chatMessageAssistant: {
+    background: '#2d2d30',
+    color: '#d4d4d4',
+    alignSelf: 'flex-start'
+  },
+  
+  chatInputContainer: {
+    padding: '16px',
+    borderTop: '1px solid #3e3e42',
+    display: 'flex',
+    gap: '8px'
+  },
+  
+  chatInput: {
+    flex: 1,
+    background: '#3c3c3c',
+    color: '#d4d4d4',
+    border: '1px solid #3e3e42',
+    borderRadius: '4px',
+    padding: '8px 12px',
+    fontSize: '14px',
+    outline: 'none'
+  },
+  
+  chatSendButton: {
+    background: '#0e639c',
+    color: '#ffffff',
+    border: 'none',
+    borderRadius: '4px',
+    padding: '8px 12px',
+    cursor: 'pointer',
+    fontSize: '14px'
+  },
+  
+  // File tree styles
   fileTree: {
-    fontSize: '13px'
+    flex: 1,
+    padding: '8px',
+    fontSize: '13px',
+    overflow: 'auto'
   },
-  loadingFiles: {
-    color: '#9cdcfe',
-    textAlign: 'center',
-    padding: '20px',
-    fontStyle: 'italic'
-  },
+  
   fileTreeItem: {
     display: 'flex',
     alignItems: 'center',
-    gap: '6px',
-    padding: '4px 6px',
+    padding: '4px 8px',
     cursor: 'pointer',
     borderRadius: '4px',
-    transition: 'all 0.2s',
-    marginBottom: '1px'
+    marginBottom: '2px',
+    gap: '6px'
   },
+  
+  fileTreeItemHover: {
+    background: '#2a2d2e'
+  },
+  
   fileTreeItemSelected: {
     background: '#094771',
     color: '#ffffff'
   },
-  fileIcon: {
-    fontSize: '14px',
-    width: '16px',
-    textAlign: 'center',
-    flexShrink: 0
-  },
-  fileName: {
-    flex: 1,
-    whiteSpace: 'nowrap',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis'
-  },
-  editorMain: {
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column',
-    overflow: 'hidden'
-  },
-  editorContentContainer: {
-    display: 'flex',
-    height: '100%',
-    overflow: 'hidden'
-  },
-  monacoContainer: {
-    flex: 1,
-    overflow: 'hidden'
-  },
-  monacoContainerWithPreview: {
-    width: '50%',
-    borderRight: '1px solid #3c3c3c'
-  },
-  previewContainer: {
-    width: '50%',
-    display: 'flex',
-    flexDirection: 'column',
-    background: '#1e1e1e'
-  },
-  previewHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '8px 12px',
-    background: '#2d2d30',
-    borderBottom: '1px solid #3c3c3c',
-    minHeight: '32px'
-  },
-  previewTitle: {
-    color: '#cccccc',
-    fontSize: '13px',
-    fontWeight: 500
-  },
-  previewContent: {
-    flex: 1,
-    background: 'white',
-    position: 'relative'
-  },
-  previewIframe: {
-    width: '100%',
-    height: '100%',
-    border: 'none',
-    background: 'white'
-  },
-  previewLoading: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: '100%',
-    color: '#cccccc',
-    background: '#1e1e1e'
-  },
-  previewError: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: '100%',
-    color: '#f48771',
-    background: '#1e1e1e',
-    flexDirection: 'column',
-    gap: '8px'
-  },
-  chatContainer: {
-    width: '50%',
-    minWidth: '300px',
-    display: 'flex',
-    flexDirection: 'column',
-    background: '#1e1e1e',
-    borderRight: '1px solid #3c3c3c'
-  },
-  chatHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '8px 12px',
-    background: '#2d2d30',
-    borderBottom: '1px solid #3c3c3c',
-    minHeight: '32px'
-  },
-  chatTitle: {
-    color: '#cccccc',
-    fontSize: '13px',
-    fontWeight: 500
-  },
-  chatMessages: {
-    flex: 1,
-    overflowY: 'auto',
-    padding: '12px',
-    background: '#1e1e1e'
-  },
-  chatMessage: {
-    marginBottom: '16px',
-    padding: '12px',
-    borderRadius: '8px',
-    background: '#2d2d30'
-  },
-  chatMessageUser: {
-    background: '#0e639c',
-    marginLeft: '20px'
-  },
-  chatMessageAssistant: {
-    background: '#2d2d30',
-    marginRight: '20px'
-  },
-  chatMessageError: {
-    background: '#5d2d2d',
-    borderLeft: '3px solid #f48771'
-  },
-  messageContent: {
-    color: '#cccccc',
-    lineHeight: 1.4,
-    whiteSpace: 'pre-wrap'
-  },
-  chatInputContainer: {
-    display: 'flex',
-    padding: '12px',
-    background: '#2d2d30',
-    borderTop: '1px solid #3c3c3c',
-    gap: '8px'
-  },
-  chatInput: {
-    flex: 1,
-    background: '#1e1e1e',
-    border: '1px solid #3c3c3c',
-    color: '#cccccc',
-    padding: '8px 12px',
-    borderRadius: '4px',
-    fontSize: '13px',
-    outline: 'none'
-  },
-  chatSend: {
-    background: '#0e639c',
-    border: 'none',
-    color: 'white',
-    padding: '8px 12px',
-    borderRadius: '4px',
-    cursor: 'pointer',
-    fontSize: '14px',
-    transition: 'background-color 0.2s',
-    minWidth: '40px'
-  },
-  editorTerminal: {
-    height: '250px',
-    background: '#1e1e1e',
-    borderTop: '1px solid #3e3e42',
-    display: 'flex',
-    flexDirection: 'column',
-    transition: 'height 0.3s ease'
-  },
-  editorTerminalCollapsed: {
-    height: '32px'
-  },
-  terminalHeader: {
-    background: '#2d2d30',
-    borderBottom: '1px solid #3e3e42',
-    padding: '6px 12px',
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    height: '32px'
-  },
-  terminalTitle: {
-    color: '#ffffff',
-    fontSize: '12px',
-    fontWeight: 500
-  },
-  terminalContent: {
-    flex: 1,
-    overflowY: 'auto',
-    padding: '8px 12px',
-    fontFamily: "'Consolas', 'Monaco', 'Courier New', monospace",
-    fontSize: '12px',
-    lineHeight: 1.4,
-    background: '#1e1e1e'
-  },
-  terminalLine: {
-    marginBottom: '2px',
-    display: 'flex',
-    gap: '8px'
-  },
-  terminalTimestamp: {
-    color: '#666',
-    fontSize: '10px',
-    flexShrink: 0
-  },
-  terminalMessage: {
-    flex: 1,
-    wordBreak: 'break-word'
-  },
-  terminalSuccess: {
-    color: '#73c991'
-  },
-  terminalError: {
-    color: '#f44747'
-  },
-  terminalWarning: {
-    color: '#ffcc02'
-  },
-  terminalInfo: {
-    color: '#d4d4d4'
-  },
-  noFileSelected: {
-    height: '100%',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    background: '#1e1e1e'
-  },
+  
   welcomeScreen: {
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'center',
+    alignItems: 'center',
+    height: '100%',
     textAlign: 'center',
     maxWidth: '600px',
+    margin: '0 auto',
     padding: '40px'
   },
+  
   welcomeScreenH2: {
     color: '#ffffff',
     marginBottom: '16px',
     fontSize: '24px'
   },
+  
   welcomeScreenP: {
     color: '#cccccc',
     marginBottom: '12px',
@@ -427,539 +303,157 @@ const MonacoProjectEditor = ({ project, onClose }) => {
   const [fileTree, setFileTree] = useState([]);
   const [selectedFile, setSelectedFile] = useState(null);
   const [fileContents, setFileContents] = useState({});
-  const [terminalOutput, setTerminalOutput] = useState([]);
-  const [isRunning, setIsRunning] = useState(false);
-  const [isBuilding, setIsBuilding] = useState(false);
-  const [previewUrl, setPreviewUrl] = useState(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [terminalCollapsed, setTerminalCollapsed] = useState(false);
   const [activeTab, setActiveTab] = useState('files');
-  const [openTabs, setOpenTabs] = useState([]);
   const [errors, setErrors] = useState([]);
-  const [currentDirectory, setCurrentDirectory] = useState('/');
-  const [isCreatingProject, setIsCreatingProject] = useState(false);
-  const [showChat, setShowChat] = useState(false);
+  const [isBuilding, setIsBuilding] = useState(false);
+  const [isRunning, setIsRunning] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState(null);
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
   const [isAiThinking, setIsAiThinking] = useState(false);
-  const [layoutMode, setLayoutMode] = useState('editor'); // 'editor', 'preview', 'chat', 'split'
-  const editorRef = useRef(null);
+  const [layoutMode, setLayoutMode] = useState('preview'); // 'preview' or 'code'
+  const [terminalOutput, setTerminalOutput] = useState([]); // Live generation output
+  
   const chatEndRef = useRef(null);
-  const terminalRef = useRef(null);
   const wsRef = useRef(null);
 
+  // Initialize project
   useEffect(() => {
     if (project?.name) {
       initializeProject();
       setupWebSocket();
+      
+      // Initialize chat with welcome message
+      const welcomeMessage = {
+        role: 'assistant',
+        content: `👋 Welcome to your AI coding assistant! I'm here to help you build amazing apps.
+
+I can help you:
+• Add new features to your app
+• Fix bugs and errors
+• Improve styling and design
+• Optimize performance
+• Explain code functionality
+
+Just tell me what you'd like to do with your project!`
+      };
+      setChatMessages([welcomeMessage]);
     }
-    
-    return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
-    };
   }, [project]);
 
-  const setupWebSocket = () => {
-    try {
-      const ws = new WebSocket(`ws://localhost:8000/ws/project/${project.name}`);
-      wsRef.current = ws;
-      
-      ws.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        
-        switch (data.type) {
-          case 'terminal_output':
-            addTerminalOutput(data.message, data.level || 'info');
-            break;
-          case 'file_changed':
-            if (data.file_path && fileContents[data.file_path]) {
-              reloadFile(data.file_path);
-            }
-            break;
-          case 'error_detected':
-            setErrors(prev => [...prev, data.error]);
-            addTerminalOutput(`❌ Error: ${data.error.message}`, 'error');
-            break;
-          case 'preview_ready':
-            setPreviewUrl(data.url);
-            addTerminalOutput(`🌐 Preview available: ${data.url}`, 'success');
-            break;
-          case 'file_creation_start':
-            addTerminalOutput(data.message, 'info');
-            setIsCreatingProject(true);
-            break;
-          case 'file_created':
-            // Add file to file tree (will trigger re-render)
-            loadProjectFiles();
-            addTerminalOutput(`📄 Created ${data.file_path}`, 'info');
-            break;
-          case 'file_content_update':
-            // Show real-time typing effect in Monaco Editor
-            if (data.file_path && selectedFile === data.file_path) {
-              setFileContents(prev => ({
-                ...prev,
-                [data.file_path]: data.content
-              }));
-            }
-            // Auto-open first created file
-            if (data.file_path && !selectedFile && data.content) {
-              setSelectedFile(data.file_path);
-              setFileContents(prev => ({
-                ...prev,
-                [data.file_path]: data.content
-              }));
-            }
-            break;
-          case 'file_creation_complete':
-            addTerminalOutput(data.message, 'success');
-            setIsCreatingProject(false);
-            loadProjectFiles(); // Refresh file tree
-            break;
-        }
-      };
-      
-      ws.onopen = () => {
-        addTerminalOutput('🔗 Connected to project server', 'success');
-      };
-      
-      ws.onclose = () => {
-        addTerminalOutput('🔌 Disconnected from project server', 'warning');
-      };
-    } catch (error) {
-      addTerminalOutput(`❌ WebSocket connection failed: ${error.message}`, 'error');
-    }
-  };
-
   const initializeProject = async () => {
-    addTerminalOutput('🚀 Initializing project workspace...', 'info');
-    
+    // Load file tree
     try {
-      // Create project structure
-      await createProjectStructure();
-      
-      // Load file tree
-      await loadProjectFiles();
-      
-      // Install dependencies
-      await installDependencies();
-      
-      addTerminalOutput('✅ Project initialized successfully!', 'success');
-    } catch (error) {
-      addTerminalOutput(`❌ Project initialization failed: ${error.message}`, 'error');
-    }
-  };
-
-  const createProjectStructure = async () => {
-    addTerminalOutput('📁 Creating project structure...', 'info');
-    
-    try {
-      const response = await fetch('/api/create-project-structure', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          project_name: project.name,
-          idea: project.description,
-          tech_stack: project.tech_stack
-        })
-      });
-      
+      const response = await fetch(`http://localhost:8000/api/project-file-tree?project_name=${encodeURIComponent(project.name)}`);
       const data = await response.json();
-      
       if (data.success) {
-        addTerminalOutput('✅ Project structure created', 'success');
-        
-        // Log created files
-        data.files_created?.forEach(file => {
-          addTerminalOutput(`📄 Created: ${file}`, 'info');
-        });
+        setFileTree(data.file_tree || []);
       } else {
-        throw new Error(data.error);
+        console.error('Failed to load file tree:', data.error);
+        setFileTree([]);
       }
     } catch (error) {
-      addTerminalOutput(`❌ Failed to create structure: ${error.message}`, 'error');
-      throw error;
+      console.error('Failed to load file tree:', error);
+      setFileTree([]);
     }
   };
 
-  const loadProjectFiles = async () => {
-    try {
-      const response = await fetch(`/api/project-file-tree?project_name=${encodeURIComponent(project.name)}`);
-      const data = await response.json();
+  const setupWebSocket = () => {
+    if (wsRef.current) {
+      wsRef.current.close();
+    }
+    
+    const ws = new WebSocket(`ws://localhost:8000/ws/project/${project.name}`);
+    wsRef.current = ws;
+    
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
       
-      if (data.success && data.file_tree) {
-        setFileTree(data.file_tree);
-        
-        // Auto-open main files
-        const mainFiles = ['App.jsx', 'index.html', 'main.py', 'package.json', 'README.md'];
-        for (const mainFile of mainFiles) {
-          const foundFile = findFileInTree(data.file_tree, mainFile);
-          if (foundFile) {
-            await openFile(foundFile);
-            break;
+      switch (data.type) {
+        case 'preview_ready':
+          setPreviewUrl(data.url);
+          setIsBuilding(false);
+          setIsRunning(true);
+          break;
+        case 'status':
+          if (data.phase === 'ready') {
+            setIsBuilding(false);
+            setIsRunning(true);
+            if (data.preview_url) {
+              setPreviewUrl(data.preview_url);
+            }
+          } else if (data.phase === 'generate') {
+            // Show AI generation progress
+            setTerminalOutput(prev => [...prev, `🤖 ${data.message}`]);
+          } else if (data.phase === 'frontend') {
+            setTerminalOutput(prev => [...prev, `🎨 ${data.message}`]);
+          } else if (data.phase === 'backend') {
+            setTerminalOutput(prev => [...prev, `⚡ ${data.message}`]);
+          } else if (data.phase === 'config') {
+            setTerminalOutput(prev => [...prev, `📄 ${data.message}`]);
           }
-        }
-      } else {
-        addTerminalOutput(`❌ Failed to load files: ${data.error}`, 'error');
+          break;
+        case 'file_created':
+          // Show live file creation
+          setTerminalOutput(prev => [...prev, `📄 Created ${data.file_path}`]);
+          // Refresh file tree to show new file
+          if (fileTree.length > 0) {
+            initializeProject();
+          }
+          break;
+        case 'file_content_update':
+          // Show live typing effect for file content
+          setTerminalOutput(prev => [...prev, `✍️ Writing ${data.file_path}...`]);
+          break;
+        case 'file_creation_start':
+          setTerminalOutput(prev => [...prev, `🚀 ${data.message}`]);
+          break;
+        case 'file_creation_complete':
+          setTerminalOutput(prev => [...prev, `✅ ${data.message}`]);
+          // Refresh file tree after completion
+          setTimeout(() => {
+            initializeProject();
+          }, 500);
+          break;
+        case 'terminal_output':
+          // Show general terminal output
+          setTerminalOutput(prev => [...prev, data.message]);
+          break;
+        case 'file_changed':
+          // Reload file tree when files change
+          initializeProject();
+          break;
       }
-    } catch (error) {
-      addTerminalOutput(`❌ Error loading project: ${error.message}`, 'error');
-    }
-  };
-
-  const installDependencies = async () => {
-    addTerminalOutput('📦 Installing dependencies...', 'info');
-    
-    try {
-      const response = await fetch('/api/install-dependencies', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          project_name: project.name,
-          tech_stack: project.tech_stack
-        })
-      });
-      
-      const data = await response.json();
-      
-      if (data.success) {
-        addTerminalOutput('✅ Dependencies installed successfully', 'success');
-      } else {
-        addTerminalOutput(`⚠️ Dependency installation issues: ${data.error}`, 'warning');
-      }
-    } catch (error) {
-      addTerminalOutput(`❌ Failed to install dependencies: ${error.message}`, 'error');
-    }
-  };
-
-  const findFileInTree = (tree, fileName) => {
-    if (!tree || !Array.isArray(tree)) return null;
-    
-    for (const item of tree) {
-      if (item.type === 'file' && item.name === fileName) {
-        return item;
-      }
-      if (item.type === 'dir' && item.children) {
-        const found = findFileInTree(item.children, fileName);
-        if (found) return found;
-      }
-    }
-    return null;
-  };
-
-  const openFile = async (file) => {
-    if (file.type !== 'file') return;
-
-    try {
-      const response = await fetch(`/api/project-file-content?project_name=${encodeURIComponent(project.name)}&file_path=${encodeURIComponent(file.path)}`);
-      const data = await response.json();
-      
-      if (data.success) {
-        setFileContents(prev => ({
-          ...prev,
-          [file.path]: data.content
-        }));
-        
-        setSelectedFile(file);
-        
-        // Add to open tabs if not already open
-        if (!openTabs.find(tab => tab.path === file.path)) {
-          setOpenTabs(prev => [...prev, file]);
-        }
-        
-        addTerminalOutput(`📄 Opened: ${file.path}`, 'info');
-      } else {
-        addTerminalOutput(`❌ Failed to open ${file.path}: ${data.error}`, 'error');
-      }
-    } catch (error) {
-      addTerminalOutput(`❌ Error opening file: ${error.message}`, 'error');
-    }
-  };
-
-  const saveFile = async (filePath, content) => {
-    try {
-      const response = await fetch('/api/save-project-file', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          project_name: project.name,
-          file_path: filePath,
-          content: content
-        })
-      });
-      
-      const data = await response.json();
-      if (data.success) {
-        addTerminalOutput(`💾 Saved: ${filePath}`, 'success');
-        
-        setFileContents(prev => ({
-          ...prev,
-          [filePath]: content
-        }));
-        
-        // Auto-check for errors after save
-        setTimeout(() => checkForErrors(), 1000);
-      } else {
-        addTerminalOutput(`❌ Failed to save ${filePath}: ${data.error}`, 'error');
-      }
-    } catch (error) {
-      addTerminalOutput(`❌ Error saving file: ${error.message}`, 'error');
-    }
+    };
   };
 
   const runProject = async () => {
-    if (isRunning) return;
-    
-    setIsRunning(true);
     setIsBuilding(true);
-    addTerminalOutput('🚀 Building and starting project...', 'info');
-    
     try {
-      const response = await fetch('/api/run-project', {
+      const response = await fetch('http://localhost:8000/api/run-project', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           project_name: project.name,
-          tech_stack: project.tech_stack
+          tech_stack: project.tech_stack || []
         })
       });
       
-      const data = await response.json();
-      
-      if (data.success) {
-        addTerminalOutput('✅ Project started successfully!', 'success');
-        if (data.preview_url) {
-          setPreviewLoading(true);
-          setPreviewUrl(data.preview_url);
-        }
-        setIsBuilding(false);
-        
-        // Start monitoring
-        startErrorMonitoring();
-      } else {
-        addTerminalOutput(`❌ Failed to start project: ${data.error}`, 'error');
-        setIsBuilding(false);
-        
-        // Try to auto-fix build errors
-        if (data.errors && data.errors.length > 0) {
-          await autoFixErrors(data.errors);
-        }
+      const result = await response.json();
+      if (result.success && result.preview_url) {
+        setPreviewUrl(result.preview_url);
+        setIsRunning(true);
       }
     } catch (error) {
-      addTerminalOutput(`❌ Error running project: ${error.message}`, 'error');
-      setIsBuilding(false);
+      console.error('Failed to run project:', error);
     } finally {
-      setIsRunning(false);
+      setIsBuilding(false);
     }
   };
 
-  const stopProject = async () => {
+  const loadFileContent = async (filePath) => {
     try {
-      const response = await fetch('/api/stop-project', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          project_name: project.name
-        })
-      });
-      
-      const data = await response.json();
-      
-      if (data.success) {
-        addTerminalOutput('🛑 Project stopped', 'info');
-        setPreviewUrl(null);
-        setPreviewLoading(false);
-        setIsBuilding(false);
-      }
-    } catch (error) {
-      addTerminalOutput(`❌ Error stopping project: ${error.message}`, 'error');
-    }
-  };
-
-  // AI Chat Functions
-  const sendChatMessage = async () => {
-    if (!chatInput.trim() || isAiThinking) return;
-    
-    const userMessage = {
-      role: 'user',
-      content: chatInput.trim(),
-      timestamp: new Date().toLocaleTimeString()
-    };
-    
-    setChatMessages(prev => [...prev, userMessage]);
-    setChatInput('');
-    setIsAiThinking(true);
-    
-    try {
-      const response = await fetch('/api/ai-chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          project_name: project.name,
-          message: userMessage.content,
-          file_context: selectedFile ? {
-            path: selectedFile.path,
-            content: fileContents[selectedFile.path] || ''
-          } : null,
-          file_tree: fileTree
-        })
-      });
-      
-      const data = await response.json();
-      
-      if (data.success) {
-        const aiMessage = {
-          role: 'assistant',
-          content: data.response,
-          timestamp: new Date().toLocaleTimeString(),
-          actions: data.actions || []
-        };
-        
-        setChatMessages(prev => [...prev, aiMessage]);
-        
-        // Apply any file changes suggested by AI
-        if (data.file_changes) {
-          await applyAiFileChanges(data.file_changes);
-        }
-      } else {
-        const errorMessage = {
-          role: 'assistant',
-          content: `Sorry, I encountered an error: ${data.error}`,
-          timestamp: new Date().toLocaleTimeString(),
-          isError: true
-        };
-        setChatMessages(prev => [...prev, errorMessage]);
-      }
-    } catch (error) {
-      const errorMessage = {
-        role: 'assistant',
-        content: `Sorry, I couldn't process your request: ${error.message}`,
-        timestamp: new Date().toLocaleTimeString(),
-        isError: true
-      };
-      setChatMessages(prev => [...prev, errorMessage]);
-    }
-    
-    setIsAiThinking(false);
-  };
-
-  const applyAiFileChanges = async (fileChanges) => {
-    for (const change of fileChanges) {
-      if (change.type === 'modify' && change.path && change.content) {
-        // Update file content in editor
-        setFileContents(prev => ({
-          ...prev,
-          [change.path]: change.content
-        }));
-        
-        // Save the file
-        await saveFile(change.path, change.content);
-        
-        addTerminalOutput(`✏️ AI updated file: ${change.path}`, 'success');
-      } else if (change.type === 'create' && change.path && change.content) {
-        // Create new file
-        await createNewFile(change.path, change.content);
-        addTerminalOutput(`📝 AI created file: ${change.path}`, 'success');
-      }
-    }
-    
-    // Refresh file tree to show changes
-    await loadProjectFiles();
-  };
-
-  const createNewFile = async (filePath, content) => {
-    try {
-      const response = await fetch('/api/create-file', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          project_name: project.name,
-          file_path: filePath,
-          content: content
-        })
-      });
-      
-      if (response.ok) {
-        // Add to file contents
-        setFileContents(prev => ({
-          ...prev,
-          [filePath]: content
-        }));
-      }
-    } catch (error) {
-      addTerminalOutput(`❌ Error creating file: ${error.message}`, 'error');
-    }
-  };
-
-  const autoFixErrors = async (errorList) => {
-    addTerminalOutput('🔧 Auto-fixing detected errors...', 'info');
-    
-    try {
-      const response = await fetch('/api/auto-fix-errors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          project_name: project.name,
-          errors: errorList,
-          tech_stack: project.tech_stack
-        })
-      });
-      
-      const data = await response.json();
-      
-      if (data.success) {
-        addTerminalOutput('✅ Errors fixed automatically!', 'success');
-        
-        // Reload modified files
-        if (data.files_modified) {
-          for (const filePath of data.files_modified) {
-            await reloadFile(filePath);
-          }
-        }
-        
-        // Try running again after a delay
-        setTimeout(() => {
-          addTerminalOutput('🔄 Retrying project build...', 'info');
-          runProject();
-        }, 2000);
-      } else {
-        addTerminalOutput(`❌ Auto-fix failed: ${data.error}`, 'error');
-        addTerminalOutput('💡 Please fix errors manually', 'info');
-      }
-    } catch (error) {
-      addTerminalOutput(`❌ Auto-fix error: ${error.message}`, 'error');
-    }
-  };
-
-  const checkForErrors = async () => {
-    try {
-      const response = await fetch(`/api/check-project-errors?project_name=${encodeURIComponent(project.name)}`);
-      const data = await response.json();
-      
-      if (data.errors && data.errors.length > 0) {
-        setErrors(data.errors);
-        
-        if (data.errors.length > 0) {
-          addTerminalOutput(`⚠️ ${data.errors.length} errors detected`, 'warning');
-        }
-      } else {
-        setErrors([]);
-      }
-    } catch (error) {
-      console.error('Error checking for errors:', error);
-    }
-  };
-
-  const startErrorMonitoring = () => {
-    const interval = setInterval(checkForErrors, 3000);
-    return () => clearInterval(interval);
-  };
-
-  const reloadFile = async (filePath) => {
-    try {
-      const response = await fetch(`/api/project-file-content?project_name=${encodeURIComponent(project.name)}&file_path=${encodeURIComponent(filePath)}`);
+      const response = await fetch(`http://localhost:8000/api/project-file-content?project_name=${encodeURIComponent(project.name)}&file_path=${encodeURIComponent(filePath)}`);
       const data = await response.json();
       
       if (data.success) {
@@ -967,168 +461,107 @@ const MonacoProjectEditor = ({ project, onClose }) => {
           ...prev,
           [filePath]: data.content
         }));
-        
-        addTerminalOutput(`🔄 Reloaded: ${filePath}`, 'info');
       }
     } catch (error) {
-      addTerminalOutput(`❌ Error reloading file: ${error.message}`, 'error');
+      console.error('Failed to load file content:', error);
     }
   };
 
-  const executeTerminalCommand = async (command) => {
-    addTerminalOutput(`$ ${command}`, 'command');
+  const sendChatMessage = async () => {
+    if (!chatInput.trim() || isAiThinking) return;
+    
+    const userMessage = { role: 'user', content: chatInput };
+    setChatMessages(prev => [...prev, userMessage]);
+    setChatInput('');
+    setIsAiThinking(true);
     
     try {
-      const response = await fetch('/api/execute-command', {
+      const response = await fetch('http://localhost:8000/api/ai-apply-changes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           project_name: project.name,
-          command: command,
-          working_directory: currentDirectory
+          user_message: chatInput,
+          tech_stack: project.tech_stack || [],
+          re_run: true // Auto re-run after changes
         })
       });
       
-      const data = await response.json();
+      const result = await response.json();
       
-      if (data.success) {
-        addTerminalOutput(data.output, 'output');
+      if (result.success) {
+        const assistantMessage = {
+          role: 'assistant',
+          content: `✅ I've made the requested changes to your project!
+
+${result.files_modified ? `Modified files: ${result.files_modified.join(', ')}` : ''}
+
+The changes have been applied and your preview has been updated.`
+        };
+        setChatMessages(prev => [...prev, assistantMessage]);
         
-        // Update current directory if cd command
-        if (command.startsWith('cd ')) {
-          setCurrentDirectory(data.working_directory || currentDirectory);
+        // Reload project files and preview
+        initializeProject();
+        if (result.preview_url) {
+          setPreviewUrl(result.preview_url);
         }
       } else {
-        addTerminalOutput(data.error, 'error');
+        const errorMessage = {
+          role: 'assistant',
+          content: `❌ Sorry, I couldn't make those changes: ${result.error || 'Unknown error'}`
+        };
+        setChatMessages(prev => [...prev, errorMessage]);
       }
     } catch (error) {
-      addTerminalOutput(`Error: ${error.message}`, 'error');
+      const errorMessage = {
+        role: 'assistant',
+        content: `❌ Sorry, there was an error processing your request: ${error.message}`
+      };
+      setChatMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setIsAiThinking(false);
     }
   };
 
-  const addTerminalOutput = (message, type = 'info') => {
-    const timestamp = new Date().toLocaleTimeString();
-    setTerminalOutput(prev => [...prev, {
-      message,
-      type,
-      timestamp,
-      id: Date.now() + Math.random()
-    }]);
-    
-    // Auto-scroll terminal
-    setTimeout(() => {
-      if (terminalRef.current) {
-        terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
-      }
-    }, 100);
+  const renderFileTree = (items, level = 0) => {
+    return items.map((item, index) => (
+      <div key={index}>
+        <div 
+          style={{
+            ...styles.fileTreeItem,
+            paddingLeft: `${8 + level * 16}px`,
+            ...(selectedFile === item.path ? styles.fileTreeItemSelected : {})
+          }}
+          onClick={() => {
+            if (item.type === 'file') {
+              setSelectedFile(item.path);
+              loadFileContent(item.path);
+            }
+          }}
+        >
+          <span>{item.type === 'dir' ? '📁' : '📄'}</span>
+          <span>{item.name}</span>
+        </div>
+        {item.children && renderFileTree(item.children, level + 1)}
+      </div>
+    ));
   };
 
-  const closeTab = (tabToClose) => {
-    setOpenTabs(prev => prev.filter(tab => tab.path !== tabToClose.path));
-    
-    if (selectedFile?.path === tabToClose.path) {
-      const remainingTabs = openTabs.filter(tab => tab.path !== tabToClose.path);
-      setSelectedFile(remainingTabs.length > 0 ? remainingTabs[0] : null);
-    }
-  };
-
-  const getFileLanguage = (fileName) => {
+  const getLanguageFromFileName = (fileName) => {
     const ext = fileName.split('.').pop().toLowerCase();
-    const languageMap = {
+    const langMap = {
       'js': 'javascript',
       'jsx': 'javascript',
       'ts': 'typescript',
       'tsx': 'typescript',
       'py': 'python',
-      'html': 'html',
       'css': 'css',
-      'scss': 'scss',
+      'html': 'html',
       'json': 'json',
-      'md': 'markdown',
-      'yml': 'yaml',
-      'yaml': 'yaml',
-      'dockerfile': 'dockerfile',
-      'env': 'shell',
-      'gitignore': 'ignore',
-      'vue': 'vue'
+      'md': 'markdown'
     };
-    return languageMap[ext] || 'plaintext';
+    return langMap[ext] || 'plaintext';
   };
-
-  const getFileIcon = (fileName) => {
-    const ext = fileName.split('.').pop().toLowerCase();
-    const iconMap = {
-      'js': '🟨',
-      'jsx': '⚛️',
-      'ts': '🔷',
-      'tsx': '⚛️',
-      'py': '🐍',
-      'html': '🌐',
-      'css': '🎨',
-      'scss': '🎨',
-      'json': '📄',
-      'md': '📝',
-      'yml': '⚙️',
-      'yaml': '⚙️',
-      'dockerfile': '🐳',
-      'gitignore': '📋',
-      'env': '🔐',
-      'vue': '💚'
-    };
-    return iconMap[ext] || '📄';
-  };
-
-  const renderFileTree = (items, level = 0) => {
-    if (!items || !Array.isArray(items)) return null;
-    
-    return items.map(item => (
-      <div key={item.path} style={{ marginLeft: `${level * 16}px` }}>
-        <div 
-          className={`file-tree-item ${item.type} ${selectedFile?.path === item.path ? 'selected' : ''}`}
-          onClick={() => item.type === 'file' ? openFile(item) : null}
-        >
-          <span className="file-icon">
-            {item.type === 'directory' ? '📁' : getFileIcon(item.name)}
-          </span>
-          <span className="file-name">{item.name}</span>
-        </div>
-        
-        {item.type === 'directory' && item.children && (
-          <div className="file-tree-children">
-            {renderFileTree(item.children, level + 1)}
-          </div>
-        )}
-      </div>
-    ));
-  };
-
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.ctrlKey || e.metaKey) {
-        if (e.key === 's') {
-          e.preventDefault();
-          if (selectedFile) {
-            const content = fileContents[selectedFile.path] || '';
-            saveFile(selectedFile.path, content);
-          }
-        }
-      }
-      
-      if (e.key === 'F5') {
-        e.preventDefault();
-        runProject();
-      }
-      
-      if (e.key === 'Escape' && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault();
-        stopProject();
-      }
-    };
-    
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedFile, fileContents]);
 
   return (
     <div style={styles.monacoProjectEditor}>
@@ -1142,56 +575,10 @@ const MonacoProjectEditor = ({ project, onClose }) => {
         </div>
         
         <div style={styles.editorActions}>
-          {/* Layout Toggle Buttons */}
-          <div style={styles.layoutToggles}>
-            <button 
-              style={{
-                ...styles.btnLayoutToggle,
-                ...(layoutMode === 'editor' ? styles.btnLayoutToggleActive : {})
-              }}
-              onClick={() => setLayoutMode('editor')}
-              title="Editor Only"
-            >
-              📝
-            </button>
-            <button 
-              style={{
-                ...styles.btnLayoutToggle,
-                ...(layoutMode === 'chat' ? styles.btnLayoutToggleActive : {})
-              }}
-              onClick={() => setLayoutMode('chat')}
-              title="AI Chat"
-            >
-              🤖
-            </button>
-            <button 
-              style={{
-                ...styles.btnLayoutToggle,
-                ...(layoutMode === 'preview' ? styles.btnLayoutToggleActive : {}),
-                ...(previewUrl ? {} : styles.btnLayoutToggleDisabled)
-              }}
-              onClick={() => setLayoutMode('preview')}
-              title="Preview Only"
-              disabled={!previewUrl}
-            >
-              🌐
-            </button>
-            <button 
-              style={{
-                ...styles.btnLayoutToggle,
-                ...(layoutMode === 'split' ? styles.btnLayoutToggleActive : {})
-              }}
-              onClick={() => setLayoutMode('split')}
-              title="Split View"
-            >
-              ⚡
-            </button>
-          </div>
-
           <button 
             style={{
               ...styles.btnEditorAction,
-              ...(isRunning || isBuilding ? styles.btnEditorActionDisabled : {})
+              ...(isRunning || isBuilding ? { opacity: 0.5 } : {})
             }}
             onClick={runProject}
             disabled={isRunning || isBuilding}
@@ -1205,19 +592,9 @@ const MonacoProjectEditor = ({ project, onClose }) => {
             <button 
               style={{...styles.btnEditorAction, ...styles.btnEditorActionPreview}}
               onClick={() => window.open(previewUrl, '_blank')}
-              title="Open Preview"
+              title="Open in New Tab"
             >
-              🌐 Preview
-            </button>
-          )}
-          
-          {(isRunning || previewUrl) && (
-            <button 
-              style={{...styles.btnEditorAction, ...styles.btnEditorActionStop}}
-              onClick={stopProject}
-              title="Stop Project (Ctrl+Esc)"
-            >
-              🛑 Stop
+              🔗 Open
             </button>
           )}
           
@@ -1231,14 +608,62 @@ const MonacoProjectEditor = ({ project, onClose }) => {
         </div>
       </div>
 
-      {/* Main Layout */}
-      <div style={styles.editorLayout}>
-        {/* Sidebar */}
-        <div style={{
-          ...styles.editorSidebar,
-          ...(sidebarCollapsed ? styles.editorSidebarCollapsed : {})
-        }}>
-          <div style={styles.sidebarHeader}>
+      {/* New Layout: Chat Left, Preview/Code Right */}
+      <div style={styles.newEditorLayout}>
+        {/* Left Panel: AI Chat */}
+        <div style={styles.chatPanel}>
+          <div style={styles.rightPanelHeader}>
+            <div style={styles.sidebarTabs}>
+              <button style={{...styles.sidebarTab, ...styles.sidebarTabActive}}>
+                🤖 AI Assistant
+              </button>
+            </div>
+          </div>
+          
+          <div style={styles.chatContainer}>
+            <div style={styles.chatMessages} ref={chatEndRef}>
+              {chatMessages.map((message, index) => (
+                <div 
+                  key={index} 
+                  style={{
+                    ...styles.chatMessage,
+                    ...(message.role === 'user' ? styles.chatMessageUser : styles.chatMessageAssistant)
+                  }}
+                >
+                  {message.content}
+                </div>
+              ))}
+              {isAiThinking && (
+                <div style={{...styles.chatMessage, ...styles.chatMessageAssistant}}>
+                  🤔 Thinking...
+                </div>
+              )}
+            </div>
+            
+            <div style={styles.chatInputContainer}>
+              <input
+                style={styles.chatInput}
+                type="text"
+                placeholder="Ask AI to modify your code..."
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && sendChatMessage()}
+                disabled={isAiThinking}
+              />
+              <button 
+                style={styles.chatSendButton}
+                onClick={sendChatMessage}
+                disabled={isAiThinking || !chatInput.trim()}
+              >
+                {isAiThinking ? '⏳' : '↗️'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Right Panel: Preview or Code */}
+        <div style={styles.rightPanel}>
+          <div style={styles.rightPanelHeader}>
             <div style={styles.sidebarTabs}>
               <button 
                 style={{
@@ -1260,327 +685,164 @@ const MonacoProjectEditor = ({ project, onClose }) => {
               </button>
             </div>
             
-            <button 
-              style={styles.sidebarToggle}
-              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            >
-              {sidebarCollapsed ? '▶️' : '◀️'}
-            </button>
-          </div>
-          
-          <div style={styles.sidebarContent}>
-            {activeTab === 'files' && (
-              <div style={styles.fileTree}>
-                {fileTree && fileTree.length > 0 ? renderFileTree(fileTree) : (
-                  <div style={styles.loadingFiles}>Loading project files...</div>
-                )}
-              </div>
-            )}
-            
-            {activeTab === 'errors' && (
-              <div style={styles.errorsPanel}>
-                {errors.length === 0 ? (
-                  <div style={styles.noErrors}>✅ No problems detected</div>
-                ) : (
-                  errors.map((error, index) => (
-                    <div key={index} style={styles.errorItem} onClick={() => {
-                      // Jump to error location
-                      if (error.file) {
-                        const file = findFileInTree(fileTree, error.file);
-                        if (file) openFile(file);
-                      }
-                    }}>
-                      <div style={styles.errorSeverity}>{error.severity === 'error' ? '❌' : '⚠️'}</div>
-                      <div style={styles.errorDetails}>
-                        <div style={styles.errorMessage}>{error.message}</div>
-                        <div style={styles.errorLocation}>{error.file}:{error.line}</div>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Editor Area */}
-        <div style={styles.editorMain}>
-          {/* Tab Bar */}
-          {openTabs.length > 0 && (
-            <div style={styles.editorTabs}>
-              {openTabs.map(tab => (
-                <div 
-                  key={tab.path}
-                  style={{
-                    ...styles.editorTab,
-                    ...(selectedFile?.path === tab.path ? styles.editorTabActive : {})
-                  }}
-                  onClick={() => setSelectedFile(tab)}
-                >
-                  <span style={styles.tabIcon}>{getFileIcon(tab.name)}</span>
-                  <span style={styles.tabName}>{tab.name}</span>
-                  <button 
-                    style={styles.tabClose}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      closeTab(tab);
-                    }}
-                  >
-                    ✕
-                  </button>
-                </div>
-              ))}
+            <div style={styles.viewToggleButtons}>
+              <button 
+                style={{
+                  ...styles.viewToggleButton,
+                  ...(layoutMode === 'preview' ? styles.viewToggleButtonActive : {})
+                }}
+                onClick={() => setLayoutMode('preview')}
+                title="Live Preview"
+              >
+                🌐 Preview
+              </button>
+              <button 
+                style={{
+                  ...styles.viewToggleButton,
+                  ...(layoutMode === 'code' ? styles.viewToggleButtonActive : {})
+                }}
+                onClick={() => setLayoutMode('code')}
+                title="Code Editor"
+              >
+                📝 Code
+              </button>
             </div>
-          )}
+          </div>
           
-          {/* Dynamic Content Container */}
-          <div style={{
-            ...styles.editorContentContainer,
-            ...styles[`layout${layoutMode.charAt(0).toUpperCase() + layoutMode.slice(1)}`]
-          }}>
-            {/* Chat Panel */}
-            {(layoutMode === 'chat' || layoutMode === 'split') && (
-              <div style={styles.chatContainer}>
-                <div style={styles.chatHeader}>
-                  <span style={styles.chatTitle}>🤖 AI Assistant</span>
-                </div>
-                <div style={styles.chatMessages}>
-                  {chatMessages.map((message, index) => (
-                    <div key={index} style={{
-                      ...styles.chatMessage,
-                      ...styles[`chatMessage${message.role.charAt(0).toUpperCase() + message.role.slice(1)}`],
-                      ...(message.isError ? styles.chatMessageError : {})
-                    }}>
-                      <div style={styles.messageHeader}>
-                        <span style={styles.messageRole}>
-                          {message.role === 'user' ? '👤' : '🤖'} 
-                          {message.role === 'user' ? 'You' : 'AI Assistant'}
-                        </span>
-                        <span style={styles.messageTime}>{message.timestamp}</span>
+          <div style={styles.rightPanelContent}>
+            {layoutMode === 'preview' && previewUrl ? (
+              <iframe
+                src={previewUrl}
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  border: 'none',
+                  background: '#ffffff'
+                }}
+                title="Live Preview"
+              />
+            ) : layoutMode === 'preview' && isBuilding ? (
+              /* Live Generation Progress */
+              <div style={styles.welcomeScreen}>
+                <h2 style={styles.welcomeScreenH2}>🤖 AI Generating Your App</h2>
+                <p style={styles.welcomeScreenP}>
+                  Watch your React + FastAPI application being created in real-time
+                </p>
+                <div style={{
+                  background: '#1e1e1e',
+                  border: '1px solid #3e3e42',
+                  borderRadius: '8px',
+                  padding: '16px',
+                  marginTop: '20px',
+                  maxHeight: '400px',
+                  overflow: 'auto',
+                  fontFamily: 'Consolas, Monaco, monospace',
+                  fontSize: '14px',
+                  color: '#d4d4d4',
+                  textAlign: 'left'
+                }}>
+                  {terminalOutput.length === 0 ? (
+                    <div style={{ color: '#ffcc02' }}>⚡ Initializing AI generation...</div>
+                  ) : (
+                    terminalOutput.map((line, index) => (
+                      <div key={index} style={{ 
+                        marginBottom: '4px',
+                        animation: 'fadeIn 0.3s ease-in'
+                      }}>
+                        {line}
                       </div>
-                      <div style={styles.messageContent}>{message.content}</div>
-                      {message.actions && message.actions.length > 0 && (
-                        <div style={styles.messageActions}>
-                          {message.actions.map((action, actionIndex) => (
-                            <button key={actionIndex} style={styles.actionButton}>
-                              {action.label}
-                            </button>
-                          ))}
-                        </div>
+                    ))
+                  )}
+                  <div style={{ 
+                    marginTop: '8px',
+                    color: '#007acc',
+                    animation: 'pulse 1.5s infinite'
+                  }}>
+                    ▊
+                  </div>
+                </div>
+              </div>
+            ) : layoutMode === 'preview' && !previewUrl ? (
+              <div style={styles.welcomeScreen}>
+                <h2 style={styles.welcomeScreenH2}>No Preview Available</h2>
+                <p style={styles.welcomeScreenP}>
+                  Click "Run" to start your project and see the live preview.
+                </p>
+              </div>
+            ) : (
+              /* Code Editor Mode */
+              <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                {/* File Tree Section */}
+                <div style={{ height: '30%', overflow: 'auto', borderBottom: '1px solid #3e3e42' }}>
+                  {activeTab === 'files' && (
+                    <div style={styles.fileTree}>
+                      {fileTree && fileTree.length > 0 ? renderFileTree(fileTree) : (
+                        <div style={styles.welcomeScreenP}>Loading project files...</div>
                       )}
                     </div>
-                  ))}
-                  {isAiThinking && (
-                    <div style={{...styles.chatMessage, ...styles.chatMessageAssistant, ...styles.chatMessageThinking}}>
-                      <div style={styles.messageHeader}>
-                        <span style={styles.messageRole}>🤖 AI Assistant</span>
-                      </div>
-                      <div style={styles.messageContent}>
-                        <div style={styles.thinkingIndicator}>
-                          <span>🧠</span> Thinking...
-                        </div>
-                      </div>
+                  )}
+                  
+                  {activeTab === 'errors' && (
+                    <div style={styles.fileTree}>
+                      {errors.length === 0 ? (
+                        <div style={styles.welcomeScreenP}>✅ No problems detected</div>
+                      ) : (
+                        errors.map((error, index) => (
+                          <div key={index} style={styles.fileTreeItem}>
+                            <span>{error.severity === 'error' ? '❌' : '⚠️'}</span>
+                            <div>
+                              <div>{error.message}</div>
+                              <div style={{ fontSize: '11px', color: '#888' }}>{error.file}:{error.line}</div>
+                            </div>
+                          </div>
+                        ))
+                      )}
                     </div>
                   )}
-                  <div ref={chatEndRef} />
                 </div>
-                <div style={styles.chatInputContainer}>
-                  <input
-                    type="text"
-                    style={styles.chatInput}
-                    placeholder="Ask AI to modify your code..."
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && sendChatMessage()}
-                    disabled={isAiThinking}
-                  />
-                  <button 
-                    style={{
-                      ...styles.chatSend,
-                      ...(!chatInput.trim() || isAiThinking ? styles.chatSendDisabled : {})
-                    }}
-                    onClick={sendChatMessage}
-                    disabled={!chatInput.trim() || isAiThinking}
-                  >
-                    📤
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Monaco Editor */}
-            {(layoutMode === 'editor' || layoutMode === 'split') && (
-              <div style={{
-                ...styles.monacoContainer,
-                ...(layoutMode === 'split' ? styles.monacoContainerSplitMode : styles.monacoContainerFullWidth)
-              }}>
-                {selectedFile ? (
-                  <MonacoEditor
-                    ref={editorRef}
-                    height="100%"
-                    language={getFileLanguage(selectedFile.name)}
-                    value={fileContents[selectedFile.path] || ''}
-                    onChange={(value) => {
-                      setFileContents(prev => ({
-                        ...prev,
-                        [selectedFile.path]: value
-                      }));
-                    }}
-                    theme="vs-dark"
-                    options={{
-                      fontSize: 14,
-                      minimap: { enabled: true },
-                      automaticLayout: true,
-                      lineNumbers: 'on',
-                      renderWhitespace: 'selection',
-                      folding: true,
-                      bracketPairColorization: { enabled: true },
-                      autoIndent: 'full',
-                      formatOnType: true,
-                      formatOnPaste: true,
-                      quickSuggestions: true,
-                      parameterHints: { enabled: true },
-                      suggestOnTriggerCharacters: true,
-                      acceptSuggestionOnEnter: 'on',
-                      tabCompletion: 'on',
-                      wordBasedSuggestions: true
-                    }}
-                  />
-                ) : (
-                  <div style={styles.noFileSelected}>
+                
+                {/* Code Editor Section */}
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                  {selectedFile ? (
+                    <div style={{ flex: 1 }}>
+                      <div style={{ 
+                        padding: '8px 16px', 
+                        background: '#2d2d30', 
+                        borderBottom: '1px solid #3e3e42',
+                        fontSize: '12px',
+                        color: '#ffffff'
+                      }}>
+                        📄 {selectedFile}
+                      </div>
+                      <MonacoEditor
+                        height="100%"
+                        language={getLanguageFromFileName(selectedFile)}
+                        value={fileContents[selectedFile] || ''}
+                        theme="vs-dark"
+                        options={{
+                          automaticLayout: true,
+                          minimap: { enabled: false },
+                          wordWrap: 'on',
+                          fontSize: 14,
+                          lineNumbers: 'on',
+                          scrollBeyondLastLine: false,
+                          renderWhitespace: 'selection',
+                          readOnly: true // For now, make it read-only
+                        }}
+                      />
+                    </div>
+                  ) : (
                     <div style={styles.welcomeScreen}>
-                      <h2>🚀 {project.name}</h2>
-                      <p>AI-generated {project.tech_stack?.join(' + ') || 'web'} application</p>
-                      <p>Select a file from the tree to start editing</p>
-                      
-                      <div style={styles.quickActions}>
-                        <button 
-                          onClick={runProject} 
-                          style={{
-                            ...styles.btnWelcome,
-                            ...(isBuilding ? styles.btnWelcomeDisabled : {})
-                          }}
-                          disabled={isBuilding}
-                        >
-                          {isBuilding ? '⚡ Building...' : '▶️ Run Project'}
-                        </button>
-                        {previewUrl && (
-                          <button 
-                            onClick={() => window.open(previewUrl, '_blank')}
-                            style={styles.btnWelcome}
-                          >
-                            🌐 Open Preview
-                          </button>
-                        )}
-                      </div>
-                      
-                      <div style={styles.keyboardShortcuts}>
-                        <h4>Keyboard Shortcuts:</h4>
-                        <div>Ctrl+S - Save file</div>
-                        <div>F5 - Run project</div>
-                        <div>Ctrl+Esc - Stop project</div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Preview Panel */}
-            {(layoutMode === 'preview' || (layoutMode === 'split' && previewUrl)) && previewUrl && (
-              <div style={styles.previewContainer}>
-                <div style={styles.previewHeader}>
-                  <span style={styles.previewTitle}>🌐 Live Preview</span>
-                  <div style={styles.previewActions}>
-                    <button 
-                      onClick={() => window.open(previewUrl, '_blank')}
-                      style={styles.btnPreviewAction}
-                      title="Open in new tab"
-                    >
-                      ↗️
-                    </button>
-                    <button 
-                      onClick={() => document.getElementById('preview-iframe')?.contentWindow?.location.reload()}
-                      style={styles.btnPreviewAction}
-                      title="Refresh preview"
-                    >
-                      🔄
-                    </button>
-                  </div>
-                </div>
-                <div style={styles.previewContent}>
-                  {previewLoading && (
-                    <div style={styles.previewLoading}>
-                      <div>🔄 Loading preview...</div>
+                      <h2 style={styles.welcomeScreenH2}>Select a file to view</h2>
+                      <p style={styles.welcomeScreenP}>
+                        Choose a file from the file tree above to view its contents.
+                      </p>
                     </div>
                   )}
-                  <iframe
-                    id="preview-iframe"
-                    src={previewUrl}
-                    style={{
-                      ...styles.previewIframe,
-                      display: previewLoading ? 'none' : 'block'
-                    }}
-                    title="Application Preview"
-                    sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups"
-                    onLoad={() => setPreviewLoading(false)}
-                    onError={() => setPreviewLoading(false)}
-                  />
                 </div>
               </div>
             )}
           </div>
-        </div>
-      </div>
-
-      {/* Terminal */}
-      <div style={{
-        ...styles.editorTerminal,
-        ...(terminalCollapsed ? styles.editorTerminalCollapsed : {})
-      }}>
-        <div style={styles.terminalHeader}>
-          <span style={styles.terminalTitle}>🖥️ Terminal - {currentDirectory}</span>
-          <div style={styles.terminalActions}>
-            <button 
-              style={styles.terminalAction}
-              onClick={() => setTerminalOutput([])}
-              title="Clear terminal"
-            >
-              🗑️
-            </button>
-            <button 
-              style={styles.terminalToggle}
-              onClick={() => setTerminalCollapsed(!terminalCollapsed)}
-            >
-              {terminalCollapsed ? '⬆️' : '⬇️'}
-            </button>
-          </div>
-        </div>
-        
-        <div style={styles.terminalContent} ref={terminalRef}>
-          {terminalOutput.map(output => (
-            <div key={output.id} style={{
-              ...styles.terminalLine,
-              ...styles[`terminalLine${output.type.charAt(0).toUpperCase() + output.type.slice(1)}`]
-            }}>
-              <span style={styles.terminalTimestamp}>[{output.timestamp}]</span>
-              <span style={styles.terminalMessage}>{output.message}</span>
-            </div>
-          ))}
-        </div>
-        
-        <div style={styles.terminalInput}>
-          <span style={styles.terminalPrompt}>{currentDirectory}$</span>
-          <input 
-            type="text"
-            placeholder="Type command and press Enter..."
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && e.target.value.trim()) {
-                executeTerminalCommand(e.target.value);
-                e.target.value = '';
-              }
-            }}
-          />
         </div>
       </div>
     </div>
