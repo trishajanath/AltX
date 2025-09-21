@@ -96,6 +96,36 @@ const styles = {
     background: '#c5524a'
   },
   
+  // Navigation styles
+  navigationControls: {
+    display: 'flex',
+    gap: '4px',
+    alignItems: 'center',
+    marginRight: '8px'
+  },
+  navButton: {
+    background: '#37373d',
+    color: '#cccccc',
+    border: 'none',
+    padding: '4px 8px',
+    borderRadius: '3px',
+    cursor: 'pointer',
+    fontSize: '11px',
+    transition: 'background 0.2s',
+    minWidth: '24px',
+    height: '24px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  navButtonDisabled: {
+    opacity: 0.4,
+    cursor: 'not-allowed'
+  },
+  navButtonHover: {
+    background: '#4c4c4c'
+  },
+  
   // New layout styles
   newEditorLayout: {
     flex: 1,
@@ -174,7 +204,7 @@ const styles = {
   viewToggleButtonActive: {
     background: '#094771',
     color: '#ffffff',
-    borderColor: '#094771'
+    border: '1px solid #094771'
   },
   
   rightPanelContent: {
@@ -195,7 +225,9 @@ const styles = {
     padding: '16px',
     gap: '16px',
     display: 'flex',
-    flexDirection: 'column'
+    flexDirection: 'column',
+    scrollbarWidth: 'thin',
+    scrollBehavior: 'smooth'
   },
   
   chatMessage: {
@@ -313,6 +345,8 @@ const MonacoProjectEditor = ({ project, onClose }) => {
   const [isAiThinking, setIsAiThinking] = useState(false);
   const [layoutMode, setLayoutMode] = useState('preview'); // 'preview' or 'code'
   const [terminalOutput, setTerminalOutput] = useState([]); // Live generation output
+  const [viewHistory, setViewHistory] = useState([]);
+  const [currentViewIndex, setCurrentViewIndex] = useState(-1);
   
   const chatEndRef = useRef(null);
   const wsRef = useRef(null);
@@ -320,6 +354,10 @@ const MonacoProjectEditor = ({ project, onClose }) => {
   // Initialize project
   useEffect(() => {
     if (project?.name) {
+      // Set initial building state from project
+      setIsBuilding(project.isBuilding || false);
+      setPreviewUrl(project.preview_url || null);
+      
       initializeProject();
       setupWebSocket();
       
@@ -374,6 +412,7 @@ Just tell me what you'd like to do with your project!`
           setPreviewUrl(data.url);
           setIsBuilding(false);
           setIsRunning(true);
+          setTerminalOutput(prev => [...prev, `🌐 Live preview ready!`]);
           break;
         case 'status':
           if (data.phase === 'ready') {
@@ -461,11 +500,54 @@ Just tell me what you'd like to do with your project!`
           ...prev,
           [filePath]: data.content
         }));
+        
+        // Add to view history if it's a new file
+        addToViewHistory(filePath);
       }
     } catch (error) {
       console.error('Failed to load file content:', error);
     }
   };
+
+  // Navigation functions
+  const addToViewHistory = (filePath) => {
+    setViewHistory(prev => {
+      // Remove if already exists to avoid duplicates
+      const filtered = prev.filter(path => path !== filePath);
+      const newHistory = [...filtered, filePath];
+      // Keep only last 20 files in history
+      const trimmedHistory = newHistory.slice(-20);
+      setCurrentViewIndex(trimmedHistory.length - 1);
+      return trimmedHistory;
+    });
+  };
+
+  const goBack = () => {
+    if (currentViewIndex > 0) {
+      const newIndex = currentViewIndex - 1;
+      const previousFile = viewHistory[newIndex];
+      setCurrentViewIndex(newIndex);
+      setSelectedFile(previousFile);
+      if (!fileContents[previousFile]) {
+        loadFileContent(previousFile);
+      }
+    }
+  };
+
+  const goForward = () => {
+    if (currentViewIndex < viewHistory.length - 1) {
+      const newIndex = currentViewIndex + 1;
+      const nextFile = viewHistory[newIndex];
+      setCurrentViewIndex(newIndex);
+      setSelectedFile(nextFile);
+      if (!fileContents[nextFile]) {
+        loadFileContent(nextFile);
+      }
+    }
+  };
+
+  const canGoBack = currentViewIndex > 0;
+  const canGoForward = currentViewIndex < viewHistory.length - 1;
 
   const sendChatMessage = async () => {
     if (!chatInput.trim() || isAiThinking) return;
@@ -717,9 +799,13 @@ The changes have been applied and your preview has been updated.`
                   width: '100%',
                   height: '100%',
                   border: 'none',
-                  background: '#ffffff'
+                  background: '#ffffff',
+                  overflow: 'auto'
                 }}
                 title="Live Preview"
+                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+                allow="clipboard-read; clipboard-write"
+                scrolling="yes"
               />
             ) : layoutMode === 'preview' && isBuilding ? (
               /* Live Generation Progress */
@@ -773,7 +859,7 @@ The changes have been applied and your preview has been updated.`
               /* Code Editor Mode */
               <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
                 {/* File Tree Section */}
-                <div style={{ height: '30%', overflow: 'auto', borderBottom: '1px solid #3e3e42' }}>
+                <div style={{ height: '30%', overflow: 'auto', borderBottom: '1px solid #3e3e42', scrollbarWidth: 'thin' }}>
                   {activeTab === 'files' && (
                     <div style={styles.fileTree}>
                       {fileTree && fileTree.length > 0 ? renderFileTree(fileTree) : (
@@ -810,9 +896,59 @@ The changes have been applied and your preview has been updated.`
                         background: '#2d2d30', 
                         borderBottom: '1px solid #3e3e42',
                         fontSize: '12px',
-                        color: '#ffffff'
+                        color: '#ffffff',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between'
                       }}>
-                        📄 {selectedFile}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          📄 {selectedFile}
+                        </div>
+                        
+                        {/* Navigation controls */}
+                        <div style={styles.navigationControls}>
+                          <button
+                            style={{
+                              ...styles.navButton,
+                              ...(canGoBack ? {} : styles.navButtonDisabled)
+                            }}
+                            onClick={goBack}
+                            disabled={!canGoBack}
+                            title="Go back"
+                            onMouseEnter={(e) => {
+                              if (canGoBack) {
+                                e.target.style.background = styles.navButtonHover.background;
+                              }
+                            }}
+                            onMouseLeave={(e) => {
+                              e.target.style.background = styles.navButton.background;
+                            }}
+                          >
+                            ←
+                          </button>
+                          <button
+                            style={{
+                              ...styles.navButton,
+                              ...(canGoForward ? {} : styles.navButtonDisabled)
+                            }}
+                            onClick={goForward}
+                            disabled={!canGoForward}
+                            title="Go forward"
+                            onMouseEnter={(e) => {
+                              if (canGoForward) {
+                                e.target.style.background = styles.navButtonHover.background;
+                              }
+                            }}
+                            onMouseLeave={(e) => {
+                              e.target.style.background = styles.navButton.background;
+                            }}
+                          >
+                            →
+                          </button>
+                          <span style={{ color: '#888', fontSize: '10px', marginLeft: '4px' }}>
+                            {currentViewIndex + 1}/{viewHistory.length}
+                          </span>
+                        </div>
                       </div>
                       <MonacoEditor
                         height="100%"
@@ -827,7 +963,19 @@ The changes have been applied and your preview has been updated.`
                           lineNumbers: 'on',
                           scrollBeyondLastLine: false,
                           renderWhitespace: 'selection',
-                          readOnly: true // For now, make it read-only
+                          readOnly: true, // For now, make it read-only
+                          scrollbar: {
+                            vertical: 'visible',
+                            horizontal: 'visible',
+                            useShadows: false,
+                            verticalHasArrows: true,
+                            horizontalHasArrows: true,
+                            arrowSize: 11,
+                            verticalScrollbarSize: 14,
+                            horizontalScrollbarSize: 14
+                          },
+                          mouseWheelZoom: true,
+                          smoothScrolling: true
                         }}
                       />
                     </div>

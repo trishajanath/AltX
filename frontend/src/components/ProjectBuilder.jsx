@@ -76,6 +76,20 @@ const ProjectBuilder = () => {
     setSelectedImages(prev => prev.filter((_, i) => i !== index));
   };
 
+  const loadFileTree = async (projectName) => {
+    try {
+      const treeRes = await fetch(
+        `http://localhost:8000/api/project-file-tree?project_name=${encodeURIComponent(projectName)}`
+      );
+      const treeData = await treeRes.json();
+      if (treeData.success) {
+        setFileTree(treeData.file_tree || treeData.tree || []);
+      }
+    } catch (error) {
+      console.error("Failed to load file tree:", error);
+    }
+  };
+
   const buildProject = async () => {
     if (!projectIdea.trim()) return;
     setIsBuilding(true);
@@ -84,6 +98,18 @@ const ProjectBuilder = () => {
 
     // Generate a unique project name
     const projectName = `app-${Date.now()}`;
+    
+    // Set initial project data and immediately show Monaco Editor
+    const initialProject = {
+      name: projectName,
+      idea: projectIdea,
+      tech_stack: ["React", "FastAPI", "Vite", "TailwindCSS"],
+      preview_url: null,
+      isBuilding: true
+    };
+    
+    setGeneratedProject(initialProject);
+    setShowMonacoEditor(true);
     
     // Setup WebSocket connection for real-time updates
     const ws = new WebSocket(`ws://localhost:8000/ws/project/${projectName}`);
@@ -100,13 +126,17 @@ const ProjectBuilder = () => {
           break;
         case 'preview_ready':
           setBuildProgress(prev => [...prev, `[SUCCESS] 🌐 Live preview ready: ${data.url}`]);
-          // Auto-open Monaco Editor with preview
-          setTimeout(() => {
-            setShowMonacoEditor(true);
-          }, 500);
+          // Update project with preview URL
+          setGeneratedProject(prev => ({
+            ...prev,
+            preview_url: data.url,
+            isBuilding: false
+          }));
           break;
         case 'file_created':
           setBuildProgress(prev => [...prev, `[FILE] ✓ Created ${data.file_path}`]);
+          // Refresh file tree when new files are created
+          loadFileTree(projectName);
           break;
       }
     };
@@ -138,27 +168,19 @@ const ProjectBuilder = () => {
         throw new Error(data.error || "Build failed");
       }
 
-      // Set the generated project data
-      setGeneratedProject({
-        name: projectName,
-        idea: projectIdea,
-        tech_stack: payload.tech_stack,
-        preview_url: data.preview_url
-      });
+      // Set the final generated project data
+      setGeneratedProject(prev => ({
+        ...prev,
+        preview_url: data.preview_url,
+        isBuilding: false
+      }));
 
-      // Load file tree
-      try {
-        const treeRes = await fetch(
-          `http://localhost:8000/api/project-file-tree?project_name=${encodeURIComponent(projectName)}`
-        );
-        const treeData = await treeRes.json();
-        if (treeData.success) setFileTree(treeData.tree || []);
-      } catch (error) {
-        console.error("Failed to load file tree:", error);
-      }
+      // Load initial file tree
+      await loadFileTree(projectName);
 
     } catch (error) {
       setBuildProgress((prev) => [...prev, `[ERROR] ${error.message}`]);
+      setGeneratedProject(prev => prev ? {...prev, isBuilding: false} : null);
     } finally {
       setIsBuilding(false);
     }
@@ -488,25 +510,6 @@ const ProjectBuilder = () => {
             <p className="hero-subtitle">
               Generate complete full-stack applications with React, FastAPI, and deployment-ready code.
             </p>
-            
-            <div className="features-info">
-              <div className="feature-item">
-                <span className="feature-icon">⚛️</span>
-                <span>React + TailwindCSS Frontend</span>
-              </div>
-              <div className="feature-item">
-                <span className="feature-icon">🔗</span>
-                <span>FastAPI Backend + Database</span>
-              </div>
-              <div className="feature-item">
-                <span className="feature-icon">🤖</span>
-                <span>AI Integration Ready</span>
-              </div>
-              <div className="feature-item">
-                <span className="feature-icon">🚀</span>
-                <span>Production Deployment</span>
-              </div>
-            </div>
           </div>
 
           {!generatedProject ? (
