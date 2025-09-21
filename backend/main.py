@@ -588,10 +588,21 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
     <title>{project_name} - Live Preview</title>
     <!-- SANDBOX PREVIEW ONLY: Using CDN for quick prototyping -->
     <!-- In production, use built assets with npm/yarn build -->
-    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    
+    <!-- Load React first -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    
+    <!-- Try to load React Router (with fallback handling) -->
+    <script crossorigin src="https://unpkg.com/react-router@6/dist/umd/react-router.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-router-dom@6/dist/umd/react-router-dom.development.js"></script>
+    
+    <!-- Load Babel transformer -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Load TailwindCSS -->
     <script src="https://cdn.tailwindcss.com"></script>
+    
     <style>
         {index_css}
         body {{ margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif; }}
@@ -626,7 +637,213 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
     <div id="preview-console" class="preview-console" style="display: none;"></div>
     
     <script type="text/babel">
+        // Wait for all dependencies to load
+        if (typeof React === 'undefined' || typeof ReactDOM === 'undefined') {{
+            console.error('React not loaded properly');
+            document.body.innerHTML = '<div style="padding: 20px; color: red;">Error: React libraries not loaded</div>';
+            throw new Error('React dependencies missing');
+        }}
+        
         const {{ useState, useEffect, useCallback, useMemo, useRef }} = React;
+        
+        // Create a simple, reliable router that doesn't depend on external libraries
+        const createSimpleRouter = () => {{
+            // Simple router implementation using hash-based routing
+            const SimpleRouter = ({{ children }}) => {{
+                const [currentPath, setCurrentPath] = useState(window.location.hash.slice(1) || '/');
+                
+                useEffect(() => {{
+                    const handleHashChange = () => {{
+                        setCurrentPath(window.location.hash.slice(1) || '/');
+                    }};
+                    
+                    window.addEventListener('hashchange', handleHashChange);
+                    return () => window.removeEventListener('hashchange', handleHashChange);
+                }}, []);
+                
+                // Provide router context
+                return React.createElement('div', {{ 
+                    'data-router': 'simple',
+                    'data-current-path': currentPath 
+                }}, children);
+            }};
+            
+            const SimpleRoutes = ({{ children }}) => {{
+                const currentPath = window.location.hash.slice(1) || '/';
+                const routes = React.Children.toArray(children);
+                
+                // Find matching route or return first one as default
+                const matchingRoute = routes.find(route => {{
+                    if (route.props && route.props.path) {{
+                        return route.props.path === currentPath;
+                    }}
+                    return false;
+                }}) || routes[0];
+                
+                return matchingRoute || React.createElement('div', null, 'No routes found');
+            }};
+            
+            const SimpleRoute = ({{ element, path, children }}) => {{
+                return element || children || React.createElement('div', null, `Route: ${{path}}`);
+            }};
+            
+            const SimpleLink = ({{ to, children, className, style, ...props }}) => {{
+                const handleClick = (e) => {{
+                    e.preventDefault();
+                    window.location.hash = to;
+                }};
+                
+                return React.createElement('a', {{
+                    href: `#${{to}}`,
+                    onClick: handleClick,
+                    className: className,
+                    style: {{
+                        color: 'blue',
+                        textDecoration: 'underline',
+                        cursor: 'pointer',
+                        ...style
+                    }},
+                    ...props
+                }}, children);
+            }};
+            
+            const useSimpleNavigate = () => {{
+                return useCallback((path) => {{
+                    window.location.hash = path;
+                }}, []);
+            }};
+            
+            const useSimpleParams = () => {{
+                // Simple params extraction from hash
+                const hash = window.location.hash.slice(1);
+                const segments = hash.split('/');
+                return {{ id: segments[segments.length - 1] || null }};
+            }};
+            
+            const useSimpleLocation = () => {{
+                const [location, setLocation] = useState({{
+                    pathname: window.location.hash.slice(1) || '/',
+                    hash: window.location.hash,
+                    search: ''
+                }});
+                
+                useEffect(() => {{
+                    const handleHashChange = () => {{
+                        setLocation({{
+                            pathname: window.location.hash.slice(1) || '/',
+                            hash: window.location.hash,
+                            search: ''
+                        }});
+                    }};
+                    
+                    window.addEventListener('hashchange', handleHashChange);
+                    return () => window.removeEventListener('hashchange', handleHashChange);
+                }}, []);
+                
+                return location;
+            }};
+            
+            return {{
+                Router: SimpleRouter,
+                Routes: SimpleRoutes,
+                Route: SimpleRoute,
+                Link: SimpleLink,
+                useNavigate: useSimpleNavigate,
+                useParams: useSimpleParams,
+                useLocation: useSimpleLocation
+            }};
+        }};
+        
+        // Always use the built-in simple hash router to avoid external deps
+        let Router, Routes, Route, Link, useNavigate, useParams, useLocation;
+        console.log('✅ Using built-in simple hash router (no external history/react-router)');
+        const simpleRouter = createSimpleRouter();
+        Router = simpleRouter.Router;
+        Routes = simpleRouter.Routes;
+        Route = simpleRouter.Route;
+        Link = simpleRouter.Link;
+        useNavigate = simpleRouter.useNavigate;
+        useParams = simpleRouter.useParams;
+        useLocation = simpleRouter.useLocation;
+        
+        // Make Router components available globally
+        window.Router = Router;
+        window.BrowserRouter = Router; // Use main Router as fallback
+        window.HashRouter = Router;    // Use main Router as fallback
+        window.MemoryRouter = Router;  // Use main Router as fallback
+        window.Routes = Routes;
+        window.Route = Route;
+        window.Link = Link;
+        window.useNavigate = useNavigate;
+        window.useParams = useParams;
+        window.useLocation = useLocation;
+        
+        // Create simple icon components as fallbacks
+        const createIcon = (name) => ({{ size = 24, className = '', ...props }}) => 
+            React.createElement('svg', {{
+                width: size,
+                height: size,
+                viewBox: '0 0 24 24',
+                fill: 'none',
+                stroke: 'currentColor',
+                strokeWidth: 2,
+                strokeLinecap: 'round',
+                strokeLinejoin: 'round',
+                className: className,
+                ...props
+            }}, React.createElement('title', null, name));
+        
+        // Create common icons
+        window.Home = createIcon('Home');
+        window.User = createIcon('User');
+        window.Settings = createIcon('Settings');
+        window.Search = createIcon('Search');
+        window.Menu = createIcon('Menu');
+        window.X = createIcon('X');
+        window.Plus = createIcon('Plus');
+        window.Minus = createIcon('Minus');
+        window.Edit = createIcon('Edit');
+        window.Trash2 = createIcon('Trash');
+        window.Save = createIcon('Save');
+        window.ChevronDown = createIcon('ChevronDown');
+        window.ChevronUp = createIcon('ChevronUp');
+        window.ChevronLeft = createIcon('ChevronLeft');
+        window.ChevronRight = createIcon('ChevronRight');
+        window.Heart = createIcon('Heart');
+        window.Star = createIcon('Star');
+        window.Eye = createIcon('Eye');
+        window.EyeOff = createIcon('EyeOff');
+        window.Lock = createIcon('Lock');
+        window.Unlock = createIcon('Unlock');
+        window.Mail = createIcon('Mail');
+        window.Phone = createIcon('Phone');
+        window.Calendar = createIcon('Calendar');
+        window.Clock = createIcon('Clock');
+        window.Download = createIcon('Download');
+        window.Upload = createIcon('Upload');
+        window.Share = createIcon('Share');
+        window.MessageCircle = createIcon('MessageCircle');
+        window.AlertCircle = createIcon('AlertCircle');
+        window.CheckCircle = createIcon('CheckCircle');
+        window.Info = createIcon('Info');
+        window.FileText = createIcon('FileText');
+        window.Folder = createIcon('Folder');
+        window.Image = createIcon('Image');
+        window.ShoppingCart = createIcon('ShoppingCart');
+        window.CreditCard = createIcon('CreditCard');
+        window.Package = createIcon('Package');
+        window.MapPin = createIcon('MapPin');
+        window.Globe = createIcon('Globe');
+        window.Play = createIcon('Play');
+        window.Pause = createIcon('Pause');
+        window.Volume2 = createIcon('Volume');
+        window.Battery = createIcon('Battery');
+        window.Wifi = createIcon('Wifi');
+        window.Filter = createIcon('Filter');
+        window.Sort = createIcon('Sort');
+        window.MoreHorizontal = createIcon('MoreHorizontal');
+        window.MoreVertical = createIcon('MoreVertical');
+        window.ExternalLink = createIcon('ExternalLink');
         
         // Console logger for debugging
         const originalConsoleLog = console.log;
@@ -753,6 +970,27 @@ def fix_jsx_content_for_sandbox(content: str, component_name: str, project_name:
             f'const {component_name} = () => (\n  <div className="p-4 bg-gray-100 rounded">\n    <h3>Welcome to {component_name}</h3>\n    <p>Component is working!</p>\n  </div>\n);'
         )
     
+    # Fix incomplete arrow function components - pattern: const ComponentName = () => (\n\n);
+    content = re.sub(
+        r'const (\w+) = \(\) => \(\s*\n\s*\n\s*\);',
+        r'const \1 = () => (\n  <div className="flex items-center justify-center p-4">\n    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>\n  </div>\n);',
+        content
+    )
+    
+    # Fix incomplete arrow function components with props - pattern: const ComponentName = ({ prop }) => (\n\n);
+    content = re.sub(
+        r'const (\w+) = \(\{[^}]*\}\) => \(\s*\n\s*\n\s*\);',
+        r'const \1 = ({ message, type = "error" }) => (\n  <div className={`p-4 rounded-lg border ${"bg-red-50 border-red-200 text-red-700" if type === "error" else "bg-blue-50 border-blue-200 text-blue-700"}`}>\n    <div className="flex items-center">\n      <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">\n        <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />\n      </svg>\n      {message || "An error occurred"}\n    </div>\n  </div>\n);',
+        content
+    )
+    
+    # Fix any remaining incomplete components with better defaults
+    content = re.sub(
+        r'const (\w+) = \([^)]*\) => \{\s*\n\s*return \(\s*\n\s*\);?\s*\n\s*\};?',
+        r'const \1 = (props) => {\n  return (\n    <div className="p-4 bg-white rounded-lg shadow-sm border border-gray-200">\n      <h3 className="text-lg font-semibold text-gray-800 mb-2">\1 Component</h3>\n      <p className="text-gray-600">This component is ready for implementation.</p>\n    </div>\n  );\n};',
+        content
+    )
+
     # Fix incomplete function components
     if 'function ' + component_name in content and 'return (\n\n' in content:
         print(f"🔧 Fixing incomplete return in {component_name}")
@@ -767,6 +1005,24 @@ def fix_jsx_content_for_sandbox(content: str, component_name: str, project_name:
                 content = content[:-2] + '\n    </div>\n  );'
             elif content.endswith('  );\n}'):
                 content = content.replace('  );\n}', '    </div>\n  );\n}')
+    
+    # Fix Router component usage for sandbox (use globals provided by sandbox)
+    # Normalize all router types to a single `Router` symbol used by preview
+    content = content.replace('BrowserRouter', 'Router')
+    content = content.replace('HashRouter', 'Router')
+    content = content.replace('MemoryRouter', 'Router')
+
+    # Remove any react-router-dom imports (named, default, or namespace)
+    content = re.sub(r"import\s+\{[^}]*\}\s+from\s+['\"]react-router-dom['\"];?\s*", '', content)
+    content = re.sub(r"import\s+\*\s+as\s+\w+\s+from\s+['\"]react-router-dom['\"];?\s*", '', content)
+    content = re.sub(r"import\s+\w+\s+from\s+['\"]react-router-dom['\"];?\s*", '', content)
+
+    # Remove destructuring from ReactRouterDOM global, if present
+    content = re.sub(r'const\s*\{\s*([^}]*)\s*\}\s*=\s*ReactRouterDOM;?\s*', '', content)
+    
+    # Handle Lucide React imports - remove them since icons are global
+    content = re.sub(r'import\s*{\s*([^}]*)\s*}\s*from\s*[\'"]lucide-react[\'"];?', '', content)
+    content = re.sub(r'const\s*{\s*([^}]*)\s*}\s*=\s*LucideReact;?', '', content)
     
     # Fix incomplete JSX elements (missing content between tags) - more comprehensive
     content = re.sub(r'>\s*\n\s*\n\s*</div>', '>\n      <p>Content placeholder</p>\n    </div>', content)
@@ -890,6 +1146,233 @@ async def build_with_ai(request: dict = Body(...)):
         }
 
     except Exception as e:
+        return {"success": False, "error": str(e)}
+
+# --- AI Project Assistant Endpoint ---
+@app.post("/api/ai-project-assistant")
+async def ai_project_assistant(request: dict = Body(...)):
+    """Process natural language requests to modify and improve project files."""
+    try:
+        project_name = request.get("project_name")
+        user_message = request.get("user_message")
+        tech_stack = request.get("tech_stack", [])
+        re_run = bool(request.get("re_run", False))
+
+        if not project_name:
+            raise HTTPException(status_code=400, detail="project_name is required")
+        if not user_message:
+            raise HTTPException(status_code=400, detail="user_message is required")
+
+        # Resolve project path
+        project_slug = project_name.lower().replace(" ", "-")
+        projects_dir = Path("generated_projects")
+        project_path = projects_dir / project_slug
+        if not project_path.exists():
+            return {"success": False, "error": "Project not found"}
+
+        # Send status update
+        await manager.send_to_project(project_name, {
+            "type": "status",
+            "phase": "thinking",
+            "message": "🤖 Processing your request..."
+        })
+
+        # Get project context (read existing files)
+        project_context = ""
+        try:
+            # Read key files for context
+            for file_pattern in ["package.json", "src/App.jsx", "src/main.jsx", "backend/main.py"]:
+                context_file = project_path / file_pattern
+                if context_file.exists():
+                    try:
+                        with open(context_file, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                            project_context += f"\n=== {file_pattern} ===\n{content[:2000]}\n"
+                    except:
+                        continue
+        except:
+            pass
+
+        # Use AI to generate changes
+        prompt = f"""You are an expert full-stack developer. The user wants to modify their project.
+
+Project: {project_name}
+Tech Stack: {', '.join(tech_stack) if tech_stack else 'React + FastAPI'}
+
+Current project context:
+{project_context}
+
+User request: {user_message}
+
+CRITICAL REQUIREMENTS:
+1. Generate FULLY FUNCTIONAL, PRODUCTION-READY code - NO mock ups, NO placeholders, NO "TODO" comments
+2. For React components: Include complete JSX with proper styling, event handlers, state management, and real functionality
+3. For FastAPI backends: Include complete endpoints with proper request/response models, database operations, error handling
+4. Use actual working imports and dependencies that exist in the project
+5. Implement real business logic, not dummy data or placeholder functions
+6. For UI components: Include proper TailwindCSS classes for styling and responsive design
+7. For database operations: Use real SQLAlchemy models and proper CRUD operations
+8. Include proper error handling, validation, and edge cases
+9. Make components interactive and fully functional from the start
+
+Please analyze the request and provide specific file changes needed. Respond in JSON format:
+{{
+  "changes": [
+    {{
+      "file_path": "relative/path/to/file", 
+      "content": "complete file content with FULL implementation",
+      "reason": "why this change is needed"
+    }}
+  ],
+  "explanation": "brief explanation of what you're implementing"
+}}
+
+Only include files that need to be changed. Provide complete, working file content with full implementations."""
+
+        try:
+            # Use the existing AI assistant for code generation
+            from ai_assistant import get_chat_response
+            
+            # Format as a chat history for the AI
+            chat_history = [
+                {"role": "user", "content": prompt}
+            ]
+            
+            ai_response = get_chat_response(chat_history, model_type='smart')
+            
+            # Parse AI response with robust error handling
+            import json
+            import re
+            
+            def clean_json_string(text):
+                """Clean JSON string by removing control characters and fixing common issues"""
+                if not text:
+                    return text
+                
+                # Remove control characters (except newlines, tabs, carriage returns)
+                cleaned = ''.join(char for char in text if ord(char) >= 32 or char in '\n\t\r')
+                
+                # Remove BOM if present
+                cleaned = cleaned.lstrip('\ufeff')
+                
+                # Fix common JSON issues
+                cleaned = re.sub(r',\s*}', '}', cleaned)  # Remove trailing commas before }
+                cleaned = re.sub(r',\s*]', ']', cleaned)  # Remove trailing commas before ]
+                
+                return cleaned
+            
+            # Extract JSON from the response with better pattern matching
+            json_match = re.search(r'\{[\s\S]*?\}(?=\s*$|\s*\n\s*[^{])', ai_response)
+            if not json_match:
+                # Try to find any JSON-like structure
+                json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', ai_response)
+            
+            if json_match:
+                try:
+                    json_str = clean_json_string(json_match.group())
+                    response_data = json.loads(json_str)
+                except (json.JSONDecodeError, ValueError) as e:
+                    print(f"JSON parsing error: {e}")
+                    print(f"Attempting to parse: {json_str[:200]}...")
+                    # Fallback: create response from AI text
+                    response_data = {
+                        "changes": [],
+                        "explanation": f"AI processing encountered a formatting error. Raw response: {ai_response[:500]}..."
+                    }
+            else:
+                # If no JSON found, try to create a simple response
+                response_data = {
+                    "changes": [],
+                    "explanation": f"I understand you want to: {user_message}. However, I need more specific details about what files to modify. Could you be more specific about what changes you'd like me to make?"
+                }
+            
+            changes = response_data.get("changes", [])
+            explanation = response_data.get("explanation", "AI-generated changes")
+            
+            if not changes:
+                return {
+                    "success": False, 
+                    "error": "AI couldn't determine what changes to make. Please be more specific."
+                }
+
+            # Apply the changes
+            files_modified = []
+            for change in changes:
+                file_path = change.get("file_path", "").lstrip("/")
+                content = change.get("content", "")
+                if not file_path or not content:
+                    continue
+                    
+                target = project_path / file_path
+                # Ensure path is within project
+                try:
+                    target.resolve().relative_to(project_path.resolve())
+                except Exception:
+                    continue
+                    
+                target.parent.mkdir(parents=True, exist_ok=True)
+                cleaned = _clean_ai_generated_content(content, target.name)
+                
+                with open(target, 'w', encoding='utf-8', newline='\n') as f:
+                    f.write(cleaned)
+                files_modified.append(file_path)
+                
+                await manager.send_to_project(project_name, {
+                    "type": "file_changed",
+                    "file_path": file_path,
+                    "message": f"✍️ Updated {file_path}"
+                })
+
+            # Validate and fix critical files
+            await manager.send_to_project(project_name, {
+                "type": "status",
+                "phase": "validate",
+                "message": "Validating changes..."
+            })
+            
+            await validate_and_fix_project_files(project_path, project_name)
+            check = await check_project_errors(project_name)
+            remaining_errors = check.get("errors", []) if check.get("success") else []
+
+            # Optionally rerun project
+            preview_url = None
+            if re_run and files_modified:
+                await manager.send_to_project(project_name, {
+                    "type": "status",
+                    "phase": "run",
+                    "message": "Restarting development servers..."
+                })
+                run_resp = await run_project({
+                    "project_name": project_name,
+                    "tech_stack": tech_stack
+                })
+                if isinstance(run_resp, dict):
+                    preview_url = run_resp.get("preview_url")
+                    if preview_url:
+                        await manager.send_to_project(project_name, {
+                            "type": "preview_ready", 
+                            "url": preview_url
+                        })
+
+            return {
+                "success": True,
+                "explanation": explanation,
+                "files_modified": files_modified,
+                "preview_url": preview_url,
+                "errors": remaining_errors
+            }
+
+        except Exception as ai_error:
+            print(f"AI processing error: {ai_error}")
+            return {
+                "success": False,
+                "error": f"AI processing failed: {str(ai_error)}"
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"AI chat error: {e}")
         return {"success": False, "error": str(e)}
 
 # --- AI Apply Changes Endpoint ---
@@ -1019,7 +1502,11 @@ def _strip_code_fences(text: str) -> str:
 def _clean_ai_generated_content(content: str, filename: str) -> str:
     """Normalize AI-generated content by stripping BOM/code fences and validating JSON."""
     try:
-        cleaned = content.lstrip('\ufeff')
+        # Remove control characters (except newlines, tabs, carriage returns)
+        cleaned = ''.join(char for char in content if ord(char) >= 32 or char in '\n\t\r')
+        
+        # Remove BOM
+        cleaned = cleaned.lstrip('\ufeff')
         cleaned = _strip_code_fences(cleaned)
 
         # If it's a JSON file, try to extract a strict JSON object/array and pretty print
@@ -1031,10 +1518,15 @@ def _clean_ai_generated_content(content: str, filename: str) -> str:
                 obj = json.loads(candidate)
                 cleaned = json.dumps(obj, indent=2)
             except Exception:
-                # Attempt to remove trailing commas and retry
-                tmp = re.sub(r",\s*([}\]])", r"\1", candidate)
-                obj = json.loads(tmp)
-                cleaned = json.dumps(obj, indent=2)
+                try:
+                    # Attempt to remove trailing commas and retry
+                    tmp = re.sub(r",\s*([}\]])", r"\1", candidate)
+                    obj = json.loads(tmp)
+                    cleaned = json.dumps(obj, indent=2)
+                except Exception as e:
+                    print(f"JSON validation failed for {filename}: {e}")
+                    # Return the original cleaned content as fallback
+                    pass
         return cleaned
     except Exception:
         return content
@@ -1176,9 +1668,12 @@ async def save_project_file(request: dict = Body(...)):
         # Create directory if it doesn't exist
         full_file_path.parent.mkdir(parents=True, exist_ok=True)
         
+        # Clean content before saving
+        cleaned_content = _clean_ai_generated_content(content, full_file_path.name)
+        
         # Save file
         with open(full_file_path, 'w', encoding='utf-8') as f:
-            f.write(content)
+            f.write(cleaned_content)
         
         # Notify via WebSocket
         await manager.send_to_project(project_name, {
@@ -7699,59 +8194,57 @@ SPECIFIC FEATURES DETECTED:
 - API endpoints to integrate: {', '.join(api_endpoints)}
 - Special features: {', '.join(special_features) if special_features else 'None'}
 
-CRITICAL REQUIREMENTS:
-- Use React 18+ with modern hooks (useState, useEffect, useCallback)
-- Include TailwindCSS for modern, responsive styling
-- Create FUNCTIONAL components that actually work and make API calls
-- Add proper error handling and loading states
-- Make it responsive and user-friendly for mobile/desktop
-- Include the components identified above that are relevant to "{idea}"
-- Use Vite as the build tool with fast HMR
-- Include proper imports and exports
-- Make sure all components are properly connected
-- Add realistic sample data and interactions
-- Include modern UI patterns (cards, modals, forms, etc.)
+CRITICAL REQUIREMENTS - NO MOCKS OR PLACEHOLDERS:
+- Generate COMPLETE, PRODUCTION-READY code that works immediately
+- Use React 18+ with functional components and modern hooks
+- Include TailwindCSS for beautiful, responsive styling
+- Create WORKING components with real state management and API calls
+- Add proper error handling, loading states, and user feedback
+- Include form validation and submission handling
+- Make components interactive with real click handlers and state updates
+- Use proper TypeScript types or PropTypes for type safety
+- Include proper routing if needed (React Router)
+- Add realistic sample data that looks professional
+- Implement CRUD operations that actually work with API endpoints
+- Include proper accessibility features (ARIA labels, keyboard navigation)
 
-CODE QUALITY REQUIREMENTS:
-- Write COMPLETE, VALID JSX with no missing closing tags or malformed syntax
-- Every component must have proper return statements with valid JSX
-- All functions must have complete implementations, no empty bodies
-- Use proper React component patterns (functional components with hooks)
-- Include PropTypes or TypeScript types where appropriate
-- Add proper error boundaries and loading states
-- Ensure all imports are correctly specified
-- Write semantic, accessible HTML structures
+COMPONENT IMPLEMENTATION RULES:
+- Every component MUST have complete implementations - no empty functions
+- All useState hooks must have proper initial states and update functions
+- All useEffect hooks must have complete dependency arrays and cleanup
+- Include real event handlers (onClick, onChange, onSubmit) with actual logic
+- Implement proper form submission with validation
+- Add loading spinners and error messages for API calls
+- Use proper conditional rendering for different states
+- Include proper component composition and reusability
 
-SYNTAX REQUIREMENTS:
-- NO INCOMPLETE JSX ELEMENTS (like return (\n\n) or empty function bodies)
-- NO MALFORMED COMMENT BLOCKS (ensure /** */ comments are properly closed)
-- NO MISSING SEMICOLONS in JavaScript/JSX code
-- COMPLETE all function implementations - no placeholder comments like "// rest of component"
-- ENSURE proper JSX nesting and closing tags
-- USE proper React patterns for state management and effects
+STYLING REQUIREMENTS:
+- Use modern TailwindCSS utility classes for beautiful UI
+- Implement responsive design (mobile-first approach)
+- Add hover effects, transitions, and micro-interactions
+- Use proper color schemes and typography
+- Include proper spacing, shadows, and visual hierarchy
+- Add icons from Lucide React or Heroicons
+- Implement proper layout with flexbox/grid
 
-UNIQUE REQUIREMENTS for "{idea}":
-- Customize colors, icons, and layout to match the app's purpose
-- Add specific functionality that makes sense for this particular idea
-- Include relevant form fields, data displays, and user interactions
-- Use appropriate icons and visual elements
-- Make the UI feel purposeful and tailored to the use case
+API INTEGRATION:
+- Write real fetch() calls to the backend endpoints
+- Include proper error handling for network requests
+- Add loading states during API calls
+- Handle success and error responses appropriately
+- Use proper HTTP methods (GET, POST, PUT, DELETE)
+- Include authentication headers if needed
 
-Generate EXACTLY these files with COMPLETE, WORKING content:
+FILES TO GENERATE WITH COMPLETE IMPLEMENTATIONS:
+1. package.json - All necessary dependencies
+2. src/App.jsx - Main app with routing and layout
+3. src/main.jsx - React 18 setup with error boundaries
+4. src/index.css - TailwindCSS + custom styles
+5. vite.config.js - Optimized Vite config
+6. tailwind.config.js - Custom theme configuration
+7. Component files in src/components/ - Fully functional components
 
-1. package.json - Include all necessary dependencies for this specific project
-2. src/App.jsx - Main application with custom layout for "{idea}"
-3. src/main.jsx - Entry point with React 18 setup
-4. src/index.css - TailwindCSS + custom styles for this app
-5. vite.config.js - Vite configuration optimized for React
-6. tailwind.config.js - TailwindCSS with custom theme if needed
-7. postcss.config.js - PostCSS configuration
-
-ADDITIONAL COMPONENT FILES (create 2-3 relevant to the idea):
-- Create component files in src/components/ that match the detected components above
-- Each component should be functional and include proper React patterns
-- Include realistic sample data and state management
-- Add proper TypeScript types if needed
+Each file must be complete and production-ready. Do not use placeholders like "TODO", "// implement later", or empty function bodies.
 
 IMPORTANT: 
 - Make the app UNIQUE and SPECIFIC to "{idea}" - not generic
@@ -7852,7 +8345,7 @@ async def generate_fastapi_backend_with_ai(backend_path: Path, idea: str, projec
         
         # Use AI to generate unique code based on the idea
         prompt = f"""
-Generate a complete, functional FastAPI backend application for: "{idea}"
+Generate a complete, PRODUCTION-READY FastAPI backend application for: "{idea}"
 
 Project Name: {project_name}
 AI Integration: {"Yes" if needs_ai else "No"}
@@ -7864,41 +8357,63 @@ SPECIFIC FEATURES DETECTED:
 - Data Models needed: {', '.join(data_models)}
 - Special Dependencies: {', '.join(special_deps) if special_deps else 'None'}
 
-CRITICAL REQUIREMENTS:
-- Use FastAPI with modern Python 3.9+ features and async/await
-- Include proper CORS handling for React frontend on localhost:5173 (Vite default)
-- Create FUNCTIONAL API endpoints specific to "{idea}"
-- Add proper error handling and validation with Pydantic models
-- Include health check and automatic API documentation
-- Make it production-ready with proper code structure
-- Include all necessary imports and dependencies
-- Make endpoints actually work and return realistic data
-- Add proper status codes (200, 201, 404, 422, etc.)
-- Include realistic sample data for development
+CRITICAL REQUIREMENTS - NO MOCKS OR PLACEHOLDERS:
+- Generate COMPLETE, PRODUCTION-READY FastAPI code that works immediately
+- Use FastAPI with modern Python 3.9+ async/await patterns
+- Include proper CORS handling for React frontend (localhost:5173)
+- Create WORKING API endpoints with full business logic implementation
+- Add comprehensive error handling and validation with Pydantic models
+- Include proper HTTP status codes and response models
+- Implement REAL CRUD operations with in-memory storage or database
+- Add proper request/response validation and error messages
+- Include authentication middleware if auth is required
+- Add proper logging and error tracking
+- Implement rate limiting and security best practices
 
-UNIQUE REQUIREMENTS for "{idea}":
-- Customize data models to match the specific domain (e.g., Task, Product, Post, etc.)
-- Add business logic that makes sense for this particular idea
-- Include proper validation rules and error messages
-- Add realistic default data or mock data for testing
-- Use appropriate field types and constraints
+DATABASE IMPLEMENTATION:
+- If database needed: Use SQLAlchemy with async support and real database operations
+- Include proper database models with relationships
+- Add migration scripts and database initialization
+- Implement connection pooling and error handling
+- Use proper transaction management
 
-Generate EXACTLY these files with COMPLETE, WORKING content:
+API ENDPOINT REQUIREMENTS:
+- Every endpoint MUST have complete implementation - no empty functions
+- Include proper path parameters, query parameters, and request bodies
+- Add comprehensive input validation using Pydantic models
+- Implement proper error handling for all edge cases
+- Include realistic business logic specific to "{idea}"
+- Add proper response models with example data
+- Include proper HTTP methods (GET, POST, PUT, DELETE, PATCH)
+- Implement pagination for list endpoints
+- Add search and filtering capabilities where appropriate
 
-1. requirements.txt - Include all necessary dependencies for this specific project
-2. main.py - Main FastAPI application with proper setup and routing
-3. models.py - Pydantic models specific to "{idea}" 
-4. routes.py - API routes with business logic for "{idea}"
-5. config.py - Application configuration and settings
-6. database.py - Database setup if needed (SQLite/PostgreSQL)
+AUTHENTICATION & SECURITY:
+- If auth required: Implement JWT tokens with proper validation
+- Add password hashing with bcrypt
+- Include proper user registration and login flows
+- Add role-based access control (RBAC) if needed
+- Implement rate limiting and security headers
+- Add proper CORS configuration
 
-IMPORTANT: 
-- Make the API UNIQUE and SPECIFIC to "{idea}" - not generic
-- Include proper imports and all dependencies
-- Use modern FastAPI patterns and best practices
-- Ensure all endpoints work and return proper responses
-- Include realistic sample data and proper error handling
-- Add comments explaining the business logic
+DATA MODELS:
+- Create comprehensive Pydantic models for all data structures
+- Include proper field validation with regex, min/max values
+- Add realistic sample data and default values
+- Implement proper relationships between models
+- Include created_at/updated_at timestamps
+- Add proper serialization/deserialization
+
+FILES TO GENERATE WITH COMPLETE IMPLEMENTATIONS:
+1. requirements.txt - All necessary dependencies
+2. main.py - FastAPI app with middleware, routing, and startup/shutdown
+3. models.py - Complete Pydantic models with validation
+4. routes.py - Full API endpoints with business logic
+5. database.py - Database setup with SQLAlchemy (if needed)
+6. auth.py - Authentication system (if needed)
+7. config.py - Configuration management with environment variables
+
+Each file must be complete and production-ready. Do not use placeholders like "TODO", "# implement later", or "pass" statements.
 
 Return each file content in this EXACT format:
 ===FILE: filename===

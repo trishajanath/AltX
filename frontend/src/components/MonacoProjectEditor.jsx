@@ -26,18 +26,19 @@ const styles = {
     left: 0,
     right: 0,
     bottom: 0,
-    background: '#1e1e1e',
-    color: '#d4d4d4',
+    background: '#0b0b0b',
+    color: '#ffffff',
     fontFamily: "'Consolas', 'Monaco', 'Courier New', monospace",
-    zIndex: 1000,
+  zIndex: 2000,
     display: 'flex',
-    flexDirection: 'column'
+    flexDirection: 'column',
+    overflow: 'hidden'
   },
   
   // Header styles
   editorHeader: {
-    background: '#2d2d30',
-    borderBottom: '1px solid #3e3e42',
+    background: '#111111',
+    borderBottom: '1px solid #222222',
     padding: '8px 16px',
     display: 'flex',
     justifyContent: 'space-between',
@@ -58,14 +59,14 @@ const styles = {
     fontSize: '16px'
   },
   projectType: {
-    color: '#9cdcfe',
+    color: '#ffffff',
     fontSize: '12px',
-    background: 'rgba(156, 220, 254, 0.1)',
+    background: 'rgba(255, 255, 255, 0.08)',
     padding: '2px 6px',
     borderRadius: '4px'
   },
   buildingIndicator: {
-    color: '#ffcc02',
+    color: '#ffffff',
     fontSize: '12px',
     marginLeft: '8px',
     animation: 'pulse 2s infinite'
@@ -76,9 +77,9 @@ const styles = {
     alignItems: 'center'
   },
   btnEditorAction: {
-    background: '#0e639c',
+    background: '#1f1f23',
     color: '#ffffff',
-    border: 'none',
+    border: '1px solid #333333',
     padding: '6px 12px',
     borderRadius: '4px',
     cursor: 'pointer',
@@ -87,13 +88,16 @@ const styles = {
     transition: 'background 0.2s'
   },
   btnEditorActionPreview: {
-    background: '#16825d'
+    background: '#262626',
+    border: '1px solid #2f6f4f'
   },
   btnEditorActionStop: {
-    background: '#c5524a'
+    background: '#262626',
+    border: '1px solid #6f2f2f'
   },
   btnEditorActionClose: {
-    background: '#c5524a'
+    background: '#262626',
+    border: '1px solid #6f2f2f'
   },
   
   // Navigation styles
@@ -104,8 +108,8 @@ const styles = {
     marginRight: '8px'
   },
   navButton: {
-    background: '#37373d',
-    color: '#cccccc',
+    background: '#1f1f23',
+    color: '#ffffff',
     border: 'none',
     padding: '4px 8px',
     borderRadius: '3px',
@@ -123,14 +127,16 @@ const styles = {
     cursor: 'not-allowed'
   },
   navButtonHover: {
-    background: '#4c4c4c'
+    background: '#2a2a2f'
   },
   
   // New layout styles
   newEditorLayout: {
     flex: 1,
     display: 'flex',
-    overflow: 'hidden'
+    overflow: 'hidden',
+    minHeight: 0,
+    height: 'calc(100vh - 48px)'
   },
   
   // Chat panel (left side)
@@ -138,12 +144,14 @@ const styles = {
     width: '400px',
     minWidth: '300px',
     maxWidth: '500px',
-    background: '#252526',
-    borderRight: '1px solid #3e3e42',
+    background: '#0f0f0f',
+    borderRight: '1px solid #222222',
     display: 'flex',
     flexDirection: 'column',
     resize: 'horizontal',
-    overflow: 'auto'
+    overflow: 'hidden',
+    height: '100%',
+    minHeight: 0
   },
   
   // Right panel (preview or code)
@@ -151,12 +159,13 @@ const styles = {
     flex: 1,
     display: 'flex',
     flexDirection: 'column',
-    background: '#1e1e1e'
+    background: '#0b0b0b',
+    minHeight: 0
   },
   
   rightPanelHeader: {
-    background: '#2d2d30',
-    borderBottom: '1px solid #3e3e42',
+    background: '#111111',
+    borderBottom: '1px solid #222222',
     padding: '8px 16px',
     display: 'flex',
     justifyContent: 'space-between',
@@ -171,7 +180,7 @@ const styles = {
   
   sidebarTab: {
     background: 'transparent',
-    color: '#cccccc',
+    color: '#ffffff',
     border: 'none',
     padding: '6px 8px',
     cursor: 'pointer',
@@ -181,8 +190,9 @@ const styles = {
   },
   
   sidebarTabActive: {
-    background: '#094771',
-    color: '#ffffff'
+    background: '#1a1a1a',
+    color: '#ffffff',
+    border: '1px solid #333333'
   },
   
   viewToggleButtons: {
@@ -192,8 +202,8 @@ const styles = {
   
   viewToggleButton: {
     background: 'transparent',
-    color: '#cccccc',
-    border: '1px solid #3e3e42',
+    color: '#ffffff',
+    border: '1px solid #222222',
     padding: '6px 12px',
     cursor: 'pointer',
     borderRadius: '4px',
@@ -202,32 +212,39 @@ const styles = {
   },
   
   viewToggleButtonActive: {
-    background: '#094771',
+    background: '#1a1a1a',
     color: '#ffffff',
-    border: '1px solid #094771'
+    border: '1px solid #333333'
   },
   
   rightPanelContent: {
     flex: 1,
-    overflow: 'hidden'
+    overflow: 'hidden',
+    background: '#0b0b0b',
+    minHeight: 0
   },
   
   // Chat styles
   chatContainer: {
-    display: 'flex',
-    flexDirection: 'column',
-    height: '100%'
+    display: 'grid',
+    gridTemplateRows: '1fr auto',
+    flex: 1,
+    minHeight: 0,
+    overflow: 'hidden',
+    maxHeight: '100%'
   },
   
   chatMessages: {
     flex: 1,
     overflowY: 'auto',
     padding: '16px',
+    paddingBottom: '16px',
     gap: '16px',
     display: 'flex',
     flexDirection: 'column',
     scrollbarWidth: 'thin',
-    scrollBehavior: 'smooth'
+    scrollBehavior: 'smooth',
+    maxHeight: '100%'
   },
   
   chatMessage: {
@@ -235,38 +252,45 @@ const styles = {
     padding: '12px 16px',
     borderRadius: '12px',
     fontSize: '14px',
-    lineHeight: 1.4
+    lineHeight: 1.4,
+    whiteSpace: 'pre-wrap'
   },
   
   chatMessageUser: {
-    background: '#094771',
+    background: '#1f1f23',
     color: '#ffffff',
     alignSelf: 'flex-end',
     marginLeft: 'auto'
   },
   
   chatMessageAssistant: {
-    background: '#2d2d30',
-    color: '#d4d4d4',
+    background: '#1a1a1a',
+    color: '#ffffff',
     alignSelf: 'flex-start'
   },
   
   chatInputContainer: {
     padding: '16px',
-    borderTop: '1px solid #3e3e42',
+    borderTop: '1px solid #222222',
     display: 'flex',
-    gap: '8px'
+    gap: '8px',
+    background: '#0f0f0f',
+    height: '56px',
+    alignItems: 'center',
+    boxShadow: '0 -1px 0 rgba(255,255,255,0.06)'
   },
   
   chatInput: {
     flex: 1,
-    background: '#3c3c3c',
-    color: '#d4d4d4',
-    border: '1px solid #3e3e42',
+    background: '#111111',
+    color: '#ffffff',
+    border: '1px solid #333333',
     borderRadius: '4px',
     padding: '8px 12px',
     fontSize: '14px',
-    outline: 'none'
+    outline: 'none',
+    resize: 'none',
+    lineHeight: 1.4
   },
   
   chatSendButton: {
@@ -284,7 +308,8 @@ const styles = {
     flex: 1,
     padding: '8px',
     fontSize: '13px',
-    overflow: 'auto'
+    overflow: 'auto',
+    color: '#ffffff'
   },
   
   fileTreeItem: {
@@ -294,16 +319,43 @@ const styles = {
     cursor: 'pointer',
     borderRadius: '4px',
     marginBottom: '2px',
-    gap: '6px'
+    gap: '6px',
+    color: '#ffffff'
   },
   
   fileTreeItemHover: {
-    background: '#2a2d2e'
+    background: '#1a1a1a'
   },
   
   fileTreeItemSelected: {
-    background: '#094771',
-    color: '#ffffff'
+    background: '#1f1f23',
+    color: '#ffffff',
+    border: '1px solid #333333'
+  },
+
+  // New: Code area row layout
+  codeAreaRow: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'row',
+    minHeight: 0,
+    overflow: 'hidden'
+  },
+  fileTreePane: {
+    width: '260px',
+    minWidth: '220px',
+    maxWidth: '360px',
+    borderRight: '1px solid #222222',
+    overflow: 'auto',
+    background: '#0b0b0b'
+  },
+  codeEditorPane: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden'
   },
   
   welcomeScreen: {
@@ -325,7 +377,7 @@ const styles = {
   },
   
   welcomeScreenP: {
-    color: '#cccccc',
+    color: '#ffffff',
     marginBottom: '12px',
     lineHeight: 1.5
   }
@@ -378,6 +430,17 @@ Just tell me what you'd like to do with your project!`
       setChatMessages([welcomeMessage]);
     }
   }, [project]);
+
+  // Keep chat scrolled to the latest message
+  useEffect(() => {
+    try {
+      if (chatEndRef.current) {
+        chatEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      }
+    } catch (e) {
+      // no-op
+    }
+  }, [chatMessages, isAiThinking]);
 
   const initializeProject = async () => {
     // Load file tree
@@ -554,16 +617,17 @@ Just tell me what you'd like to do with your project!`
     
     const userMessage = { role: 'user', content: chatInput };
     setChatMessages(prev => [...prev, userMessage]);
+    const messageToSend = chatInput;
     setChatInput('');
     setIsAiThinking(true);
     
     try {
-      const response = await fetch('http://localhost:8000/api/ai-apply-changes', {
+      const response = await fetch('http://localhost:8000/api/ai-project-assistant', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           project_name: project.name,
-          user_message: chatInput,
+          user_message: messageToSend,
           tech_stack: project.tech_stack || [],
           re_run: true // Auto re-run after changes
         })
@@ -574,9 +638,11 @@ Just tell me what you'd like to do with your project!`
       if (result.success) {
         const assistantMessage = {
           role: 'assistant',
-          content: `✅ I've made the requested changes to your project!
+          content: `✅ ${result.explanation || "I've made the requested changes to your project!"}
 
-${result.files_modified ? `Modified files: ${result.files_modified.join(', ')}` : ''}
+${result.files_modified && result.files_modified.length > 0 ? `Modified files: ${result.files_modified.join(', ')}` : ''}
+
+${result.errors && result.errors.length > 0 ? `\n⚠️ Note: ${result.errors.length} issue(s) detected that may need attention.` : ''}
 
 The changes have been applied and your preview has been updated.`
         };
@@ -720,17 +786,23 @@ The changes have been applied and your preview has been updated.`
                   🤔 Thinking...
                 </div>
               )}
+              <div ref={chatEndRef} style={{ height: '1px' }} />
             </div>
             
             <div style={styles.chatInputContainer}>
-              <input
+              <textarea
                 style={styles.chatInput}
-                type="text"
                 placeholder="Ask AI to modify your code..."
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && sendChatMessage()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    sendChatMessage();
+                  }
+                }}
                 disabled={isAiThinking}
+                rows={1}
               />
               <button 
                 style={styles.chatSendButton}
@@ -799,7 +871,7 @@ The changes have been applied and your preview has been updated.`
                   width: '100%',
                   height: '100%',
                   border: 'none',
-                  background: '#ffffff',
+                  background: '#000000',
                   overflow: 'auto'
                 }}
                 title="Live Preview"
@@ -857,18 +929,16 @@ The changes have been applied and your preview has been updated.`
               </div>
             ) : (
               /* Code Editor Mode */
-              <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-                {/* File Tree Section */}
-                <div style={{ height: '30%', overflow: 'auto', borderBottom: '1px solid #3e3e42', scrollbarWidth: 'thin' }}>
-                  {activeTab === 'files' && (
+              <div style={styles.codeAreaRow}>
+                {/* Left: File Tree Pane */}
+                <div style={styles.fileTreePane}>
+                  {activeTab === 'files' ? (
                     <div style={styles.fileTree}>
                       {fileTree && fileTree.length > 0 ? renderFileTree(fileTree) : (
                         <div style={styles.welcomeScreenP}>Loading project files...</div>
                       )}
                     </div>
-                  )}
-                  
-                  {activeTab === 'errors' && (
+                  ) : (
                     <div style={styles.fileTree}>
                       {errors.length === 0 ? (
                         <div style={styles.welcomeScreenP}>✅ No problems detected</div>
@@ -877,8 +947,8 @@ The changes have been applied and your preview has been updated.`
                           <div key={index} style={styles.fileTreeItem}>
                             <span>{error.severity === 'error' ? '❌' : '⚠️'}</span>
                             <div>
-                              <div>{error.message}</div>
-                              <div style={{ fontSize: '11px', color: '#888' }}>{error.file}:{error.line}</div>
+                              <div style={{ color: '#ffffff' }}>{error.message}</div>
+                              <div style={{ fontSize: '11px', color: '#bbbbbb' }}>{error.file}:{error.line}</div>
                             </div>
                           </div>
                         ))
@@ -886,11 +956,11 @@ The changes have been applied and your preview has been updated.`
                     </div>
                   )}
                 </div>
-                
-                {/* Code Editor Section */}
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+
+                {/* Right: Code Editor Pane */}
+                <div style={styles.codeEditorPane}>
                   {selectedFile ? (
-                    <div style={{ flex: 1 }}>
+                    <>
                       <div style={{ 
                         padding: '8px 16px', 
                         background: '#2d2d30', 
@@ -899,13 +969,14 @@ The changes have been applied and your preview has been updated.`
                         color: '#ffffff',
                         display: 'flex',
                         alignItems: 'center',
-                        justifyContent: 'space-between'
+                        justifyContent: 'space-between',
+                        position: 'sticky',
+                        top: 0,
+                        zIndex: 2
                       }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                           📄 {selectedFile}
                         </div>
-                        
-                        {/* Navigation controls */}
                         <div style={styles.navigationControls}>
                           <button
                             style={{
@@ -950,40 +1021,42 @@ The changes have been applied and your preview has been updated.`
                           </span>
                         </div>
                       </div>
-                      <MonacoEditor
-                        height="100%"
-                        language={getLanguageFromFileName(selectedFile)}
-                        value={fileContents[selectedFile] || ''}
-                        theme="vs-dark"
-                        options={{
-                          automaticLayout: true,
-                          minimap: { enabled: false },
-                          wordWrap: 'on',
-                          fontSize: 14,
-                          lineNumbers: 'on',
-                          scrollBeyondLastLine: false,
-                          renderWhitespace: 'selection',
-                          readOnly: true, // For now, make it read-only
-                          scrollbar: {
-                            vertical: 'visible',
-                            horizontal: 'visible',
-                            useShadows: false,
-                            verticalHasArrows: true,
-                            horizontalHasArrows: true,
-                            arrowSize: 11,
-                            verticalScrollbarSize: 14,
-                            horizontalScrollbarSize: 14
-                          },
-                          mouseWheelZoom: true,
-                          smoothScrolling: true
-                        }}
-                      />
-                    </div>
+                      <div style={{ flex: 1, minHeight: 0 }}>
+                        <MonacoEditor
+                          height="100%"
+                          language={getLanguageFromFileName(selectedFile)}
+                          value={fileContents[selectedFile] || ''}
+                          theme="vs-dark"
+                          options={{
+                            automaticLayout: true,
+                            minimap: { enabled: false },
+                            wordWrap: 'on',
+                            fontSize: 14,
+                            lineNumbers: 'on',
+                            scrollBeyondLastLine: false,
+                            renderWhitespace: 'selection',
+                            readOnly: true,
+                            scrollbar: {
+                              vertical: 'visible',
+                              horizontal: 'visible',
+                              useShadows: false,
+                              verticalHasArrows: true,
+                              horizontalHasArrows: true,
+                              arrowSize: 11,
+                              verticalScrollbarSize: 14,
+                              horizontalScrollbarSize: 14
+                            },
+                            mouseWheelZoom: true,
+                            smoothScrolling: true
+                          }}
+                        />
+                      </div>
+                    </>
                   ) : (
                     <div style={styles.welcomeScreen}>
                       <h2 style={styles.welcomeScreenH2}>Select a file to view</h2>
                       <p style={styles.welcomeScreenP}>
-                        Choose a file from the file tree above to view its contents.
+                        Choose a file from the file tree to view its contents.
                       </p>
                     </div>
                   )}
