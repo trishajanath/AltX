@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect } from "react";
 import PageWrapper from "./PageWrapper";
 import usePreventZoom from "./usePreventZoom";
 import MonacoProjectEditor from "./MonacoProjectEditor";
-import "./MonacoProjectEditor.css";
 
 const ProjectBuilder = () => {
   usePreventZoom();
@@ -16,6 +15,7 @@ const ProjectBuilder = () => {
   const [fileContent, setFileContent] = useState("");
   const [isRecording, setIsRecording] = useState(false);
   const [selectedImages, setSelectedImages] = useState([]);
+  const [autoRunEnabled, setAutoRunEnabled] = useState(false);
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
   const mediaRecorderRef = useRef(null);
@@ -129,15 +129,47 @@ const ProjectBuilder = () => {
       setBuildProgress((prev) => [...prev, "[INFO] Frontend: React + TailwindCSS ready"]);
       setBuildProgress((prev) => [...prev, "[INFO] Backend: FastAPI + PostgreSQL configured"]);
       setBuildProgress((prev) => [...prev, "[INFO] Deployment: Ready for Vercel + Render"]);
-      setBuildProgress((prev) => [...prev, "[INFO] Opening Monaco Editor..."]);
 
-      // Auto-open Monaco Editor
-      setTimeout(() => {
-        setShowMonacoEditor(true);
-      }, 1000);
+      // Check if auto-run is enabled in response
+      if (data.auto_run && data.auto_run.enabled) {
+        setAutoRunEnabled(true);
+        setBuildProgress((prev) => [...prev, "[INFO] Auto-run enabled - Opening Monaco Editor..."]);
+        setBuildProgress((prev) => [...prev, "[INFO] Loading project file tree..."]);
+        
+        // Auto-open Monaco Editor
+        setTimeout(() => {
+          setShowMonacoEditor(true);
+        }, 1000);
+
+        // Auto-start project after a delay
+        if (data.auto_run.auto_start_project) {
+          setTimeout(async () => {
+            setBuildProgress((prev) => [...prev, "[INFO] Auto-starting project..."]);
+            try {
+              const runResponse = await fetch("http://localhost:8001/api/run-project", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ project_name: data.project.name }),
+              });
+              const runData = await runResponse.json();
+              if (runData.success) {
+                setBuildProgress((prev) => [...prev, "[SUCCESS] Project started automatically!"]);
+                setBuildProgress((prev) => [...prev, "[INFO] Live preview available"]);
+              }
+            } catch (error) {
+              setBuildProgress((prev) => [...prev, `[WARNING] Auto-start failed: ${error.message}`]);
+            }
+          }, 3000);
+        }
+      } else {
+        setBuildProgress((prev) => [...prev, "[INFO] Opening Monaco Editor..."]);
+        setTimeout(() => {
+          setShowMonacoEditor(true);
+        }, 1000);
+      }
 
       const treeRes = await fetch(
-        `http://localhost:8000/project-file-tree?project_name=${encodeURIComponent(
+        `http://localhost:8001/api/project-file-tree?project_name=${encodeURIComponent(
           data.project.name
         )}`
       );

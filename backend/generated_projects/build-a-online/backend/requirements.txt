@@ -1,0 +1,20 @@
+```text
+# FastAPI framework and ASGI server
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+
+# Pydantic for data validation and settings management
+# We use [email] extra for robust email validation in models
+pydantic[email]==2.7.1
+pydantic-settings==2.2.1
+
+# Middleware for handling Cross-Origin Resource Sharing (CORS)
+fastapi-cors==1.0.1
+# Note: Newer FastAPI versions have this built-in, but this explicit package can be used.
+# Let's stick to the built-in middleware for simplicity and robustness. The correct dependency is fastapi itself.
+# The following is just for reference, the main.py will use FastAPI's own middleware.
+# python-cors is a common name, but the one for FastAPI is usually installed with it.
+
+# UUID generation
+# No specific package needed, it's in the Python standard library.
+```

@@ -4763,6 +4763,13 @@ Generate actual code files with complete implementations, not just placeholders.
                 "complexity": complexity,
                 "path": str(project_path),
                 "ai_generated": True
+            },
+            "auto_run": {
+                "enabled": True,
+                "project_name": project_name.replace("-", " ").title(),
+                "redirect_to_monaco": True,
+                "auto_start_project": True,
+                "show_file_tree": True
             }
         }
         
@@ -4772,6 +4779,41 @@ Generate actual code files with complete implementations, not just placeholders.
             "success": False,
             "error": f"Failed to generate project: {str(e)}"
         }
+
+@app.post("/auto-run-project")
+async def auto_run_project(request: dict):
+    """
+    Auto-run project after AI generation - opens Monaco Editor and starts the project
+    """
+    try:
+        project_name = request.get("project_name")
+        if not project_name:
+            return {"success": False, "error": "Project name is required"}
+        
+        # Generate project slug
+        project_slug = project_name.lower().replace(" ", "-").replace("_", "-")
+        
+        print(f"🚀 Auto-running project: {project_name}")
+        
+        # Return instructions for frontend to auto-navigate and start
+        return {
+            "success": True,
+            "auto_run": {
+                "project_name": project_name,
+                "project_slug": project_slug,
+                "monaco_url": f"/monaco?project={project_name}",
+                "actions": [
+                    {"type": "navigate", "target": "monaco_editor"},
+                    {"type": "load_file_tree", "project": project_name},
+                    {"type": "auto_start", "delay": 2000},
+                    {"type": "show_preview", "delay": 5000}
+                ]
+            }
+        }
+        
+    except Exception as e:
+        print(f"❌ Auto-run error: {e}")
+        return {"success": False, "error": str(e)}
 
 @app.post("/propose-fix")
 async def propose_fix(request: FixRequest):

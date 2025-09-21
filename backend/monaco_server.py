@@ -109,10 +109,17 @@ async def websocket_endpoint(websocket: WebSocket, project_name: str):
 @app.post("/api/create-project-structure")
 async def create_project_structure(request: dict = Body(...)):
     """Create actual project files and structure"""
+    print(f"📥 Received create-project-structure request: {request}")
+    
     try:
         project_name = request.get("project_name")
         idea = request.get("idea") 
         tech_stack = request.get("tech_stack", ["React", "TypeScript", "Node.js"])
+        
+        if not project_name:
+            error_response = {"success": False, "error": "Project name is required"}
+            print(f"❌ Missing project name, returning: {error_response}")
+            return error_response
         
         # Send progress updates via WebSocket (non-blocking)
         try:
@@ -130,9 +137,35 @@ async def create_project_structure(request: dict = Body(...)):
         projects_dir.mkdir(exist_ok=True)
         project_path = projects_dir / project_slug
         
-        # Remove existing project if it exists
+        # Check if project already exists (likely created by main server)
         if project_path.exists():
-            shutil.rmtree(project_path)
+            print(f"✅ Project {project_name} already exists, returning existing structure")
+            
+            try:
+                await manager.send_to_project(project_name, {
+                    "type": "terminal_output", 
+                    "message": f"✅ Project already exists with existing files",
+                    "level": "success"
+                })
+            except Exception as ws_error:
+                print(f"WebSocket error in create_project_structure success: {ws_error}")
+            
+            # Count existing files
+            files_found = []
+            for root, dirs, files in os.walk(project_path):
+                for file in files:
+                    rel_path = os.path.relpath(os.path.join(root, file), project_path)
+                    files_found.append(rel_path)
+            
+            success_response = {
+                "success": True,
+                "files_created": files_found,
+                "tech_stack": tech_stack,
+                "project_path": str(project_path),
+                "message": "Project already exists"
+            }
+            print(f"✅ Returning existing project response: {len(files_found)} files")
+            return success_response
         
         # Create project structure
         files_created = await create_simple_project_structure(
@@ -148,14 +181,17 @@ async def create_project_structure(request: dict = Body(...)):
         except Exception as ws_error:
             print(f"WebSocket error in create_project_structure success: {ws_error}")
         
-        return {
+        success_response = {
             "success": True,
             "files_created": files_created,
             "tech_stack": tech_stack,
             "project_path": str(project_path)
         }
+        print(f"✅ Successfully created project structure with {len(files_created)} files")
+        return success_response
         
     except Exception as e:
+        print(f"❌ Error in create_project_structure: {str(e)}")
         try:
             await manager.send_to_project(project_name, {
                 "type": "terminal_output",
@@ -164,7 +200,10 @@ async def create_project_structure(request: dict = Body(...)):
             })
         except Exception as ws_error:
             print(f"WebSocket error in create_project_structure exception: {ws_error}")
-        return {"success": False, "error": str(e)}
+        
+        error_response = {"success": False, "error": str(e)}
+        print(f"❌ Returning error response: {error_response}")
+        return error_response
 
 async def create_simple_project_structure(project_path: Path, idea: str, project_name: str, tech_stack: List[str]) -> List[str]:
     """Create a simple React + Node.js project structure"""
@@ -672,8 +711,40 @@ async def run_project(request: dict = Body(...)):
                 if package_json_path.exists():
                     try:
                         import json
-                        with open(package_json_path, 'r') as f:
-                            package_data = json.load(f)
+                        import time
+                        print(f"Reading package.json from: {package_json_path}")
+                        
+                        # Retry logic for file reading (in case of concurrent access)
+                        max_retries = 3
+                        retry_delay = 0.5
+                        
+                        for attempt in range(max_retries):
+                            try:
+                                with open(package_json_path, 'r', encoding='utf-8') as f:
+                                    content = f.read().strip()
+                                    print(f"Package.json content length: {len(content)} (attempt {attempt + 1})")
+                                    
+                                    if len(content) == 0:
+                                        print("Package.json is empty!")
+                                        if attempt < max_retries - 1:
+                                            print(f"Retrying in {retry_delay} seconds...")
+                                            time.sleep(retry_delay)
+                                            continue
+                                        else:
+                                            raise ValueError("Package.json file is empty after all retries")
+                                    
+                                    package_data = json.loads(content)
+                                    print("Package.json successfully parsed")
+                                    break
+                                    
+                            except (json.JSONDecodeError, ValueError) as e:
+                                print(f"JSON parsing error on attempt {attempt + 1}: {e}")
+                                if attempt < max_retries - 1:
+                                    print(f"Retrying in {retry_delay} seconds...")
+                                    time.sleep(retry_delay)
+                                    continue
+                                else:
+                                    raise
                         
                         scripts = package_data.get('scripts', {})
                         
@@ -686,9 +757,16 @@ async def run_project(request: dict = Body(...)):
                         # If it has a dev script but no start script, use dev
                         elif 'dev' in scripts and 'start' not in scripts:
                             start_command = "npm run dev"
+                        
+                        print(f"Determined start command: {start_command}")
                             
                     except Exception as e:
                         print(f"Error reading package.json: {e}")
+                        print(f"Package.json path: {package_json_path}")
+                        print(f"Path exists: {package_json_path.exists()}")
+                        # Continue with default npm start command
+                else:
+                    print(f"Package.json not found at: {package_json_path}")
                 
                 await manager.send_to_project(project_name, {
                     "type": "terminal_output", 

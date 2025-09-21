@@ -1,6 +1,428 @@
 import React, { useState, useEffect, useRef } from 'react';
 import MonacoEditor from '@monaco-editor/react';
 
+// Inline styles - moved from MonacoProjectEditor.css
+const styles = {
+  monacoProjectEditor: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    background: '#1e1e1e',
+    color: '#d4d4d4',
+    fontFamily: "'Consolas', 'Monaco', 'Courier New', monospace",
+    zIndex: 1000,
+    display: 'flex',
+    flexDirection: 'column'
+  },
+  editorHeader: {
+    background: '#2d2d30',
+    borderBottom: '1px solid #3e3e42',
+    padding: '8px 16px',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    height: '48px'
+  },
+  editorTitle: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    fontWeight: 600
+  },
+  projectIcon: {
+    fontSize: '18px'
+  },
+  projectName: {
+    color: '#ffffff',
+    fontSize: '16px'
+  },
+  projectType: {
+    color: '#9cdcfe',
+    fontSize: '12px',
+    background: 'rgba(156, 220, 254, 0.1)',
+    padding: '2px 6px',
+    borderRadius: '4px'
+  },
+  buildingIndicator: {
+    color: '#ffcc02',
+    fontSize: '12px',
+    background: 'rgba(255, 204, 2, 0.1)',
+    padding: '2px 6px',
+    borderRadius: '4px',
+    animation: 'pulse 1.5s infinite'
+  },
+  editorActions: {
+    display: 'flex',
+    gap: '8px'
+  },
+  layoutToggles: {
+    display: 'flex',
+    gap: '4px',
+    marginRight: '12px',
+    padding: '4px',
+    background: '#2d2d30',
+    borderRadius: '6px'
+  },
+  btnLayoutToggle: {
+    background: 'transparent',
+    border: 'none',
+    color: '#cccccc',
+    padding: '6px 10px',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    transition: 'all 0.2s'
+  },
+  btnLayoutToggleActive: {
+    background: '#0e639c',
+    color: 'white'
+  },
+  btnEditorAction: {
+    background: '#0e639c',
+    color: 'white',
+    border: 'none',
+    padding: '6px 12px',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontSize: '12px',
+    transition: 'all 0.2s',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px'
+  },
+  btnEditorActionPreview: {
+    background: '#16825d'
+  },
+  btnEditorActionStop: {
+    background: '#d73027'
+  },
+  btnEditorActionClose: {
+    background: '#c5524a'
+  },
+  editorLayout: {
+    flex: 1,
+    display: 'flex',
+    overflow: 'hidden'
+  },
+  editorSidebar: {
+    width: '320px',
+    background: '#252526',
+    borderRight: '1px solid #3e3e42',
+    display: 'flex',
+    flexDirection: 'column',
+    transition: 'width 0.3s ease'
+  },
+  editorSidebarCollapsed: {
+    width: '48px'
+  },
+  sidebarHeader: {
+    background: '#2d2d30',
+    borderBottom: '1px solid #3e3e42',
+    padding: '8px',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center'
+  },
+  sidebarTabs: {
+    display: 'flex',
+    gap: '4px'
+  },
+  sidebarTab: {
+    background: 'transparent',
+    color: '#cccccc',
+    border: 'none',
+    padding: '6px 8px',
+    cursor: 'pointer',
+    borderRadius: '4px',
+    fontSize: '11px',
+    transition: 'all 0.2s'
+  },
+  sidebarTabActive: {
+    background: '#094771',
+    color: '#ffffff'
+  },
+  sidebarToggle: {
+    background: 'transparent',
+    color: '#cccccc',
+    border: 'none',
+    cursor: 'pointer',
+    padding: '4px',
+    borderRadius: '4px',
+    transition: 'all 0.2s'
+  },
+  sidebarContent: {
+    flex: 1,
+    overflowY: 'auto',
+    padding: '8px'
+  },
+  fileTree: {
+    fontSize: '13px'
+  },
+  loadingFiles: {
+    color: '#9cdcfe',
+    textAlign: 'center',
+    padding: '20px',
+    fontStyle: 'italic'
+  },
+  fileTreeItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '4px 6px',
+    cursor: 'pointer',
+    borderRadius: '4px',
+    transition: 'all 0.2s',
+    marginBottom: '1px'
+  },
+  fileTreeItemSelected: {
+    background: '#094771',
+    color: '#ffffff'
+  },
+  fileIcon: {
+    fontSize: '14px',
+    width: '16px',
+    textAlign: 'center',
+    flexShrink: 0
+  },
+  fileName: {
+    flex: 1,
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis'
+  },
+  editorMain: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden'
+  },
+  editorContentContainer: {
+    display: 'flex',
+    height: '100%',
+    overflow: 'hidden'
+  },
+  monacoContainer: {
+    flex: 1,
+    overflow: 'hidden'
+  },
+  monacoContainerWithPreview: {
+    width: '50%',
+    borderRight: '1px solid #3c3c3c'
+  },
+  previewContainer: {
+    width: '50%',
+    display: 'flex',
+    flexDirection: 'column',
+    background: '#1e1e1e'
+  },
+  previewHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '8px 12px',
+    background: '#2d2d30',
+    borderBottom: '1px solid #3c3c3c',
+    minHeight: '32px'
+  },
+  previewTitle: {
+    color: '#cccccc',
+    fontSize: '13px',
+    fontWeight: 500
+  },
+  previewContent: {
+    flex: 1,
+    background: 'white',
+    position: 'relative'
+  },
+  previewIframe: {
+    width: '100%',
+    height: '100%',
+    border: 'none',
+    background: 'white'
+  },
+  previewLoading: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
+    color: '#cccccc',
+    background: '#1e1e1e'
+  },
+  previewError: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
+    color: '#f48771',
+    background: '#1e1e1e',
+    flexDirection: 'column',
+    gap: '8px'
+  },
+  chatContainer: {
+    width: '50%',
+    minWidth: '300px',
+    display: 'flex',
+    flexDirection: 'column',
+    background: '#1e1e1e',
+    borderRight: '1px solid #3c3c3c'
+  },
+  chatHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '8px 12px',
+    background: '#2d2d30',
+    borderBottom: '1px solid #3c3c3c',
+    minHeight: '32px'
+  },
+  chatTitle: {
+    color: '#cccccc',
+    fontSize: '13px',
+    fontWeight: 500
+  },
+  chatMessages: {
+    flex: 1,
+    overflowY: 'auto',
+    padding: '12px',
+    background: '#1e1e1e'
+  },
+  chatMessage: {
+    marginBottom: '16px',
+    padding: '12px',
+    borderRadius: '8px',
+    background: '#2d2d30'
+  },
+  chatMessageUser: {
+    background: '#0e639c',
+    marginLeft: '20px'
+  },
+  chatMessageAssistant: {
+    background: '#2d2d30',
+    marginRight: '20px'
+  },
+  chatMessageError: {
+    background: '#5d2d2d',
+    borderLeft: '3px solid #f48771'
+  },
+  messageContent: {
+    color: '#cccccc',
+    lineHeight: 1.4,
+    whiteSpace: 'pre-wrap'
+  },
+  chatInputContainer: {
+    display: 'flex',
+    padding: '12px',
+    background: '#2d2d30',
+    borderTop: '1px solid #3c3c3c',
+    gap: '8px'
+  },
+  chatInput: {
+    flex: 1,
+    background: '#1e1e1e',
+    border: '1px solid #3c3c3c',
+    color: '#cccccc',
+    padding: '8px 12px',
+    borderRadius: '4px',
+    fontSize: '13px',
+    outline: 'none'
+  },
+  chatSend: {
+    background: '#0e639c',
+    border: 'none',
+    color: 'white',
+    padding: '8px 12px',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    transition: 'background-color 0.2s',
+    minWidth: '40px'
+  },
+  editorTerminal: {
+    height: '250px',
+    background: '#1e1e1e',
+    borderTop: '1px solid #3e3e42',
+    display: 'flex',
+    flexDirection: 'column',
+    transition: 'height 0.3s ease'
+  },
+  editorTerminalCollapsed: {
+    height: '32px'
+  },
+  terminalHeader: {
+    background: '#2d2d30',
+    borderBottom: '1px solid #3e3e42',
+    padding: '6px 12px',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    height: '32px'
+  },
+  terminalTitle: {
+    color: '#ffffff',
+    fontSize: '12px',
+    fontWeight: 500
+  },
+  terminalContent: {
+    flex: 1,
+    overflowY: 'auto',
+    padding: '8px 12px',
+    fontFamily: "'Consolas', 'Monaco', 'Courier New', monospace",
+    fontSize: '12px',
+    lineHeight: 1.4,
+    background: '#1e1e1e'
+  },
+  terminalLine: {
+    marginBottom: '2px',
+    display: 'flex',
+    gap: '8px'
+  },
+  terminalTimestamp: {
+    color: '#666',
+    fontSize: '10px',
+    flexShrink: 0
+  },
+  terminalMessage: {
+    flex: 1,
+    wordBreak: 'break-word'
+  },
+  terminalSuccess: {
+    color: '#73c991'
+  },
+  terminalError: {
+    color: '#f44747'
+  },
+  terminalWarning: {
+    color: '#ffcc02'
+  },
+  terminalInfo: {
+    color: '#d4d4d4'
+  },
+  noFileSelected: {
+    height: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: '#1e1e1e'
+  },
+  welcomeScreen: {
+    textAlign: 'center',
+    maxWidth: '600px',
+    padding: '40px'
+  },
+  welcomeScreenH2: {
+    color: '#ffffff',
+    marginBottom: '16px',
+    fontSize: '24px'
+  },
+  welcomeScreenP: {
+    color: '#cccccc',
+    marginBottom: '12px',
+    lineHeight: 1.5
+  }
+};
+
 const MonacoProjectEditor = ({ project, onClose }) => {
   const [fileTree, setFileTree] = useState([]);
   const [selectedFile, setSelectedFile] = useState(null);
@@ -709,35 +1131,45 @@ const MonacoProjectEditor = ({ project, onClose }) => {
   }, [selectedFile, fileContents]);
 
   return (
-    <div className="monaco-project-editor">
+    <div style={styles.monacoProjectEditor}>
       {/* Header */}
-      <div className="editor-header">
-        <div className="editor-title">
-          <span className="project-icon">🚀</span>
-          <span className="project-name">{project.name}</span>
-          <span className="project-type">({project.tech_stack?.join(', ') || 'Mixed'})</span>
-          {isBuilding && <span className="building-indicator">⚡ Building...</span>}
+      <div style={styles.editorHeader}>
+        <div style={styles.editorTitle}>
+          <span style={styles.projectIcon}>🚀</span>
+          <span style={styles.projectName}>{project.name}</span>
+          <span style={styles.projectType}>({project.tech_stack?.join(', ') || 'Mixed'})</span>
+          {isBuilding && <span style={styles.buildingIndicator}>⚡ Building...</span>}
         </div>
         
-        <div className="editor-actions">
+        <div style={styles.editorActions}>
           {/* Layout Toggle Buttons */}
-          <div className="layout-toggles">
+          <div style={styles.layoutToggles}>
             <button 
-              className={`btn-layout-toggle ${layoutMode === 'editor' ? 'active' : ''}`}
+              style={{
+                ...styles.btnLayoutToggle,
+                ...(layoutMode === 'editor' ? styles.btnLayoutToggleActive : {})
+              }}
               onClick={() => setLayoutMode('editor')}
               title="Editor Only"
             >
               📝
             </button>
             <button 
-              className={`btn-layout-toggle ${layoutMode === 'chat' ? 'active' : ''}`}
+              style={{
+                ...styles.btnLayoutToggle,
+                ...(layoutMode === 'chat' ? styles.btnLayoutToggleActive : {})
+              }}
               onClick={() => setLayoutMode('chat')}
               title="AI Chat"
             >
               🤖
             </button>
             <button 
-              className={`btn-layout-toggle ${layoutMode === 'preview' ? 'active' : ''}`}
+              style={{
+                ...styles.btnLayoutToggle,
+                ...(layoutMode === 'preview' ? styles.btnLayoutToggleActive : {}),
+                ...(previewUrl ? {} : styles.btnLayoutToggleDisabled)
+              }}
               onClick={() => setLayoutMode('preview')}
               title="Preview Only"
               disabled={!previewUrl}
@@ -745,7 +1177,10 @@ const MonacoProjectEditor = ({ project, onClose }) => {
               🌐
             </button>
             <button 
-              className={`btn-layout-toggle ${layoutMode === 'split' ? 'active' : ''}`}
+              style={{
+                ...styles.btnLayoutToggle,
+                ...(layoutMode === 'split' ? styles.btnLayoutToggleActive : {})
+              }}
               onClick={() => setLayoutMode('split')}
               title="Split View"
             >
@@ -754,7 +1189,10 @@ const MonacoProjectEditor = ({ project, onClose }) => {
           </div>
 
           <button 
-            className="btn-editor-action" 
+            style={{
+              ...styles.btnEditorAction,
+              ...(isRunning || isBuilding ? styles.btnEditorActionDisabled : {})
+            }}
             onClick={runProject}
             disabled={isRunning || isBuilding}
             title="Run Project (F5)"
@@ -765,7 +1203,7 @@ const MonacoProjectEditor = ({ project, onClose }) => {
           
           {previewUrl && (
             <button 
-              className="btn-editor-action preview"
+              style={{...styles.btnEditorAction, ...styles.btnEditorActionPreview}}
               onClick={() => window.open(previewUrl, '_blank')}
               title="Open Preview"
             >
@@ -775,7 +1213,7 @@ const MonacoProjectEditor = ({ project, onClose }) => {
           
           {(isRunning || previewUrl) && (
             <button 
-              className="btn-editor-action stop"
+              style={{...styles.btnEditorAction, ...styles.btnEditorActionStop}}
               onClick={stopProject}
               title="Stop Project (Ctrl+Esc)"
             >
@@ -784,7 +1222,7 @@ const MonacoProjectEditor = ({ project, onClose }) => {
           )}
           
           <button 
-            className="btn-editor-action close"
+            style={{...styles.btnEditorAction, ...styles.btnEditorActionClose}}
             onClick={onClose}
             title="Close Editor"
           >
@@ -794,19 +1232,28 @@ const MonacoProjectEditor = ({ project, onClose }) => {
       </div>
 
       {/* Main Layout */}
-      <div className="editor-layout">
+      <div style={styles.editorLayout}>
         {/* Sidebar */}
-        <div className={`editor-sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
-          <div className="sidebar-header">
-            <div className="sidebar-tabs">
+        <div style={{
+          ...styles.editorSidebar,
+          ...(sidebarCollapsed ? styles.editorSidebarCollapsed : {})
+        }}>
+          <div style={styles.sidebarHeader}>
+            <div style={styles.sidebarTabs}>
               <button 
-                className={`sidebar-tab ${activeTab === 'files' ? 'active' : ''}`}
+                style={{
+                  ...styles.sidebarTab,
+                  ...(activeTab === 'files' ? styles.sidebarTabActive : {})
+                }}
                 onClick={() => setActiveTab('files')}
               >
                 📁 Files
               </button>
               <button 
-                className={`sidebar-tab ${activeTab === 'errors' ? 'active' : ''}`}
+                style={{
+                  ...styles.sidebarTab,
+                  ...(activeTab === 'errors' ? styles.sidebarTabActive : {})
+                }}
                 onClick={() => setActiveTab('errors')}
               >
                 ⚠️ Problems ({errors.length})
@@ -814,39 +1261,39 @@ const MonacoProjectEditor = ({ project, onClose }) => {
             </div>
             
             <button 
-              className="sidebar-toggle"
+              style={styles.sidebarToggle}
               onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
             >
               {sidebarCollapsed ? '▶️' : '◀️'}
             </button>
           </div>
           
-          <div className="sidebar-content">
+          <div style={styles.sidebarContent}>
             {activeTab === 'files' && (
-              <div className="file-tree">
+              <div style={styles.fileTree}>
                 {fileTree && fileTree.length > 0 ? renderFileTree(fileTree) : (
-                  <div className="loading-files">Loading project files...</div>
+                  <div style={styles.loadingFiles}>Loading project files...</div>
                 )}
               </div>
             )}
             
             {activeTab === 'errors' && (
-              <div className="errors-panel">
+              <div style={styles.errorsPanel}>
                 {errors.length === 0 ? (
-                  <div className="no-errors">✅ No problems detected</div>
+                  <div style={styles.noErrors}>✅ No problems detected</div>
                 ) : (
                   errors.map((error, index) => (
-                    <div key={index} className="error-item" onClick={() => {
+                    <div key={index} style={styles.errorItem} onClick={() => {
                       // Jump to error location
                       if (error.file) {
                         const file = findFileInTree(fileTree, error.file);
                         if (file) openFile(file);
                       }
                     }}>
-                      <div className="error-severity">{error.severity === 'error' ? '❌' : '⚠️'}</div>
-                      <div className="error-details">
-                        <div className="error-message">{error.message}</div>
-                        <div className="error-location">{error.file}:{error.line}</div>
+                      <div style={styles.errorSeverity}>{error.severity === 'error' ? '❌' : '⚠️'}</div>
+                      <div style={styles.errorDetails}>
+                        <div style={styles.errorMessage}>{error.message}</div>
+                        <div style={styles.errorLocation}>{error.file}:{error.line}</div>
                       </div>
                     </div>
                   ))
@@ -857,20 +1304,23 @@ const MonacoProjectEditor = ({ project, onClose }) => {
         </div>
 
         {/* Editor Area */}
-        <div className="editor-main">
+        <div style={styles.editorMain}>
           {/* Tab Bar */}
           {openTabs.length > 0 && (
-            <div className="editor-tabs">
+            <div style={styles.editorTabs}>
               {openTabs.map(tab => (
                 <div 
                   key={tab.path}
-                  className={`editor-tab ${selectedFile?.path === tab.path ? 'active' : ''}`}
+                  style={{
+                    ...styles.editorTab,
+                    ...(selectedFile?.path === tab.path ? styles.editorTabActive : {})
+                  }}
                   onClick={() => setSelectedFile(tab)}
                 >
-                  <span className="tab-icon">{getFileIcon(tab.name)}</span>
-                  <span className="tab-name">{tab.name}</span>
+                  <span style={styles.tabIcon}>{getFileIcon(tab.name)}</span>
+                  <span style={styles.tabName}>{tab.name}</span>
                   <button 
-                    className="tab-close"
+                    style={styles.tabClose}
                     onClick={(e) => {
                       e.stopPropagation();
                       closeTab(tab);
@@ -884,28 +1334,35 @@ const MonacoProjectEditor = ({ project, onClose }) => {
           )}
           
           {/* Dynamic Content Container */}
-          <div className={`editor-content-container layout-${layoutMode}`}>
+          <div style={{
+            ...styles.editorContentContainer,
+            ...styles[`layout${layoutMode.charAt(0).toUpperCase() + layoutMode.slice(1)}`]
+          }}>
             {/* Chat Panel */}
             {(layoutMode === 'chat' || layoutMode === 'split') && (
-              <div className="chat-container">
-                <div className="chat-header">
-                  <span className="chat-title">🤖 AI Assistant</span>
+              <div style={styles.chatContainer}>
+                <div style={styles.chatHeader}>
+                  <span style={styles.chatTitle}>🤖 AI Assistant</span>
                 </div>
-                <div className="chat-messages">
+                <div style={styles.chatMessages}>
                   {chatMessages.map((message, index) => (
-                    <div key={index} className={`chat-message ${message.role} ${message.isError ? 'error' : ''}`}>
-                      <div className="message-header">
-                        <span className="message-role">
+                    <div key={index} style={{
+                      ...styles.chatMessage,
+                      ...styles[`chatMessage${message.role.charAt(0).toUpperCase() + message.role.slice(1)}`],
+                      ...(message.isError ? styles.chatMessageError : {})
+                    }}>
+                      <div style={styles.messageHeader}>
+                        <span style={styles.messageRole}>
                           {message.role === 'user' ? '👤' : '🤖'} 
                           {message.role === 'user' ? 'You' : 'AI Assistant'}
                         </span>
-                        <span className="message-time">{message.timestamp}</span>
+                        <span style={styles.messageTime}>{message.timestamp}</span>
                       </div>
-                      <div className="message-content">{message.content}</div>
+                      <div style={styles.messageContent}>{message.content}</div>
                       {message.actions && message.actions.length > 0 && (
-                        <div className="message-actions">
+                        <div style={styles.messageActions}>
                           {message.actions.map((action, actionIndex) => (
-                            <button key={actionIndex} className="action-button">
+                            <button key={actionIndex} style={styles.actionButton}>
                               {action.label}
                             </button>
                           ))}
@@ -914,12 +1371,12 @@ const MonacoProjectEditor = ({ project, onClose }) => {
                     </div>
                   ))}
                   {isAiThinking && (
-                    <div className="chat-message assistant thinking">
-                      <div className="message-header">
-                        <span className="message-role">🤖 AI Assistant</span>
+                    <div style={{...styles.chatMessage, ...styles.chatMessageAssistant, ...styles.chatMessageThinking}}>
+                      <div style={styles.messageHeader}>
+                        <span style={styles.messageRole}>🤖 AI Assistant</span>
                       </div>
-                      <div className="message-content">
-                        <div className="thinking-indicator">
+                      <div style={styles.messageContent}>
+                        <div style={styles.thinkingIndicator}>
                           <span>🧠</span> Thinking...
                         </div>
                       </div>
@@ -927,10 +1384,10 @@ const MonacoProjectEditor = ({ project, onClose }) => {
                   )}
                   <div ref={chatEndRef} />
                 </div>
-                <div className="chat-input-container">
+                <div style={styles.chatInputContainer}>
                   <input
                     type="text"
-                    className="chat-input"
+                    style={styles.chatInput}
                     placeholder="Ask AI to modify your code..."
                     value={chatInput}
                     onChange={(e) => setChatInput(e.target.value)}
@@ -938,7 +1395,10 @@ const MonacoProjectEditor = ({ project, onClose }) => {
                     disabled={isAiThinking}
                   />
                   <button 
-                    className="chat-send"
+                    style={{
+                      ...styles.chatSend,
+                      ...(!chatInput.trim() || isAiThinking ? styles.chatSendDisabled : {})
+                    }}
                     onClick={sendChatMessage}
                     disabled={!chatInput.trim() || isAiThinking}
                   >
@@ -950,9 +1410,10 @@ const MonacoProjectEditor = ({ project, onClose }) => {
 
             {/* Monaco Editor */}
             {(layoutMode === 'editor' || layoutMode === 'split') && (
-              <div className={`monaco-container ${
-                layoutMode === 'split' ? 'split-mode' : 'full-width'
-              }`}>
+              <div style={{
+                ...styles.monacoContainer,
+                ...(layoutMode === 'split' ? styles.monacoContainerSplitMode : styles.monacoContainerFullWidth)
+              }}>
                 {selectedFile ? (
                   <MonacoEditor
                     ref={editorRef}
@@ -986,27 +1447,34 @@ const MonacoProjectEditor = ({ project, onClose }) => {
                     }}
                   />
                 ) : (
-                  <div className="no-file-selected">
-                    <div className="welcome-screen">
+                  <div style={styles.noFileSelected}>
+                    <div style={styles.welcomeScreen}>
                       <h2>🚀 {project.name}</h2>
                       <p>AI-generated {project.tech_stack?.join(' + ') || 'web'} application</p>
                       <p>Select a file from the tree to start editing</p>
                       
-                      <div className="quick-actions">
-                        <button onClick={runProject} className="btn-welcome" disabled={isBuilding}>
+                      <div style={styles.quickActions}>
+                        <button 
+                          onClick={runProject} 
+                          style={{
+                            ...styles.btnWelcome,
+                            ...(isBuilding ? styles.btnWelcomeDisabled : {})
+                          }}
+                          disabled={isBuilding}
+                        >
                           {isBuilding ? '⚡ Building...' : '▶️ Run Project'}
                         </button>
                         {previewUrl && (
                           <button 
                             onClick={() => window.open(previewUrl, '_blank')}
-                            className="btn-welcome"
+                            style={styles.btnWelcome}
                           >
                             🌐 Open Preview
                           </button>
                         )}
                       </div>
                       
-                      <div className="keyboard-shortcuts">
+                      <div style={styles.keyboardShortcuts}>
                         <h4>Keyboard Shortcuts:</h4>
                         <div>Ctrl+S - Save file</div>
                         <div>F5 - Run project</div>
@@ -1020,41 +1488,43 @@ const MonacoProjectEditor = ({ project, onClose }) => {
 
             {/* Preview Panel */}
             {(layoutMode === 'preview' || (layoutMode === 'split' && previewUrl)) && previewUrl && (
-              <div className="preview-container">
-                <div className="preview-header">
-                  <span className="preview-title">🌐 Live Preview</span>
-                  <div className="preview-actions">
+              <div style={styles.previewContainer}>
+                <div style={styles.previewHeader}>
+                  <span style={styles.previewTitle}>🌐 Live Preview</span>
+                  <div style={styles.previewActions}>
                     <button 
                       onClick={() => window.open(previewUrl, '_blank')}
-                      className="btn-preview-action"
+                      style={styles.btnPreviewAction}
                       title="Open in new tab"
                     >
                       ↗️
                     </button>
                     <button 
                       onClick={() => document.getElementById('preview-iframe')?.contentWindow?.location.reload()}
-                      className="btn-preview-action"
+                      style={styles.btnPreviewAction}
                       title="Refresh preview"
                     >
                       🔄
                     </button>
                   </div>
                 </div>
-                <div className="preview-content">
+                <div style={styles.previewContent}>
                   {previewLoading && (
-                    <div className="preview-loading">
+                    <div style={styles.previewLoading}>
                       <div>🔄 Loading preview...</div>
                     </div>
                   )}
                   <iframe
                     id="preview-iframe"
                     src={previewUrl}
-                    className="preview-iframe"
+                    style={{
+                      ...styles.previewIframe,
+                      display: previewLoading ? 'none' : 'block'
+                    }}
                     title="Application Preview"
                     sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups"
                     onLoad={() => setPreviewLoading(false)}
                     onError={() => setPreviewLoading(false)}
-                    style={{ display: previewLoading ? 'none' : 'block' }}
                   />
                 </div>
               </div>
@@ -1064,19 +1534,22 @@ const MonacoProjectEditor = ({ project, onClose }) => {
       </div>
 
       {/* Terminal */}
-      <div className={`editor-terminal ${terminalCollapsed ? 'collapsed' : ''}`}>
-        <div className="terminal-header">
-          <span className="terminal-title">🖥️ Terminal - {currentDirectory}</span>
-          <div className="terminal-actions">
+      <div style={{
+        ...styles.editorTerminal,
+        ...(terminalCollapsed ? styles.editorTerminalCollapsed : {})
+      }}>
+        <div style={styles.terminalHeader}>
+          <span style={styles.terminalTitle}>🖥️ Terminal - {currentDirectory}</span>
+          <div style={styles.terminalActions}>
             <button 
-              className="terminal-action"
+              style={styles.terminalAction}
               onClick={() => setTerminalOutput([])}
               title="Clear terminal"
             >
               🗑️
             </button>
             <button 
-              className="terminal-toggle"
+              style={styles.terminalToggle}
               onClick={() => setTerminalCollapsed(!terminalCollapsed)}
             >
               {terminalCollapsed ? '⬆️' : '⬇️'}
@@ -1084,17 +1557,20 @@ const MonacoProjectEditor = ({ project, onClose }) => {
           </div>
         </div>
         
-        <div className="terminal-content" ref={terminalRef}>
+        <div style={styles.terminalContent} ref={terminalRef}>
           {terminalOutput.map(output => (
-            <div key={output.id} className={`terminal-line ${output.type}`}>
-              <span className="terminal-timestamp">[{output.timestamp}]</span>
-              <span className="terminal-message">{output.message}</span>
+            <div key={output.id} style={{
+              ...styles.terminalLine,
+              ...styles[`terminalLine${output.type.charAt(0).toUpperCase() + output.type.slice(1)}`]
+            }}>
+              <span style={styles.terminalTimestamp}>[{output.timestamp}]</span>
+              <span style={styles.terminalMessage}>{output.message}</span>
             </div>
           ))}
         </div>
         
-        <div className="terminal-input">
-          <span className="terminal-prompt">{currentDirectory}$</span>
+        <div style={styles.terminalInput}>
+          <span style={styles.terminalPrompt}>{currentDirectory}$</span>
           <input 
             type="text"
             placeholder="Type command and press Enter..."
