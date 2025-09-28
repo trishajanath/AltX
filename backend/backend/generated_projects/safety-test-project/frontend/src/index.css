@@ -1,0 +1,4 @@
+/* Minimal styles for initial render */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

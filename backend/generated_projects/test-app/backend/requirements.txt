@@ -1,1 +1,0 @@
-fastapi==0.104.1\nuvicorn==0.24.0\npython-multipart==0.0.6\npython-dotenv==1.0.0\nsqlalchemy==2.0.23\npsycopg2-binary==2.9.9\npydantic==2.5.0\npython-jose==3.3.0\npasslib==1.7.4\nbcrypt==4.1.2

@@ -1,9 +1,0 @@
-# FastAPI and its dependencies
-fastapi
-
-# ASGI server to run the application
-uvicorn[standard]
-
-# Pydantic is a core dependency of FastAPI but listed for clarity
-# Used for data validation and settings management
-pydantic

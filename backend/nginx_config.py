@@ -54,14 +54,14 @@ server {{
         try_files $uri $uri/ /index.html;
         
         # Cache static assets
-        location ~* \.(jpg|jpeg|png|gif|ico|css|js|woff|woff2|ttf|svg)$ {{
+        location ~* \\.(jpg|jpeg|png|gif|ico|css|js|woff|woff2|ttf|svg)$ {{
             expires 1y;
             add_header Cache-Control "public, immutable";
         }}
     }}
     
     # Security: Deny access to sensitive files
-    location ~ /\. {{
+    location ~ /\\. {{
         deny all;
     }}
     
@@ -96,9 +96,9 @@ server {{
     
     def _get_php_config(self) -> str:
         """Get PHP-specific Nginx configuration"""
-        return """
+        return r"""
     # PHP-FPM handling
-    location ~ \\.php$ {
+    location ~ \.php$ {
         include snippets/fastcgi-php.conf;
         fastcgi_pass unix:/var/run/php/php8.1-fpm.sock;
         fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;

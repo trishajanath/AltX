@@ -402,6 +402,7 @@ const MonacoProjectEditor = ({ project, onClose }) => {
   
   const chatEndRef = useRef(null);
   const wsRef = useRef(null);
+  const connectTimerRef = useRef(null);
 
   // Initialize project
   useEffect(() => {
@@ -428,6 +429,30 @@ I can help you:
 Just tell me what you'd like to do with your project!`
       };
       setChatMessages([welcomeMessage]);
+      // Cleanup WebSocket when project changes or component unmounts
+      return () => {
+        try {
+          if (connectTimerRef.current) {
+            clearTimeout(connectTimerRef.current);
+            connectTimerRef.current = null;
+          }
+          const ws = wsRef.current;
+          if (ws) {
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.close();
+            } else if (ws.readyState === WebSocket.CONNECTING) {
+              // Defer close until after open to avoid 'closed before established' console error
+              ws.onopen = () => {
+                try { ws.close(); } catch (_) {}
+              };
+            }
+          }
+        } catch (e) {
+          // no-op
+        } finally {
+          wsRef.current = null;
+        }
+      };
     }
   }, [project]);
 
@@ -460,14 +485,34 @@ Just tell me what you'd like to do with your project!`
   };
 
   const setupWebSocket = () => {
-    if (wsRef.current) {
-      wsRef.current.close();
+    // Debounce creation to avoid StrictMode double-mount racing
+    if (connectTimerRef.current) {
+      clearTimeout(connectTimerRef.current);
+      connectTimerRef.current = null;
     }
-    
-    const ws = new WebSocket(`ws://localhost:8000/ws/project/${project.name}`);
-    wsRef.current = ws;
-    
-    ws.onmessage = (event) => {
+
+    connectTimerRef.current = setTimeout(() => {
+      // If an existing socket is CONNECTING or OPEN, don't create another
+      if (wsRef.current && (wsRef.current.readyState === WebSocket.CONNECTING || wsRef.current.readyState === WebSocket.OPEN)) {
+        return;
+      }
+
+      const ws = new WebSocket(`ws://localhost:8000/ws/project/${project.name}`);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        // Connected successfully
+      };
+
+      ws.onclose = () => {
+        // Socket closed; avoid noisy errors from double-init
+      };
+
+      ws.onerror = () => {
+        // Swallow transient errors during dev StrictMode
+      };
+
+      ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
       
       switch (data.type) {
@@ -526,7 +571,8 @@ Just tell me what you'd like to do with your project!`
           initializeProject();
           break;
       }
-    };
+      };
+    }, 50);
   };
 
   const runProject = async () => {

@@ -249,10 +249,15 @@ class ConnectionManager:
             disconnected = []
             for connection_id in self.project_connections[project_name]:
                 websocket = self.active_connections.get(connection_id)
-                if websocket and websocket.client_state == WebSocketState.CONNECTED:
+                if websocket:
                     try:
-                        await websocket.send_json(message)
-                    except:
+                        # Only send when CONNECTED
+                        if websocket.client_state == WebSocketState.CONNECTED:
+                            await websocket.send_json(message)
+                        else:
+                            disconnected.append(connection_id)
+                    except Exception:
+                        # Any send error, schedule cleanup
                         disconnected.append(connection_id)
                 else:
                     disconnected.append(connection_id)
@@ -266,32 +271,53 @@ manager = ConnectionManager()
 # --- WebSocket Endpoint ---
 @app.websocket("/ws/project/{project_name}")
 async def websocket_endpoint(websocket: WebSocket, project_name: str):
+    await websocket.accept()
     connection_id = str(uuid.uuid4())
-    await manager.connect(websocket, connection_id, project_name)
     
     try:
+        # Add to connection manager
+        manager.active_connections[connection_id] = websocket
+        # Ensure this connection is tracked under the project for broadcasts
+        if project_name not in manager.project_connections:
+            manager.project_connections[project_name] = set()
+        manager.project_connections[project_name].add(connection_id)
+        print(f"✅ WebSocket connected: {project_name} ({connection_id})")
+        
         # Send welcome message
         await websocket.send_json({
             "type": "connected",
-            "message": f"Connected to project: {project_name}"
+            "message": f"Connected to project: {project_name}",
+            "connection_id": connection_id
         })
         
-        # Keep connection alive
+        # Simple message loop
         while True:
             try:
-                data = await websocket.receive_json()
-                # Handle incoming messages if needed
-                if data.get("type") == "ping":
-                    await websocket.send_json({"type": "pong"})
-                    
+                # Just wait for any message or disconnection
+                data = await websocket.receive_text()
+                
+                # Echo back to confirm connection is alive
+                await websocket.send_json({
+                    "type": "echo",
+                    "data": data,
+                    "timestamp": datetime.now().isoformat()
+                })
+                
             except WebSocketDisconnect:
+                print(f"WebSocket disconnected: {project_name}")
                 break
             except Exception as e:
                 print(f"WebSocket error: {e}")
                 break
                 
+    except Exception as e:
+        print(f"WebSocket setup error: {e}")
     finally:
-        manager.disconnect(connection_id, project_name)
+        # Clean up connection via manager to keep maps in sync
+        try:
+            manager.disconnect(connection_id, project_name)
+        finally:
+            print(f"🔌 WebSocket cleaned up: {project_name}")
 
 # --- Enhanced Project Structure Creation ---
 @app.post("/api/create-project-structure")
@@ -350,108 +376,78 @@ async def create_project_structure(request: dict = Body(...)):
 
 async def analyze_tech_stack_for_idea(idea: str) -> List[str]:
     """Determine the best tech stack for the project idea - ALWAYS React + FastAPI"""
-    try:
-        # ALWAYS use React + FastAPI + Vite stack for consistency
-        base_stack = ["React", "FastAPI", "Vite", "TailwindCSS", "Python"]
-        
-        # Add additional technologies based on the idea requirements
-        additional_tech = []
-        
-        # AI/ML features
-        if any(keyword in idea.lower() for keyword in ["ai", "ml", "openai", "gpt", "chatbot", "predict"]):
-            additional_tech.extend(["OpenAI API", "AI Integration"])
-        
-        # Database needs
-        if any(keyword in idea.lower() for keyword in ["database", "store", "save", "data", "crud", "persistent"]):
-            additional_tech.append("SQLite")  # Start with SQLite for simplicity
-        
-        # Authentication needs
-        if any(keyword in idea.lower() for keyword in ["auth", "login", "user", "signup", "account"]):
-            additional_tech.extend(["JWT", "Authentication"])
-        
-        # Real-time features
-        if any(keyword in idea.lower() for keyword in ["chat", "live", "real-time", "websocket", "notification"]):
-            additional_tech.extend(["WebSockets", "Real-time"])
-        
-        # Advanced UI needs
-        if any(keyword in idea.lower() for keyword in ["dashboard", "chart", "graph", "analytics", "admin"]):
-            additional_tech.extend(["Charts", "Dashboard"])
-        
-        # Combine base stack with additional technologies (limit to 8 total)
-        final_stack = base_stack + additional_tech
-        return final_stack[:8]
-        
-    except Exception as e:
-        print(f"Error analyzing tech stack: {e}")
-        # Default to React + FastAPI stack
-        return ["React", "FastAPI", "Vite", "TailwindCSS", "Python"]
+    # ALWAYS use consistent React + FastAPI stack for better quality
+    base_stack = ["React", "FastAPI", "Vite", "TailwindCSS"]
+    
+    # Add specific features based on the idea
+    additional_features = []
+    
+    idea_lower = idea.lower()
+    
+    # Database features
+    if any(keyword in idea_lower for keyword in ["todo", "task", "store", "save", "data", "crud", "database"]):
+        additional_features.append("SQLite")
+    
+    # Authentication features  
+    if any(keyword in idea_lower for keyword in ["auth", "login", "user", "signup", "account", "profile"]):
+        additional_features.append("JWT Auth")
+    
+    # Real-time features
+    if any(keyword in idea_lower for keyword in ["chat", "live", "real-time", "websocket", "notification"]):
+        additional_features.append("WebSockets")
+    
+    # AI features
+    if any(keyword in idea_lower for keyword in ["ai", "ml", "openai", "gpt", "chatbot", "intelligent"]):
+        additional_features.append("AI Integration")
+    
+    return base_stack + additional_features[:4]  # Limit to 8 total items
 
 async def create_complete_project_structure(project_path: Path, idea: str, project_name: str, tech_stack: List[str]) -> List[str]:
-    """Create complete project with all necessary files and real-time visualization - ALWAYS React + FastAPI"""
-    files_created = []
+    """Create complete project with OPTIMIZED Pure AI generation - 100% AI code, NO templates, FAST"""
     
     # Send initial progress
     await manager.send_to_project(project_name, {
         "type": "file_creation_start",
-        "message": "🏗️ Starting AI-powered project creation...",
-        "total_files": 15  # Estimated number of files
+        "message": "🚀 Starting OPTIMIZED Pure AI generation - 100% AI code in ~60 seconds...",
+        "total_files": 15
     })
     
-    # Create main directories
-    frontend_path = project_path / "frontend"
-    backend_path = project_path / "backend"
-    
-    frontend_path.mkdir(parents=True, exist_ok=True)
-    backend_path.mkdir(parents=True, exist_ok=True)
-    
-    # Send directory creation update
-    await manager.send_to_project(project_name, {
-        "type": "terminal_output",
-        "message": "📁 Created React + FastAPI project directories",
-        "level": "info"
-    })
-    
-    # Determine features needed from the idea and tech stack
-    needs_ai = any(ai in tech_stack for ai in ["OpenAI API", "AI Integration"]) or any(keyword in idea.lower() for keyword in ["ai", "gpt", "chatbot", "ml"])
-    needs_auth = any(auth in tech_stack for auth in ["JWT", "Authentication"]) or any(keyword in idea.lower() for keyword in ["auth", "login", "user", "signup"])
-    needs_database = any(db in tech_stack for db in ["SQLite", "PostgreSQL", "MongoDB"]) or any(keyword in idea.lower() for keyword in ["database", "store", "save", "data"])
-    
-    # ALWAYS create React frontend with AI-generated content (no Next.js)
-    await manager.send_to_project(project_name, {
-        "type": "status",
-        "phase": "frontend",
-        "message": "🎨 Generating React frontend with Vite..."
-    })
-    
-    frontend_files = await generate_react_frontend_with_ai(frontend_path, idea, project_name, False, needs_auth)
-    files_created.extend(frontend_files)
-    
-    # ALWAYS create FastAPI backend with AI-generated content
-    await manager.send_to_project(project_name, {
-        "type": "status", 
-        "phase": "backend",
-        "message": "⚡ Generating FastAPI backend..."
-    })
-    
-    backend_files = await generate_fastapi_backend_with_ai(backend_path, idea, project_name, needs_ai, needs_auth, needs_database)
-    files_created.extend(backend_files)
-    
-    # Create root files with real-time updates
-    await manager.send_to_project(project_name, {
-        "type": "status",
-        "phase": "config",
-        "message": "📄 Creating configuration files..."
-    })
-    
-    root_files = await create_root_files_with_animation(project_path, project_name, idea, ["React", "FastAPI", "Vite", "TailwindCSS"])
-    files_created.extend(root_files)
-    
-    # Send completion
-    await manager.send_to_project(project_name, {
-        "type": "file_creation_complete",
-        "message": f"✅ React + FastAPI project created! Generated {len(files_created)} files with AI",
-        "files_created": files_created
-    })
+    try:
+        # Use OPTIMIZED Pure AI Generator - NO templates, FAST AI generation
+        if os.getenv("GOOGLE_API_KEY"):
+            from pure_ai_generator import PureAIGenerator
+            
+            await manager.send_to_project(project_name, {
+                "type": "terminal_output",
+                "message": "🧠 FAST AI: Creating 100% custom implementation...",
+                "level": "info"
+            })
+            
+            generator = PureAIGenerator()
+            files_created = await generator.generate_project_structure(project_path, idea, project_name)
+            
+            await manager.send_to_project(project_name, {
+                "type": "file_creation_complete", 
+                "message": f"🎉 Pure AI Complete! Generated {len(files_created)} files of 100% custom AI code",
+                "files_created": files_created,
+                "generation_method": "optimized-pure-ai"
+            })
+            
+            return files_created
+            
+        else:
+            # If no AI key, throw error 
+            raise Exception("GOOGLE_API_KEY is required. Please set your Gemini API key.")
+            
+    except Exception as e:
+        await manager.send_to_project(project_name, {
+            "type": "terminal_output", 
+            "message": f"❌ Pure AI generation failed: {str(e)}",
+            "level": "error"
+        })
+        
+        # Re-raise the error
+        raise Exception(f"Pure AI generation failed: {str(e)}. Please check your GOOGLE_API_KEY.")
     
     return files_created
 
@@ -2165,7 +2161,12 @@ async def get_project_file_tree(project_name: str = Query(...)):
         project_path = projects_dir / project_slug
         
         if not project_path.exists():
-            return {"success": False, "error": "Project not found"}
+            # Return an empty tree during early generation instead of an error
+            return {
+                "success": True,
+                "file_tree": [],
+                "project_path": str(project_path)
+            }
         
         def build_file_tree(path: Path, base_path: Path = None):
             """Recursively build file tree structure"""
@@ -2209,6 +2210,22 @@ async def get_project_file_tree(project_name: str = Query(...)):
             "project_path": str(project_path)
         }
         
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+# --- Rate Limit Status (to avoid 404 in frontend) ---
+@app.get("/api/rate-limit-status")
+async def rate_limit_status():
+    """Return a basic rate limit status; integrate with GitHub if available."""
+    try:
+        # Minimal static response to satisfy UI; extend to real provider limits as needed
+        return {
+            "success": True,
+            "rate_limit": {
+                "core": {"limit": 5000, "remaining": 4999},
+                "search": {"limit": 30, "remaining": 30}
+            }
+        }
     except Exception as e:
         return {"success": False, "error": str(e)}
 

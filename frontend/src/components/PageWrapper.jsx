@@ -532,7 +532,7 @@ const PageWrapper = ({ children }) => {
                         setUser(userInfo);
                         setIsAuthenticated(true);
                         if (process.env.NODE_ENV === 'development') {
-                            console.log('✅ Authentication state loaded in PageWrapper:', userInfo);
+                            
                         }
                         return;
                     }

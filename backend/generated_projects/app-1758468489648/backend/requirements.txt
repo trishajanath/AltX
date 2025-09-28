@@ -1,8 +1,0 @@
-# ASGI Server
-uvicorn[standard]
-
-# Web Framework
-fastapi
-
-# For settings management from environment variables
-python-dotenv
