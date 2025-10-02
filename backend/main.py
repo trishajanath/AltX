@@ -319,6 +319,116 @@ async def websocket_endpoint(websocket: WebSocket, project_name: str):
         finally:
             print(f"🔌 WebSocket cleaned up: {project_name}")
 
+# --- WebSocket Chat Endpoint ---
+@app.websocket("/ws/chat/{project_name}")
+async def chat_websocket_endpoint(websocket: WebSocket, project_name: str):
+    """Dedicated WebSocket endpoint for real-time AI chat during development."""
+    await websocket.accept()
+    connection_id = str(uuid.uuid4())
+    
+    try:
+        # Add to connection manager with chat prefix
+        chat_project_name = f"chat_{project_name}"
+        manager.active_connections[connection_id] = websocket
+        if chat_project_name not in manager.project_connections:
+            manager.project_connections[chat_project_name] = set()
+        manager.project_connections[chat_project_name].add(connection_id)
+        print(f"💬 Chat WebSocket connected: {project_name} ({connection_id})")
+        
+        # Send welcome message
+        await websocket.send_json({
+            "type": "chat_connected",
+            "message": "AI chat assistant ready! Ask me anything about development.",
+            "connection_id": connection_id
+        })
+        
+        # Chat message loop
+        while True:
+            try:
+                # Wait for chat message
+                data = await websocket.receive_json()
+                
+                if data.get("type") == "chat_message":
+                    user_message = data.get("message", "").strip()
+                    chat_history = data.get("history", [])
+                    context = data.get("context", {})
+                    
+                    if user_message:
+                        # Send typing indicator
+                        await websocket.send_json({
+                            "type": "chat_typing",
+                            "message": "AI is thinking..."
+                        })
+                        
+                        try:
+                            # Process chat using the same logic as the HTTP endpoint
+                            system_context = """You are an expert full-stack developer and helpful coding assistant. 
+Provide clear, practical, and actionable responses. Be concise but thorough."""
+
+                            # Add project context
+                            if context:
+                                tech_stack = context.get("tech_stack", [])
+                                if tech_stack:
+                                    system_context += f"\n\nProject uses: {', '.join(tech_stack)}"
+                            
+                            messages = [{"role": "system", "content": system_context}]
+                            
+                            # Add recent history
+                            recent_history = chat_history[-8:] if chat_history else []
+                            for msg in recent_history:
+                                if msg.get("role") and msg.get("content"):
+                                    messages.append(msg)
+                            
+                            # Add current message
+                            messages.append({"role": "user", "content": user_message})
+                            
+                            # Get AI response
+                            from ai_assistant import get_chat_response
+                            ai_response = get_chat_response(messages, model_type='fast')
+                            
+                            # Send response
+                            await websocket.send_json({
+                                "type": "chat_response",
+                                "message": ai_response,
+                                "user_message": user_message,
+                                "timestamp": time.time()
+                            })
+                            
+                        except Exception as ai_error:
+                            await websocket.send_json({
+                                "type": "chat_error", 
+                                "message": f"AI chat error: {str(ai_error)}"
+                            })
+                    
+                elif data.get("type") == "ping":
+                    await websocket.send_json({"type": "pong"})
+                    
+            except WebSocketDisconnect:
+                print(f"Chat WebSocket disconnected: {project_name}")
+                break
+            except Exception as e:
+                print(f"Chat WebSocket error: {e}")
+                await websocket.send_json({
+                    "type": "error",
+                    "message": f"Connection error: {str(e)}"
+                })
+                break
+                
+    except Exception as e:
+        print(f"Chat WebSocket setup error: {e}")
+    finally:
+        # Clean up connection
+        try:
+            chat_project_name = f"chat_{project_name}"
+            if connection_id in manager.active_connections:
+                del manager.active_connections[connection_id]
+            if chat_project_name in manager.project_connections:
+                manager.project_connections[chat_project_name].discard(connection_id)
+                if not manager.project_connections[chat_project_name]:
+                    del manager.project_connections[chat_project_name]
+        finally:
+            print(f"💬 Chat WebSocket cleaned up: {project_name}")
+
 # --- Enhanced Project Structure Creation ---
 @app.post("/api/create-project-structure")
 async def create_project_structure(request: dict = Body(...)):
@@ -1144,6 +1254,118 @@ async def build_with_ai(request: dict = Body(...)):
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+# --- AI Chat Endpoint ---
+@app.post("/api/chat")
+async def ai_chat(request: dict = Body(...)):
+    """General AI chat endpoint for development assistance and questions."""
+    try:
+        project_name = request.get("project_name")
+        user_message = request.get("user_message")
+        chat_history = request.get("chat_history", [])
+        context = request.get("context", {})
+        
+        if not user_message:
+            raise HTTPException(status_code=400, detail="user_message is required")
+        
+        # Optional: Send typing indicator if project_name is provided
+        if project_name:
+            await manager.send_to_project(project_name, {
+                "type": "chat_typing",
+                "message": "AI is thinking..."
+            })
+        
+        # Build context for the AI
+        system_context = """You are an expert full-stack developer and helpful coding assistant. 
+You help developers with:
+- Code explanations and debugging
+- Architecture advice and best practices  
+- Technology recommendations
+- Implementation guidance
+- Problem-solving and optimization
+- General development questions
+
+Provide clear, practical, and actionable responses. When discussing code, be specific and include examples when helpful."""
+
+        # Add project context if provided
+        if context:
+            tech_stack = context.get("tech_stack", [])
+            current_files = context.get("current_files", [])
+            errors = context.get("errors", [])
+            
+            if tech_stack:
+                system_context += f"\n\nCurrent project uses: {', '.join(tech_stack)}"
+            if current_files:
+                system_context += f"\nCurrent files: {', '.join(current_files[:10])}"  # Limit to first 10
+            if errors:
+                system_context += f"\nActive errors: {len(errors)} issues found"
+
+        # Prepare chat messages for AI
+        messages = [{"role": "system", "content": system_context}]
+        
+        # Add chat history (limit to last 10 messages to avoid token limits)
+        recent_history = chat_history[-10:] if chat_history else []
+        for msg in recent_history:
+            if msg.get("role") and msg.get("content"):
+                messages.append({
+                    "role": msg["role"], 
+                    "content": msg["content"]
+                })
+        
+        # Add current user message
+        messages.append({"role": "user", "content": user_message})
+        
+        # Get AI response
+        try:
+            from ai_assistant import get_chat_response
+            ai_response = get_chat_response(messages, model_type='smart')
+            
+            # Send response via WebSocket if project connected
+            if project_name:
+                await manager.send_to_project(project_name, {
+                    "type": "chat_response",
+                    "message": ai_response,
+                    "user_message": user_message
+                })
+            
+            return {
+                "success": True,
+                "response": ai_response,
+                "timestamp": time.time()
+            }
+            
+        except Exception as ai_error:
+            error_msg = f"AI chat failed: {str(ai_error)}"
+            if project_name:
+                await manager.send_to_project(project_name, {
+                    "type": "chat_error",
+                    "message": error_msg
+                })
+            
+            return {
+                "success": False,
+                "error": error_msg
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+# --- Chat History Endpoint ---
+@app.get("/api/chat/history/{project_name}")
+async def get_chat_history(project_name: str, limit: int = 50):
+    """Get recent chat history for a project (placeholder for now)."""
+    try:
+        # For now, return empty history - in production you'd store/retrieve from database
+        return {
+            "success": True,
+            "project_name": project_name,
+            "history": [],
+            "message": "Chat history feature coming soon - conversations are not yet persisted"
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
 # --- AI Project Assistant Endpoint ---
 @app.post("/api/ai-project-assistant")
 async def ai_project_assistant(request: dict = Body(...)):
@@ -1189,35 +1411,199 @@ async def ai_project_assistant(request: dict = Body(...)):
         except:
             pass
 
-        # Use AI to generate changes
-        prompt = f"""You are an expert full-stack developer. The user wants to modify their project.
+        # Enhanced request processing - handle vague requests by analyzing the project
+        def is_vague_request(message):
+            """Check if the request is too vague and needs project analysis."""
+            vague_phrases = [
+                "fix", "improve", "enhance", "make better", "update", "modify",
+                "change", "add features", "optimize", "clean up", "refactor",
+                "something went wrong", "error", "not working", "broken"
+            ]
+            return any(phrase in message.lower() for phrase in vague_phrases) and len(message.split()) < 12
+
+        def analyze_error_message(message):
+            """Extract specific error information from error messages."""
+            error_patterns = {
+                "TypeError: Invalid attempt to spread non-iterable instance": {
+                    "issue": "Spread operator used on non-array/object",
+                    "fixes": ["Check array initialization", "Ensure proper data types", "Add null checks before spreading"]
+                },
+                "ReferenceError": {
+                    "issue": "Component or variable not defined",
+                    "fixes": ["Check imports", "Verify component exports", "Add missing declarations"]
+                },
+                "map is not a function": {
+                    "issue": "Array method called on non-array",
+                    "fixes": ["Initialize as empty array []", "Add Array.isArray() check", "Provide fallback data"]
+                },
+                "JSON.parse": {
+                    "issue": "JSON parsing error",
+                    "fixes": ["Add try/catch around JSON.parse", "Validate JSON string", "Provide default fallback"]
+                }
+            }
+            
+            for pattern, info in error_patterns.items():
+                if pattern.lower() in message.lower():
+                    return info
+            return None
+
+        # Auto-analyze project for common issues if request is vague
+        project_analysis = ""
+        
+        # First check for specific error patterns
+        error_info = analyze_error_message(user_message)
+        if error_info:
+            project_analysis = f"""
+
+🚨 DETECTED ERROR: {error_info['issue']}
+
+RECOMMENDED FIXES:
+- {chr(10).join(f'• {fix}' for fix in error_info['fixes'])}
+
+ANALYZING PROJECT FILES FOR SPECIFIC FIXES..."""
+            
+        elif is_vague_request(user_message):
+            await manager.send_to_project(project_name, {
+                "type": "status", 
+                "phase": "analyzing",
+                "message": "🔍 Analyzing project for common issues..."
+            })
+            
+            # Quick analysis of common frontend issues
+            analysis_points = []
+            
+            # Check for React-specific issues in App.jsx
+            app_file = project_path / "frontend" / "src" / "App.jsx"
+            if app_file.exists():
+                try:
+                    with open(app_file, 'r', encoding='utf-8') as f:
+                        app_content = f.read()
+                        
+                    # Common React issues to check
+                    if "spread non-iterable" in user_message.lower():
+                        analysis_points.append("Fix spread operator errors - check for null/undefined values before spreading")
+                        # Check for specific spread patterns that might fail
+                        if "...(" in app_content or "... " in app_content:
+                            analysis_points.append("Found spread operators that need null checks")
+                    if ".map is not a function" in user_message.lower() or "map" in user_message.lower():
+                        analysis_points.append("Fix array.map() errors - ensure arrays are properly initialized")
+                    if "products.map" in app_content and "useState([])" not in app_content:
+                        analysis_points.append("Arrays not properly initialized as [] in useState")
+                    if "JSON.parse" in app_content and "try" not in app_content:
+                        analysis_points.append("JSON.parse without error handling")  
+                    if "ErrorBoundary" in app_content:
+                        analysis_points.append("Remove duplicate ErrorBoundary class declarations")
+                    if "...props" in app_content and "props &&" not in app_content:
+                        analysis_points.append("Spread operator used without checking if props exists")
+                    if "localhost:8000/api" in app_content and "/v1" not in app_content:
+                        analysis_points.append("API endpoints missing /v1 prefix")
+                    if "fetch(" in app_content and ".then" not in app_content and "await" not in app_content:
+                        analysis_points.append("Fetch calls need proper async/await or .then handling")
+                        
+                except:
+                    pass
+            
+            # Check package.json for missing dependencies
+            pkg_file = project_path / "frontend" / "package.json"
+            if pkg_file.exists():
+                try:
+                    with open(pkg_file, 'r', encoding='utf-8') as f:
+                        pkg_content = f.read()
+                    if '"react"' not in pkg_content:
+                        analysis_points.append("Missing React dependency in package.json")
+                except:
+                    pass
+            
+            if analysis_points:
+                project_analysis = f"\n\nDETECTED ISSUES TO FIX:\n- " + "\n- ".join(analysis_points[:5])
+            else:
+                project_analysis = f"\n\nSUGGESTION: Be more specific. Examples:\n- 'Fix the array.map error'\n- 'Add a login form'\n- 'Make buttons responsive'"
+
+        # Use AI to generate changes with enhanced prompt
+        prompt = f"""You are an expert full-stack developer and AI coding assistant. Your job is to understand ANY user request and provide intelligent, specific solutions.
+
+🎯 **SMART REQUEST ANALYSIS:**
+- If the request is vague (like "fix this" or "make it better"), analyze the project context to identify specific issues
+- If there's an error message, focus on that exact error and provide targeted fixes
+- If it's a feature request, implement it with best practices
+- If it's a UI request, create beautiful, modern designs with React Bits components
+- Always provide working, complete solutions
 
 Project: {project_name}
 Tech Stack: {', '.join(tech_stack) if tech_stack else 'React + FastAPI'}
 
-Current project context:
+📁 **CURRENT PROJECT CONTEXT:**
 {project_context}
 
-User request: {user_message}
+💬 **USER REQUEST:** {user_message}
+{project_analysis}
 
-CRITICAL REQUIREMENTS:
-1. Generate FULLY FUNCTIONAL, PRODUCTION-READY code - NO mock ups, NO placeholders, NO "TODO" comments
-2. For React components: Include complete JSX with proper styling, event handlers, state management, and real functionality
-3. For FastAPI backends: Include complete endpoints with proper request/response models, database operations, error handling
-4. Use actual working imports and dependencies that exist in the project
-5. Implement real business logic, not dummy data or placeholder functions
-6. For UI components: Include proper TailwindCSS classes for styling and responsive design
-7. For database operations: Use real SQLAlchemy models and proper CRUD operations
-8. Include proper error handling, validation, and edge cases
-9. Make components interactive and fully functional from the start
+🔧 **INTELLIGENT PROBLEM SOLVING:**
+1. **ERROR DETECTION & FIXING:**
+   - For "TypeError: Invalid attempt to spread non-iterable": 
+     * Check for ...props where props might be null/undefined
+     * Add null checks: ...{{props || {{}}}} or props && ...props
+     * Ensure arrays are initialized: const items = data?.items || []
+     * Look for ...someVariable and add safety: ...(someVariable || [])
+   - For "ReferenceError: Component is not defined": Check imports, add missing component declarations
+   - For ".map is not a function": Initialize arrays properly with useState([]), add safety checks
+   - For JSON parsing errors: Add try/catch blocks, provide fallback data
 
-Please analyze the request and provide specific file changes needed. Respond in JSON format:
+2. **VAGUE REQUEST HANDLING:**
+   - "fix this" → Analyze code for common React/JS issues and fix them
+   - "make it better" → Improve UI design, add animations, fix user experience
+   - "enhance" → Add new features, improve performance, modernize code
+   - "something went wrong" → Debug the issue from context and fix it
+
+3. **FEATURE REQUESTS:**
+   - Understand intent and implement complete, working features
+   - Use React Bits components for professional UI
+   - Follow modern React patterns (hooks, functional components)
+
+🎨 **CRITICAL REQUIREMENTS:**
+1. **MAKE TARGETED CHANGES ONLY** - Do NOT replace entire files, only modify specific parts needed
+2. **PRESERVE EXISTING CODE** - Keep all working code intact, only change what's necessary  
+3. **SURGICAL EDITS** - Focus on specific functions, components, or sections that need modification
+4. **PREMIUM FRONTEND DESIGN** - Create beautiful, React Bits-inspired UI:
+   - Component composition over large monoliths
+   - Single responsibility principle with elegant interfaces
+   - Proper state management with hooks (useState, useEffect, useCallback)
+   - Separation of concerns (UI, logic, data, animations)
+   - Reusable, animated components with smooth interactions
+   - Proper prop passing and component composition
+   - Clean, readable JSX with semantic HTML
+5. **REACT BITS STYLING** - Use advanced TailwindCSS patterns:
+   - Responsive design (sm:, md:, lg:, xl: breakpoints)
+   - Sophisticated gradients and shadows
+   - Smooth transitions and hover effects
+   - Glass morphism and modern design trends
+   - Micro-interactions and subtle animations
+   - Proper spacing, typography, and visual hierarchy
+   - Accessibility considerations (focus states, ARIA labels)
+6. **USE REACT BITS COMPONENTS** - Leverage the pre-built UI components:
+   - Import from '../components/ui/Button', '../components/ui/Card', etc.
+   - Use Button with variant="primary", Card with hover effects, SplitText, TypeWriter
+   - Apply motion.div from framer-motion for custom animations
+   - Implement loading states with SkeletonLoader, SpinnerLoader components
+   - Add interactive elements with proper hover and focus states
+7. **CODE QUALITY** - Ensure proper error handling, validation, and modern patterns:
+   - Always use safe spread operators: {{...(props || {{}})}} instead of {{...props}}
+   - Initialize arrays properly: useState([]) not useState()
+   - Add null checks before accessing properties: data?.items || []
+   - Wrap JSON.parse in try/catch blocks
+
+For each change, provide ONLY the specific code section that needs to be modified, not the entire file.
+
+Respond in JSON format with targeted edits:
 {{
   "changes": [
     {{
-      "file_path": "relative/path/to/file", 
-      "content": "complete file content with FULL implementation",
-      "reason": "why this change is needed"
+      "file_path": "relative/path/to/file",
+      "edit_type": "targeted_replacement|function_addition|component_modification",
+      "target_section": "specific function/component/block to modify",
+      "old_code": "exact code to replace (if replacing)",
+      "new_code": "replacement code with improvements",
+      "reason": "specific reason for this targeted change"
     }}
   ],
   "explanation": "brief explanation of what you're implementing"
@@ -1257,46 +1643,120 @@ Only include files that need to be changed. Provide complete, working file conte
                 
                 return cleaned
             
-            # Extract JSON from the response with better pattern matching
-            json_match = re.search(r'\{[\s\S]*?\}(?=\s*$|\s*\n\s*[^{])', ai_response)
-            if not json_match:
-                # Try to find any JSON-like structure
-                json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', ai_response)
+            # Improved JSON extraction and parsing
+            def extract_and_parse_json(text):
+                """Extract and parse JSON from AI response with robust error handling."""
+                if not text:
+                    return None
+                
+                # Try multiple JSON extraction patterns
+                patterns = [
+                    r'\{[\s\S]*\}',  # Any JSON-like structure
+                    r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}',  # Nested JSON
+                    r'\{.*?"changes".*?\}',  # JSON containing 'changes'
+                ]
+                
+                for pattern in patterns:
+                    matches = re.findall(pattern, text, re.DOTALL)
+                    for match in matches:
+                        try:
+                            # Clean and attempt to parse
+                            cleaned = clean_json_string(match)
+                            # Handle truncated JSON by ensuring proper closure
+                            if cleaned.count('{') > cleaned.count('}'):
+                                cleaned += '}' * (cleaned.count('{') - cleaned.count('}'))
+                            if cleaned.count('[') > cleaned.count(']'):
+                                cleaned += ']' * (cleaned.count('[') - cleaned.count(']'))
+                            
+                            parsed = json.loads(cleaned)
+                            if isinstance(parsed, dict) and ('changes' in parsed or 'explanation' in parsed):
+                                return parsed
+                        except:
+                            continue
+                return None
             
-            if json_match:
-                try:
-                    json_str = clean_json_string(json_match.group())
-                    response_data = json.loads(json_str)
-                except (json.JSONDecodeError, ValueError) as e:
-                    print(f"JSON parsing error: {e}")
-                    print(f"Attempting to parse: {json_str[:200]}...")
-                    # Fallback: create response from AI text
-                    response_data = {
-                        "changes": [],
-                        "explanation": f"AI processing encountered a formatting error. Raw response: {ai_response[:500]}..."
-                    }
-            else:
-                # If no JSON found, try to create a simple response
+            response_data = extract_and_parse_json(ai_response)
+            
+            if not response_data:
+                # Fallback: Parse the response manually for key information
+                print(f"JSON parsing failed, creating fallback response for: {user_message}")
+                fallback_suggestions = []
+                
+                # Analyze the user message and provide targeted suggestions
+                if "fix" in user_message.lower():
+                    if "frontend" in user_message.lower():
+                        fallback_suggestions = [
+                            "Fix React array.map() errors in components",
+                            "Fix API endpoints to use /api/v1 prefix", 
+                            "Fix localStorage JSON parsing errors",
+                            "Remove duplicate ErrorBoundary declarations"
+                        ]
+                    else:
+                        fallback_suggestions = [
+                            "Fix CORS issues in FastAPI backend",
+                            "Fix database connection errors",
+                            "Fix API endpoint routing issues"
+                        ]
+                elif any(word in user_message.lower() for word in ["add", "create", "build"]):
+                    fallback_suggestions = [
+                        "Add a login/signup form",
+                        "Add a user dashboard",
+                        "Add data filtering and search",
+                        "Add responsive navigation menu"
+                    ]
+                else:
+                    fallback_suggestions = [
+                        "Be more specific about what to fix or add",
+                        "Example: 'Fix the array map error in ProductList'",
+                        "Example: 'Add a login form to the homepage'"
+                    ]
+                
                 response_data = {
                     "changes": [],
-                    "explanation": f"I understand you want to: {user_message}. However, I need more specific details about what files to modify. Could you be more specific about what changes you'd like me to make?"
+                    "explanation": f"Request '{user_message}' needs more detail. Try one of these specific requests:\n• " + "\n• ".join(fallback_suggestions[:4])
                 }
             
             changes = response_data.get("changes", [])
             explanation = response_data.get("explanation", "AI-generated changes")
             
-            if not changes:
+            # Validate changes structure
+            valid_changes = []
+            for change in changes:
+                if isinstance(change, dict) and change.get("file_path") and change.get("content"):
+                    # Ensure content is not truncated or invalid
+                    content = str(change.get("content", "")).strip()
+                    if len(content) > 10:  # Minimum content check
+                        valid_changes.append(change)
+            
+            if not valid_changes:
+                # Enhanced error message with detected issues
+                error_msg = "AI couldn't determine what changes to make."
+                if project_analysis:
+                    error_msg += f" {project_analysis.replace('DETECTED ISSUES TO FIX:', 'However, I found these issues you could address:')}"
+                else:
+                    error_msg += f" Please be more specific. The request '{user_message}' is too vague."
+                
+                await manager.send_to_project(project_name, {
+                    "type": "status",
+                    "phase": "error",
+                    "message": f"❌ {error_msg[:100]}..."
+                })
+                
                 return {
                     "success": False, 
-                    "error": "AI couldn't determine what changes to make. Please be more specific."
+                    "error": error_msg,
+                    "suggestion": explanation if 'explanation' in locals() else "Try being more specific about what you want to change."
                 }
+            
+            changes = valid_changes
 
-            # Apply the changes
+            # Apply the changes with targeted editing
             files_modified = []
             for change in changes:
                 file_path = change.get("file_path", "").lstrip("/")
-                content = change.get("content", "")
-                if not file_path or not content:
+                edit_type = change.get("edit_type", "replace")  # Default to full replace for backwards compatibility
+                
+                if not file_path:
                     continue
                     
                 target = project_path / file_path
@@ -1307,17 +1767,76 @@ Only include files that need to be changed. Provide complete, working file conte
                     continue
                     
                 target.parent.mkdir(parents=True, exist_ok=True)
-                cleaned = _clean_ai_generated_content(content, target.name)
                 
-                with open(target, 'w', encoding='utf-8', newline='\n') as f:
-                    f.write(cleaned)
-                files_modified.append(file_path)
-                
-                await manager.send_to_project(project_name, {
-                    "type": "file_changed",
-                    "file_path": file_path,
-                    "message": f"✍️ Updated {file_path}"
-                })
+                # Handle different edit types
+                if edit_type == "targeted_edit":
+                    # Targeted edit - modify specific sections
+                    old_code = change.get("old_code", "")
+                    new_code = change.get("new_code", "")
+                    target_section = change.get("target_section", "")
+                    
+                    if not old_code or new_code is None:
+                        continue
+                    
+                    # Read existing file if it exists
+                    if target.exists():
+                        with open(target, 'r', encoding='utf-8') as f:
+                            existing_content = f.read()
+                        
+                        # Apply targeted edit
+                        if old_code in existing_content:
+                            updated_content = existing_content.replace(old_code, new_code, 1)
+                            cleaned = _clean_ai_generated_content(updated_content, target.name)
+                            
+                            with open(target, 'w', encoding='utf-8', newline='\n') as f:
+                                f.write(cleaned)
+                            files_modified.append(file_path)
+                            
+                            await manager.send_to_project(project_name, {
+                                "type": "file_changed",
+                                "file_path": file_path,
+                                "message": f"✏️ Applied targeted edit to {file_path} ({target_section})"
+                            })
+                        else:
+                            await manager.send_to_project(project_name, {
+                                "type": "warning",
+                                "message": f"⚠️ Could not find target code in {file_path} for section: {target_section}"
+                            })
+                    else:
+                        await manager.send_to_project(project_name, {
+                            "type": "warning", 
+                            "message": f"⚠️ File {file_path} does not exist for targeted edit"
+                        })
+                        
+                elif edit_type == "append":
+                    # Append to existing file
+                    content = change.get("content", "")
+                    if not content:
+                        continue
+                        
+                    existing_content = ""
+                    if target.exists():
+                        with open(target, 'r', encoding='utf-8') as f:
+                            existing_content = f.read()
+                    
+                    updated_content = existing_content + "\n" + content
+                    cleaned = _clean_ai_generated_content(updated_content, target.name)
+                    
+                    with open(target, 'w', encoding='utf-8', newline='\n') as f:
+                        f.write(cleaned)
+                    files_modified.append(file_path)
+                    
+                else:
+                    # Default: full file replacement (backwards compatibility)
+                    content = change.get("content", "")
+                    if not content:
+                        continue
+                        
+                    cleaned = _clean_ai_generated_content(content, target.name)
+                    
+                    with open(target, 'w', encoding='utf-8', newline='\n') as f:
+                        f.write(cleaned)
+                    files_modified.append(file_path)
 
             # Validate and fix critical files
             await manager.send_to_project(project_name, {
@@ -1350,6 +1869,13 @@ Only include files that need to be changed. Provide complete, working file conte
                             "url": preview_url
                         })
 
+            # Send success message
+            if files_modified:
+                await manager.send_to_project(project_name, {
+                    "type": "success",
+                    "message": f"✅ Successfully modified {len(files_modified)} file(s) with targeted changes"
+                })
+
             return {
                 "success": True,
                 "explanation": explanation,
@@ -1360,6 +1886,12 @@ Only include files that need to be changed. Provide complete, working file conte
 
         except Exception as ai_error:
             print(f"AI processing error: {ai_error}")
+            print(f"AI response preview: {ai_response[:500] if 'ai_response' in locals() else 'No response generated'}")
+            await manager.send_to_project(project_name, {
+                "type": "status",
+                "phase": "error",
+                "message": f"❌ AI processing failed: {str(ai_error)}"
+            })
             return {
                 "success": False,
                 "error": f"AI processing failed: {str(ai_error)}"
