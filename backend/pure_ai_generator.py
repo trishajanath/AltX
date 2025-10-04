@@ -200,6 +200,33 @@ class PureAIGenerator:
 			print(f"❌ ERROR: {error_msg}")
 			errors_encountered.append(error_msg)
 			
+			# Create a basic fallback App.jsx to prevent import errors
+			try:
+				fallback_app = '''import React from 'react';
+
+function App() {
+  return (
+    <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
+      <div className="text-center">
+        <h1 className="text-4xl font-bold mb-4">Welcome to {project_name}</h1>
+        <p className="text-gray-300">Your application is being generated...</p>
+        <div className="mt-8">
+          <div className="animate-pulse bg-blue-600 h-2 w-64 mx-auto rounded"></div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default App;'''.replace('{project_name}', project_name)
+				
+				(frontend_src / "App.jsx").write_text(fallback_app, encoding="utf-8")
+				files_created.append("frontend/src/App.jsx")
+				print(f"✅ DEBUG: Created fallback App.jsx")
+			except Exception as fallback_error:
+				print(f"❌ ERROR: Failed to create fallback App.jsx: {fallback_error}")
+				errors_encountered.append(f"Failed to create fallback App.jsx: {fallback_error}")
+			
 		# Generate supporting files
 		try:
 			self._create_supporting_files(frontend_path, project_name)

@@ -651,11 +651,138 @@ async def run_project(request: dict = Body(...)):
         if not project_path.exists():
             return {"success": False, "error": "Project not found"}
         
-        # Start frontend dev server
+        # Start backend server first
+        backend_path = project_path / "backend"
         frontend_path = project_path / "frontend"
         
         preview_urls = []
         
+        # Start backend if it exists
+        if backend_path.exists() and (backend_path / "main.py").exists():
+            await manager.send_to_project(project_name, {
+                "type": "terminal_output",
+                "message": "🚀 Starting backend server...",
+                "level": "info"
+            })
+            
+            try:
+                # Install backend dependencies first
+                requirements_file = backend_path / "requirements.txt"
+                if requirements_file.exists():
+                    await manager.send_to_project(project_name, {
+                        "type": "terminal_output",
+                        "message": "📦 Installing backend dependencies...",
+                        "level": "info"
+                    })
+                    
+                    pip_process = await asyncio.create_subprocess_shell(
+                        "pip install -r requirements.txt",
+                        cwd=backend_path,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE
+                    )
+                    await pip_process.wait()
+                
+                # Start FastAPI server with uvicorn
+                backend_process = await asyncio.create_subprocess_shell(
+                    "uvicorn main:app --reload --host 0.0.0.0 --port 8000",
+                    cwd=backend_path,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                
+                # Give backend time to start
+                await asyncio.sleep(3)
+                
+                # Check if backend is responding
+                import aiohttp
+                backend_available = False
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get("http://localhost:8000/health", timeout=aiohttp.ClientTimeout(total=5)) as response:
+                            if response.status == 200:
+                                backend_available = True
+                except Exception:
+                    # Try root endpoint if /health doesn't exist
+                    try:
+                        async with aiohttp.ClientSession() as session:
+                            async with session.get("http://localhost:8000/", timeout=aiohttp.ClientTimeout(total=5)) as response:
+                                if response.status == 200:
+                                    backend_available = True
+                    except Exception:
+                        pass
+                
+                if backend_available:
+                    await manager.send_to_project(project_name, {
+                        "type": "terminal_output",
+                        "message": "✅ Backend server started on http://localhost:8000",
+                        "level": "success"
+                    })
+                else:
+                    await manager.send_to_project(project_name, {
+                        "type": "terminal_output",
+                        "message": "⚠️ Backend server started but may still be loading...",
+                        "level": "warning"
+                    })
+                    
+            except Exception as e:
+                await manager.send_to_project(project_name, {
+                    "type": "terminal_output",
+                    "message": f"❌ Backend start failed: {str(e)}",
+                    "level": "error"
+                })
+        else:
+            await manager.send_to_project(project_name, {
+                "type": "terminal_output",
+                "message": "ℹ️ No backend found, starting frontend only...",
+                "level": "info"
+            })
+        
+        # Check for missing App.jsx and create fallback if needed
+        if frontend_path.exists():
+            app_jsx_path = frontend_path / "src" / "App.jsx"
+            if not app_jsx_path.exists():
+                await manager.send_to_project(project_name, {
+                    "type": "terminal_output",
+                    "message": "🔧 App.jsx missing, creating fallback...",
+                    "level": "warning"
+                })
+                
+                try:
+                    # Create basic fallback App.jsx
+                    fallback_app = f'''import React from 'react';
+
+function App() {{
+  return (
+    <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
+      <div className="text-center">
+        <h1 className="text-4xl font-bold mb-4">Welcome to {project_name}</h1>
+        <p className="text-gray-300">Your application is loading...</p>
+        <div className="mt-8">
+          <div className="animate-pulse bg-blue-600 h-2 w-64 mx-auto rounded"></div>
+        </div>
+      </div>
+    </div>
+  );
+}}
+
+export default App;'''
+                    
+                    app_jsx_path.parent.mkdir(parents=True, exist_ok=True)
+                    app_jsx_path.write_text(fallback_app, encoding="utf-8")
+                    
+                    await manager.send_to_project(project_name, {
+                        "type": "terminal_output",
+                        "message": "✅ Created fallback App.jsx",
+                        "level": "success"
+                    })
+                except Exception as e:
+                    await manager.send_to_project(project_name, {
+                        "type": "terminal_output",
+                        "message": f"❌ Failed to create fallback App.jsx: {str(e)}",
+                        "level": "error"
+                    })
+
         # Start frontend
         if frontend_path.exists():
             await manager.send_to_project(project_name, {

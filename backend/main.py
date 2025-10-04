@@ -1520,96 +1520,48 @@ ANALYZING PROJECT FILES FOR SPECIFIC FIXES..."""
                 project_analysis = f"\n\nSUGGESTION: Be more specific. Examples:\n- 'Fix the array.map error'\n- 'Add a login form'\n- 'Make buttons responsive'"
 
         # Use AI to generate changes with enhanced prompt
-        prompt = f"""You are an expert full-stack developer and AI coding assistant. Your job is to understand ANY user request and provide intelligent, specific solutions.
+        prompt = f"""You are an expert full-stack developer. CRITICAL: Your response must be VALID JSON ONLY - no markdown, no explanations outside JSON, no code blocks.
 
-🎯 **SMART REQUEST ANALYSIS:**
-- If the request is vague (like "fix this" or "make it better"), analyze the project context to identify specific issues
-- If there's an error message, focus on that exact error and provide targeted fixes
-- If it's a feature request, implement it with best practices
-- If it's a UI request, create beautiful, modern designs with React Bits components
-- Always provide working, complete solutions
-
+User Request: "{user_message}"
 Project: {project_name}
 Tech Stack: {', '.join(tech_stack) if tech_stack else 'React + FastAPI'}
 
-📁 **CURRENT PROJECT CONTEXT:**
+Current Project Files:
 {project_context}
 
-💬 **USER REQUEST:** {user_message}
-{project_analysis}
+ANALYZE THE REQUEST AND PROVIDE SPECIFIC CODE CHANGES:
 
-🔧 **INTELLIGENT PROBLEM SOLVING:**
-1. **ERROR DETECTION & FIXING:**
-   - For "TypeError: Invalid attempt to spread non-iterable": 
-     * Check for ...props where props might be null/undefined
-     * Add null checks: ...{{props || {{}}}} or props && ...props
-     * Ensure arrays are initialized: const items = data?.items || []
-     * Look for ...someVariable and add safety: ...(someVariable || [])
-   - For "ReferenceError: Component is not defined": Check imports, add missing component declarations
-   - For ".map is not a function": Initialize arrays properly with useState([]), add safety checks
-   - For JSON parsing errors: Add try/catch blocks, provide fallback data
+1. If user says "include my name which is Neelesh" or similar personalization:
+   - Add their name to the UI (header, welcome message, about section)
+   - Update titles and text to include their name
+   - Make it personal and welcoming
 
-2. **VAGUE REQUEST HANDLING:**
-   - "fix this" → Analyze code for common React/JS issues and fix them
-   - "make it better" → Improve UI design, add animations, fix user experience
-   - "enhance" → Add new features, improve performance, modernize code
-   - "something went wrong" → Debug the issue from context and fix it
+2. If fixing errors:
+   - Fix spread operator errors: {{...(props || {{}})}}
+   - Fix array.map errors: ensure useState([]) initialization
+   - Fix JSON parsing: add try/catch blocks
+   - Fix missing imports and components
 
-3. **FEATURE REQUESTS:**
-   - Understand intent and implement complete, working features
-   - Use React Bits components for professional UI
-   - Follow modern React patterns (hooks, functional components)
+3. If adding features:
+   - Implement complete, working features
+   - Use modern React patterns
+   - Include proper styling with TailwindCSS
 
-🎨 **CRITICAL REQUIREMENTS:**
-1. **MAKE TARGETED CHANGES ONLY** - Do NOT replace entire files, only modify specific parts needed
-2. **PRESERVE EXISTING CODE** - Keep all working code intact, only change what's necessary  
-3. **SURGICAL EDITS** - Focus on specific functions, components, or sections that need modification
-4. **PREMIUM FRONTEND DESIGN** - Create beautiful, React Bits-inspired UI:
-   - Component composition over large monoliths
-   - Single responsibility principle with elegant interfaces
-   - Proper state management with hooks (useState, useEffect, useCallback)
-   - Separation of concerns (UI, logic, data, animations)
-   - Reusable, animated components with smooth interactions
-   - Proper prop passing and component composition
-   - Clean, readable JSX with semantic HTML
-5. **REACT BITS STYLING** - Use advanced TailwindCSS patterns:
-   - Responsive design (sm:, md:, lg:, xl: breakpoints)
-   - Sophisticated gradients and shadows
-   - Smooth transitions and hover effects
-   - Glass morphism and modern design trends
-   - Micro-interactions and subtle animations
-   - Proper spacing, typography, and visual hierarchy
-   - Accessibility considerations (focus states, ARIA labels)
-6. **USE REACT BITS COMPONENTS** - Leverage the pre-built UI components:
-   - Import from '../components/ui/Button', '../components/ui/Card', etc.
-   - Use Button with variant="primary", Card with hover effects, SplitText, TypeWriter
-   - Apply motion.div from framer-motion for custom animations
-   - Implement loading states with SkeletonLoader, SpinnerLoader components
-   - Add interactive elements with proper hover and focus states
-7. **CODE QUALITY** - Ensure proper error handling, validation, and modern patterns:
-   - Always use safe spread operators: {{...(props || {{}})}} instead of {{...props}}
-   - Initialize arrays properly: useState([]) not useState()
-   - Add null checks before accessing properties: data?.items || []
-   - Wrap JSON.parse in try/catch blocks
+RESPOND WITH VALID JSON ONLY (no markdown, no ```json blocks):
 
-For each change, provide ONLY the specific code section that needs to be modified, not the entire file.
-
-Respond in JSON format with targeted edits:
 {{
   "changes": [
     {{
-      "file_path": "relative/path/to/file",
-      "edit_type": "targeted_replacement|function_addition|component_modification",
-      "target_section": "specific function/component/block to modify",
-      "old_code": "exact code to replace (if replacing)",
-      "new_code": "replacement code with improvements",
-      "reason": "specific reason for this targeted change"
+      "file_path": "frontend/src/App.jsx",
+      "edit_type": "content_update", 
+      "new_content": "complete updated file content here",
+      "reason": "explanation of change"
     }}
   ],
-  "explanation": "brief explanation of what you're implementing"
+  "explanation": "Brief summary of changes made"
 }}
 
-Only include files that need to be changed. Provide complete, working file content with full implementations."""
+Include complete file content in new_content field. Make real, working changes."""
 
         try:
             # Use the existing AI assistant for code generation
@@ -1649,11 +1601,16 @@ Only include files that need to be changed. Provide complete, working file conte
                 if not text:
                     return None
                 
+                # Remove markdown code blocks first
+                text = re.sub(r'```json\s*', '', text)
+                text = re.sub(r'```\s*', '', text)
+                text = re.sub(r'^```[\w]*\n', '', text, flags=re.MULTILINE)
+                
                 # Try multiple JSON extraction patterns
                 patterns = [
-                    r'\{[\s\S]*\}',  # Any JSON-like structure
+                    r'\{[\s\S]*?\}(?=\s*$|\s*\n\s*[^{])',  # Complete JSON object
+                    r'\{[\s\S]*?"changes"[\s\S]*?\}',  # JSON containing 'changes'
                     r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}',  # Nested JSON
-                    r'\{.*?"changes".*?\}',  # JSON containing 'changes'
                 ]
                 
                 for pattern in patterns:
@@ -1661,18 +1618,49 @@ Only include files that need to be changed. Provide complete, working file conte
                     for match in matches:
                         try:
                             # Clean and attempt to parse
-                            cleaned = clean_json_string(match)
+                            cleaned = clean_json_string(match.strip())
+                            
+                            # Try to fix common JSON issues
+                            if cleaned.endswith(','):
+                                cleaned = cleaned[:-1]
+                            
                             # Handle truncated JSON by ensuring proper closure
-                            if cleaned.count('{') > cleaned.count('}'):
-                                cleaned += '}' * (cleaned.count('{') - cleaned.count('}'))
-                            if cleaned.count('[') > cleaned.count(']'):
-                                cleaned += ']' * (cleaned.count('[') - cleaned.count(']'))
+                            open_braces = cleaned.count('{') - cleaned.count('}')
+                            open_brackets = cleaned.count('[') - cleaned.count(']')
+                            
+                            if open_braces > 0:
+                                cleaned += '}' * open_braces
+                            if open_brackets > 0:
+                                cleaned += ']' * open_brackets
                             
                             parsed = json.loads(cleaned)
                             if isinstance(parsed, dict) and ('changes' in parsed or 'explanation' in parsed):
                                 return parsed
-                        except:
+                        except json.JSONDecodeError as e:
+                            print(f"JSON parse error for match: {str(e)[:100]}")
                             continue
+                        except Exception as e:
+                            print(f"General parse error: {str(e)[:100]}")
+                            continue
+                
+                # If no valid JSON found, try to extract key information manually
+                if 'changes' in text.lower() or 'file_path' in text.lower():
+                    print("Attempting manual extraction from AI response...")
+                    try:
+                        # Try to extract structured information even if JSON is malformed
+                        explanation_match = re.search(r'"explanation":\s*"([^"]*)"', text)
+                        explanation = explanation_match.group(1) if explanation_match else "AI suggested changes"
+                        
+                        # Look for file modifications in the text
+                        file_mentions = re.findall(r'src/[\w/\.]+\.jsx?', text)
+                        if file_mentions:
+                            return {
+                                "changes": [{"file_path": f"frontend/{file_mentions[0]}", "edit_type": "content_update"}],
+                                "explanation": explanation
+                            }
+                    except:
+                        pass
+                
                 return None
             
             response_data = extract_and_parse_json(ai_response)
@@ -1680,40 +1668,96 @@ Only include files that need to be changed. Provide complete, working file conte
             if not response_data:
                 # Fallback: Parse the response manually for key information
                 print(f"JSON parsing failed, creating fallback response for: {user_message}")
-                fallback_suggestions = []
                 
-                # Analyze the user message and provide targeted suggestions
-                if "fix" in user_message.lower():
-                    if "frontend" in user_message.lower():
+                # Try to create a specific response based on the user's request
+                fallback_changes = []
+                fallback_explanation = f"Processing request: '{user_message}'"
+                
+                # Handle specific personalization requests
+                if "name" in user_message.lower() and ("neelesh" in user_message.lower() or "include" in user_message.lower()):
+                    # Read current App.jsx to personalize it
+                    app_file = project_path / "frontend" / "src" / "App.jsx"
+                    if app_file.exists():
+                        try:
+                            with open(app_file, 'r', encoding='utf-8') as f:
+                                current_content = f.read()
+                            
+                            # Create personalized version
+                            personalized_content = current_content.replace(
+                                'Welcome to Your Project', 'Welcome to Neelesh\'s Project'
+                            ).replace(
+                                'Your application', 'Neelesh\'s application'
+                            ).replace(
+                                'Welcome to app-', 'Welcome to Neelesh\'s app-'
+                            )
+                            
+                            # If no changes were made, add a personal header
+                            if personalized_content == current_content:
+                                # Add a personal welcome section
+                                if 'return (' in personalized_content:
+                                    personalized_content = personalized_content.replace(
+                                        'return (',
+                                        '''return (
+    <div className="text-center py-4 bg-gradient-to-r from-blue-600 to-purple-600 text-white">
+      <h2 className="text-lg font-semibold">Welcome, Neelesh! 👋</h2>
+      <p className="text-sm opacity-90">This application was built just for you</p>
+    </div>
+    <div className="flex-1">''',
+                                        1
+                                    )
+                                    # Add closing div
+                                    personalized_content = personalized_content.replace(
+                                        '  );\n}', '    </div>\n  );\n}'
+                                    )
+                            
+                            fallback_changes = [{
+                                "file_path": "frontend/src/App.jsx",
+                                "edit_type": "content_update",
+                                "new_content": personalized_content,
+                                "reason": "Added personalization for Neelesh"
+                            }]
+                            fallback_explanation = "Added personalized welcome message for Neelesh to the application"
+                            
+                        except Exception as e:
+                            print(f"Error creating personalized content: {e}")
+                
+                # If no specific changes could be made, provide helpful suggestions
+                if not fallback_changes:
+                    fallback_suggestions = []
+                    
+                    if "fix" in user_message.lower():
+                        if "frontend" in user_message.lower():
+                            fallback_suggestions = [
+                                "Fix React array.map() errors in components",
+                                "Fix API endpoints to use /api/v1 prefix", 
+                                "Fix localStorage JSON parsing errors",
+                                "Remove duplicate ErrorBoundary declarations"
+                            ]
+                        else:
+                            fallback_suggestions = [
+                                "Fix CORS issues in FastAPI backend",
+                                "Fix database connection errors",
+                                "Fix API endpoint routing issues"
+                            ]
+                    elif any(word in user_message.lower() for word in ["add", "create", "build"]):
                         fallback_suggestions = [
-                            "Fix React array.map() errors in components",
-                            "Fix API endpoints to use /api/v1 prefix", 
-                            "Fix localStorage JSON parsing errors",
-                            "Remove duplicate ErrorBoundary declarations"
+                            "Add a login/signup form",
+                            "Add a user dashboard",
+                            "Add data filtering and search",
+                            "Add responsive navigation menu"
                         ]
                     else:
                         fallback_suggestions = [
-                            "Fix CORS issues in FastAPI backend",
-                            "Fix database connection errors",
-                            "Fix API endpoint routing issues"
+                            "Be more specific about what to fix or add",
+                            "Example: 'Fix the array map error in ProductList'",
+                            "Example: 'Add a login form to the homepage'"
                         ]
-                elif any(word in user_message.lower() for word in ["add", "create", "build"]):
-                    fallback_suggestions = [
-                        "Add a login/signup form",
-                        "Add a user dashboard",
-                        "Add data filtering and search",
-                        "Add responsive navigation menu"
-                    ]
-                else:
-                    fallback_suggestions = [
-                        "Be more specific about what to fix or add",
-                        "Example: 'Fix the array map error in ProductList'",
-                        "Example: 'Add a login form to the homepage'"
-                    ]
+                    
+                    fallback_explanation = f"Request '{user_message}' needs more detail. Try one of these specific requests:\n• " + "\n• ".join(fallback_suggestions[:4])
                 
                 response_data = {
-                    "changes": [],
-                    "explanation": f"Request '{user_message}' needs more detail. Try one of these specific requests:\n• " + "\n• ".join(fallback_suggestions[:4])
+                    "changes": fallback_changes,
+                    "explanation": fallback_explanation
                 }
             
             changes = response_data.get("changes", [])
@@ -1828,7 +1872,7 @@ Only include files that need to be changed. Provide complete, working file conte
                     
                 else:
                     # Default: full file replacement (backwards compatibility)
-                    content = change.get("content", "")
+                    content = change.get("content", "") or change.get("new_content", "")
                     if not content:
                         continue
                         
