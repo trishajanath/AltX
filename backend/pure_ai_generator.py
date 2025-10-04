@@ -71,7 +71,7 @@ class PureAIGenerator:
 			"temperature": 0.25,
 			"top_p": 0.8,
 			"candidate_count": 1,
-			"max_output_tokens": 8192,  # Increased from 2048 for larger files
+			"max_output_tokens": 32768,  # Significantly increased for comprehensive apps
 		}
 
 		self.safety_settings = [
@@ -104,7 +104,7 @@ class PureAIGenerator:
 			prompt=self._build_plan_prompt(idea, project_name),
 			config_overrides={
 				"response_mime_type": "application/json",
-				"max_output_tokens": 4000,  # Increased from 1500
+				"max_output_tokens": 16384,  # Increased for comprehensive plans
 				"temperature": 0.05,  # Lower temperature for more focused output
 			},
 		)
@@ -191,13 +191,17 @@ class PureAIGenerator:
 		
 		# Generate App.jsx
 		try:
+			print(f"DEBUG: Generating App.jsx for {project_name}")
 			app_code = await self.generate_single_file("frontend_app", plan, project_name)
+			print(f"DEBUG: Generated App.jsx code length: {len(app_code)} characters")
 			(frontend_src / "App.jsx").write_text(app_code, encoding="utf-8")
 			files_created.append("frontend/src/App.jsx")
 			print(f"✅ DEBUG: Wrote file {frontend_src / 'App.jsx'}")
 		except Exception as e:
+			import traceback
 			error_msg = f"Failed to generate frontend/src/App.jsx: {e}"
 			print(f"❌ ERROR: {error_msg}")
+			print(f"❌ TRACEBACK: {traceback.format_exc()}")
 			errors_encountered.append(error_msg)
 			
 			# Create a basic fallback App.jsx to prevent import errors
@@ -273,12 +277,21 @@ export default App;'''.replace('{project_name}', project_name)
 		else:
 			raise ValueError(f"Unknown file type: {file_type}")
 			
+		# Special config for frontend files that need more tokens
+		if file_type == "frontend_app":
+			config_overrides = {
+				"max_output_tokens": 32768,  # Maximum tokens for comprehensive frontend
+				"temperature": 0.05,  # Low temperature for consistency
+			}
+		else:
+			config_overrides = {
+				"max_output_tokens": 16384,  # Increased for all backend files
+				"temperature": 0.05,
+			}
+			
 		request = GenerationRequest(
 			prompt=prompt,
-			config_overrides={
-				"max_output_tokens": 8000,  # Significantly increased from 2000
-				"temperature": 0.05,  # Lower temperature for more focused output
-			},
+			config_overrides=config_overrides,
 		)
 		
 		return self._strip_code_fences(self._run_generation(request))
@@ -499,7 +512,7 @@ export default defineConfig({
 			prompt=self._build_backend_bundle_prompt(plan, project_name),
 			config_overrides={
 				"response_mime_type": "application/json",
-				"max_output_tokens": 8000,  # Increased from 4000
+				"max_output_tokens": 24576,  # Significantly increased for backend bundles
 				"temperature": 0.05,  # Lower temperature for more concise output
 			},
 		)
@@ -513,7 +526,7 @@ export default defineConfig({
 			prompt=self._build_frontend_bundle_prompt(plan, project_name),
 			config_overrides={
 				"response_mime_type": "application/json",
-				"max_output_tokens": 8000,  # Increased from 3400
+				"max_output_tokens": 24576,  # Significantly increased for frontend bundles
 				"temperature": 0.25,
 			},
 		)
@@ -527,7 +540,7 @@ export default defineConfig({
 			prompt=self._build_docs_bundle_prompt(plan, project_name),
 			config_overrides={
 				"response_mime_type": "application/json",
-				"max_output_tokens": 3000,  # Increased from 1200
+				"max_output_tokens": 8192,  # Increased for comprehensive docs
 				"temperature": 0.1,
 			},
 		)
@@ -635,24 +648,60 @@ export default defineConfig({
 	@staticmethod
 	def _build_plan_prompt(idea: str, project_name: str) -> str:
 		return (
-			f"Create a project plan in JSON for: {idea}\n"
+			f"Create a COMPREHENSIVE, FEATURE-RICH project plan in JSON for: {idea}\n"
 			f"Project: {project_name}\n\n"
+			"🎯 REQUIREMENTS:\n"
+			"- Generate 5-8 SPECIFIC, DETAILED features (not generic)\n"
+			"- Create 4-6 meaningful frontend components\n"
+			"- Design 3-5 backend models with relevant fields\n"
+			"- Define 6-10 RESTful API endpoints\n"
+			"- Include REAL data examples and use cases\n\n"
 			"JSON format:\n"
 			"{\n"
-			"  \"app_type\": \"brief type\",\n"
-			"  \"description\": \"short description\",\n"
-			"  \"features\": [\"feature1\", \"feature2\", \"feature3\"],\n"
+			"  \"app_type\": \"Specific app category (e.g., E-commerce Platform, Task Manager, Analytics Dashboard)\",\n"
+			"  \"description\": \"Detailed description of what the app does and its value proposition\",\n"
+			"  \"features\": [\n"
+			"    \"Specific Feature 1 with real benefit\",\n"
+			"    \"Specific Feature 2 with real benefit\",\n"
+			"    \"Specific Feature 3 with real benefit\",\n"
+			"    \"Specific Feature 4 with real benefit\",\n"
+			"    \"Specific Feature 5 with real benefit\",\n"
+			"    \"Specific Feature 6 with real benefit\"\n"
+			"  ],\n"
 			"  \"frontend\": {\n"
-			"    \"stack\": \"React+Vite+Tailwind\",\n"
-			"    \"components\": [{\"name\": \"Component\", \"purpose\": \"purpose\"}]\n"
+			"    \"stack\": \"React+Vite+Tailwind+Framer Motion\",\n"
+			"    \"components\": [\n"
+			"      {\"name\": \"HeroSection\", \"purpose\": \"Eye-catching landing section with CTA\"},\n"
+			"      {\"name\": \"FeaturesGrid\", \"purpose\": \"Showcase key features with icons and descriptions\"},\n"
+			"      {\"name\": \"MainContentArea\", \"purpose\": \"Primary interactive content with CRUD operations\"},\n"
+			"      {\"name\": \"StatsSection\", \"purpose\": \"Display impressive metrics and statistics\"},\n"
+			"      {\"name\": \"Footer\", \"purpose\": \"Comprehensive footer with links and info\"}\n"
+			"    ]\n"
 			"  },\n"
 			"  \"backend\": {\n"
-			"    \"stack\": \"FastAPI\",\n"
-			"    \"models\": [{\"name\": \"Model\", \"fields\": [\"field1\", \"field2\"]}],\n"
-			"    \"endpoints\": [{\"method\": \"GET\", \"path\": \"/api/items\", \"purpose\": \"list items\"}]\n"
+			"    \"stack\": \"FastAPI+Pydantic\",\n"
+			"    \"models\": [\n"
+			"      {\"name\": \"ModelName1\", \"fields\": [\"id\", \"name\", \"description\", \"created_at\", \"status\"]},\n"
+			"      {\"name\": \"ModelName2\", \"fields\": [\"id\", \"title\", \"content\", \"author\", \"tags\"]},\n"
+			"      {\"name\": \"ModelName3\", \"fields\": [\"id\", \"value\", \"category\", \"timestamp\"]}\n"
+			"    ],\n"
+			"    \"endpoints\": [\n"
+			"      {\"method\": \"GET\", \"path\": \"/api/v1/items\", \"purpose\": \"Retrieve all items with pagination\"},\n"
+			"      {\"method\": \"GET\", \"path\": \"/api/v1/items/{id}\", \"purpose\": \"Get single item details\"},\n"
+			"      {\"method\": \"POST\", \"path\": \"/api/v1/items\", \"purpose\": \"Create new item with validation\"},\n"
+			"      {\"method\": \"PUT\", \"path\": \"/api/v1/items/{id}\", \"purpose\": \"Update existing item\"},\n"
+			"      {\"method\": \"DELETE\", \"path\": \"/api/v1/items/{id}\", \"purpose\": \"Delete item\"},\n"
+			"      {\"method\": \"GET\", \"path\": \"/api/v1/stats\", \"purpose\": \"Get application statistics\"},\n"
+			"      {\"method\": \"POST\", \"path\": \"/api/v1/search\", \"purpose\": \"Search items with filters\"}\n"
+			"    ]\n"
 			"  }\n"
 			"}\n\n"
-			"Respond with valid JSON only. Keep it concise."
+			"🎯 CRITICAL: Make features and components SPECIFIC to the app idea. Use real terminology from that domain.\n"
+			"For example:\n"
+			"- E-commerce: 'Shopping Cart', 'Product Catalog', 'Checkout Process', 'Order Tracking'\n"
+			"- Task Manager: 'Task Board', 'Priority Matrix', 'Team Collaboration', 'Progress Tracking'\n"
+			"- Analytics: 'Real-time Dashboard', 'Data Visualization', 'Custom Reports', 'Trend Analysis'\n\n"
+			"Respond with valid JSON only. Make it comprehensive and specific to the idea."
 		)
 
 	@staticmethod
@@ -1254,159 +1303,25 @@ export const FloatingTabs = ({ tabs, activeTab, onTabChange, className = '' }) =
 	@staticmethod
 	def _build_app_prompt(plan: Dict[str, Any], project_name: str) -> str:
 		features = plan.get('features', [])[:3]
-		components = plan.get('frontend', {}).get('components', [])[:2]
+		features_str = [str(f) for f in features] if features else ['Modern features']
+		app_type = plan.get('app_type', 'Web App')
 		
-		return f"""
-Create React App.jsx for: {project_name}
-Features: {features}
-Components: {components}
+		return f"""Create React App.jsx for {project_name} ({app_type}).
 
-Requirements:
-- React functional component with hooks (NO classes)
-- ONLY use existing React Bits components: Button, Card, SplitText, SpinnerLoader, NavBar, NavLink, GradientText
-- Use Lucide React icons (Download, Github, ExternalLink, X, etc.)
-- API calls to http://localhost:8000/api/v1
-- Initialize arrays as [] always
-- Safe error handling with try/catch
-- Modern TailwindCSS styling with animations
-- Responsive design
+Features: {', '.join(features_str)}
 
-Critical patterns:
-- Always check Array.isArray() before .map()
-- Safe localStorage with try/catch around JSON.parse()
-- NO ErrorBoundary classes - use functional error handling
-- DO NOT import non-existent components
-- Create inline components for simple elements like tags
+Build a complete app with:
+- Hero section with gradient background and CTA
+- Features grid (4-6 cards with icons) 
+- Stats section (3-4 metrics)
+- Main content area (8+ sample items in grid)
+- Footer with links
 
-EXACT imports to use:
-```jsx
-import React, {{useState, useEffect}} from 'react';
+Use React hooks, TailwindCSS. Include real content (no placeholders). 
+Add images: https://images.unsplash.com/300x200/?topic
 
-// Import all React Bits components with comprehensive fallbacks
-let Button, Card, CardHeader, CardBody;
-try {{
-  const ButtonModule = require('./components/ui/Button');
-  Button = ButtonModule.Button;
-}} catch (error) {{
-  // Fallback Button
-  Button = ({{ children, variant = 'primary', size = 'md', className = '', ...props }}) => {{
-    const variants = {{
-      primary: 'bg-blue-600 hover:bg-blue-700 text-white',
-      secondary: 'bg-gray-200 hover:bg-gray-300 text-gray-800',
-      outline: 'border border-gray-300 hover:bg-gray-50 text-gray-700'
-    }};
-    const sizes = {{
-      sm: 'px-3 py-1.5 text-sm',
-      md: 'px-4 py-2 text-base', 
-      lg: 'px-6 py-3 text-lg'
-    }};
-    return (
-      <button 
-        className={{`inline-flex items-center justify-center rounded-md font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 ${{variants[variant]}} ${{sizes[size]}} ${{className}}`}}
-        {{...(props || {{}})}}
-      >
-        {{children}}
-      </button>
-    );
-  }};
-}}
+IMPORTANT: Only use VALID Lucide icons: Star, Users, Zap, MapPin, Clock, Package, ShoppingCart, Heart, Settings, ArrowRight, CheckCircle, Twitter, Facebook, Instagram
+Inline Button component with blue styling.
 
-try {{
-  const CardModule = require('./components/ui/Card');
-  Card = CardModule.Card;
-  CardHeader = CardModule.CardHeader;
-  CardBody = CardModule.CardBody;
-}} catch (error) {{
-  // Fallback Card components
-  Card = ({{ children, className = '' }}) => (
-    <div className={{`bg-white rounded-lg border border-gray-200 shadow-sm ${{className}}`}}>
-      {{children}}
-    </div>
-  );
-  CardHeader = ({{ children, className = '' }}) => (
-    <div className={{`px-6 py-4 border-b border-gray-200 ${{className}}`}}>
-      {{children}}
-    </div>
-  );
-  CardBody = ({{ children, className = '' }}) => (
-    <div className={{`px-6 py-4 ${{className}}`}}>
-      {{children}}
-    </div>
-  );
-}}
-
-// Import AnimatedText with fallback for reliability
-let SplitText, GradientText;
-try {{
-  const AnimatedTextModule = require('./components/ui/AnimatedText');
-  SplitText = AnimatedTextModule.SplitText;
-  GradientText = AnimatedTextModule.GradientText;
-}} catch (error) {{
-  // Fallback SplitText
-  SplitText = ({{ text, className = '' }}) => (
-    <span className={{`inline-block ${{className}}`}}>{{text}}</span>
-  );
-  // Fallback GradientText  
-  GradientText = ({{ text, className = '' }}) => (
-    <span className={{`bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent ${{className}}`}}>
-      {{text}}
-    </span>
-  );
-}}
-
-// Import Navigation with fallback for reliability
-let NavBar, NavLink;
-try {{
-  const NavigationModule = require('./components/ui/Navigation');
-  NavBar = NavigationModule.NavBar;
-  NavLink = NavigationModule.NavLink;
-}} catch (error) {{
-  // Fallback NavBar
-  NavBar = ({{ children, className = '' }}) => (
-    <nav className={{`bg-white/80 backdrop-blur-md border-b border-gray-200 sticky top-0 z-50 ${{className}}`}}>
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between h-16">{{children}}</div>
-      </div>
-    </nav>
-  );
-  NavLink = ({{ href, children, isActive, className = '' }}) => (
-    <a href={{href}} className={{`inline-flex items-center px-1 pt-1 text-sm font-medium transition-colors ${{isActive ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-500 hover:text-gray-700'}} ${{className}}`}}>
-      {{children}}
-    </a>
-  );
-}}
-
-// Import Lucide React icons with fallbacks
-let Download, Github, ExternalLink, X;
-try {{
-  const LucideModule = require('lucide-react');
-  Download = LucideModule.Download;
-  Github = LucideModule.Github;
-  ExternalLink = LucideModule.ExternalLink;
-  X = LucideModule.X;
-}} catch (error) {{
-  // Fallback icon components using Unicode symbols
-  Download = ({{ className = '', ...props }}) => (
-    <span className={{`inline-block ${{className}}`}} {{...(props || {{}})}} >⬇</span>
-  );
-  Github = ({{ className = '', ...props }}) => (
-    <span className={{`inline-block ${{className}}`}} {{...(props || {{}})}} >⚡</span>
-  );
-  ExternalLink = ({{ className = '', ...props }}) => (
-    <span className={{`inline-block ${{className}}`}} {{...(props || {{}})}} >↗</span>
-  );
-  X = ({{ className = '', ...props }}) => (
-    <span className={{`inline-block ${{className}}`}} {{...(props || {{}})}} >✕</span>
-  );
-}}
-
-// Include inline SpinnerLoader to avoid import issues
-const SpinnerLoader = ({{ size = 'md', className = '' }}) => {{
-  const sizes = {{ sm: 'w-4 h-4', md: 'w-8 h-8', lg: 'w-12 h-12' }};
-  return <div className={{`${{sizes[size]}} border-2 border-gray-200 border-t-blue-600 rounded-full animate-spin ${{className}}`}} />;
-}};
-```
-
-Return JSX code only, no markdown fences. Make it beautiful!
-"""
+Return JSX only."""
 
