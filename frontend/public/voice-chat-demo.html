@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Chat Demo - AltX</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 2rem;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            max-width: 800px;
+            width: 90%;
+        }
+        
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 2rem;
+            font-size: 2.5rem;
+        }
+        
+        .status {
+            background: #f8f9fa;
+            border: 2px solid #e9ecef;
+            border-radius: 10px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+        
+        .status.success {
+            background: #d4edda;
+            border-color: #c3e6cb;
+            color: #155724;
+        }
+        
+        .status.error {
+            background: #f8d7da;
+            border-color: #f5c6cb;
+            color: #721c24;
+        }
+        
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin: 2rem 0;
+        }
+        
+        .feature-card {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 1.5rem;
+            border: 1px solid #dee2e6;
+        }
+        
+        .feature-title {
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+            color: #495057;
+        }
+        
+        .feature-description {
+            color: #6c757d;
+            font-size: 0.9rem;
+        }
+        
+        .cta-section {
+            text-align: center;
+            margin-top: 2rem;
+            padding-top: 2rem;
+            border-top: 1px solid #dee2e6;
+        }
+        
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            transition: transform 0.2s;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+        }
+        
+        .demo-link {
+            margin: 0 0.5rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎤 Voice Chat Builder</h1>
+        
+        <div id="status" class="status">
+            Checking system status...
+        </div>
+        
+        <div class="feature-grid">
+            <div class="feature-card">
+                <div class="feature-title">🗣️ Voice Input</div>
+                <div class="feature-description">
+                    Speak naturally to describe your app idea. The AI listens and understands your requirements through conversational speech.
+                </div>
+            </div>
+            
+            <div class="feature-card">
+                <div class="feature-title">🤖 AI Assistant</div>
+                <div class="feature-description">
+                    Powered by Google Gemini, the AI asks smart follow-up questions to gather complete specifications for your project.
+                </div>
+            </div>
+            
+            <div class="feature-card">
+                <div class="feature-title">🔊 Text-to-Speech</div>
+                <div class="feature-description">
+                    The AI responds with natural-sounding voice using Google Cloud Text-to-Speech, creating a fluid conversation experience.
+                </div>
+            </div>
+            
+            <div class="feature-card">
+                <div class="feature-title">⚡ Auto-Generation</div>
+                <div class="feature-description">
+                    Once requirements are complete, your full-stack application is generated automatically with frontend, backend, and database.
+                </div>
+            </div>
+        </div>
+        
+        <div class="cta-section">
+            <h3>Ready to build with voice?</h3>
+            <p>Choose your preferred interface:</p>
+            <br>
+            <a href="/voice-chat" class="btn demo-link">🎤 Full Voice Chat</a>
+            <a href="/build" class="btn demo-link">⌨️ Traditional Builder</a>
+        </div>
+    </div>
+    
+    <script>
+        async function checkStatus() {
+            try {
+                const response = await fetch('/api/voice-chat/status');
+                const status = await response.json();
+                
+                const statusDiv = document.getElementById('status');
+                
+                if (status.google_cloud_available && status.services.ai_chat) {
+                    statusDiv.className = 'status success';
+                    statusDiv.innerHTML = '✅ All systems ready! Voice chat is fully operational.';
+                } else {
+                    statusDiv.className = 'status error';
+                    let missing = [];
+                    if (!status.services.speech_to_text) missing.push('Speech Recognition');
+                    if (!status.services.text_to_speech) missing.push('Text-to-Speech');
+                    if (!status.services.ai_chat) missing.push('AI Chat');
+                    
+                    statusDiv.innerHTML = `⚠️ Limited functionality: ${missing.join(', ')} not available. Text-only mode will be used.`;
+                }
+            } catch (error) {
+                const statusDiv = document.getElementById('status');
+                statusDiv.className = 'status error';
+                statusDiv.innerHTML = '❌ Backend connection failed. Please ensure the server is running.';
+            }
+        }
+        
+        // Check status on load
+        checkStatus();
+        
+        // Recheck every 30 seconds
+        setInterval(checkStatus, 30000);
+    </script>
+</body>
+</html>

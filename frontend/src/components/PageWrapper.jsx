@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import * as THREE from 'three';
-import { BarChart3, Rocket, Shield, GitBranch, Menu, X, ChevronDown, LogOut } from 'lucide-react';
+import { BarChart3, Rocket, Shield, GitBranch, Menu, X, ChevronDown, LogOut, MessageCircle } from 'lucide-react';
 import Plasma from './Plasma';
 
 // --- Sidebar Component (Enhanced) ---
@@ -12,6 +12,7 @@ const Sidebar = ({ isOpen, toggleSidebar, setView, currentView, user, isAuthenti
     
     const menuItems = [
         { icon: <BarChart3 size={20} />, title: 'Dashboard', view: 'dashboard', path: '/home' },
+        { icon: <MessageCircle size={20} />, title: 'Voice Chat Builder', view: 'voice-chat', path: '/voice-chat' },
         { icon: <Rocket size={20} />, title: 'Deploy Project', view: 'deploy', path: '/deploy' },
         { icon: <Shield size={20} />, title: 'Security Scan', view: 'security', path: '/security' },
         { icon: <GitBranch size={20} />, title: 'Repo Analysis', view: 'repo-analysis', path: '/repo-analysis' },

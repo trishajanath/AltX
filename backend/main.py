@@ -63,6 +63,9 @@ except ImportError:
 from scanner.secrets_detector import scan_secrets
 from scanner.static_python import run_bandit
 
+# --- Voice Chat Integration ---
+from voice_chat_api import router as voice_chat_router
+
 app = FastAPI()
 
 # CORS config
@@ -72,6 +75,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include voice chat router
+app.include_router(voice_chat_router)
 
 # --- Storage Classes for Scan Results ---
 class WebsiteScan:

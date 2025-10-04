@@ -269,6 +269,7 @@ const Sidebar = ({ isOpen, toggleSidebar, setView, currentView, user, isAuthenti
         { icon: <GitBranch size={20} />, title: 'Repo Analysis', view: 'repo-analysis', path: '/repo-analysis' },
         { icon: <BarChart3 size={20} />, title: 'Reports', view: 'reports', path: '/report' },
         { icon: <Rocket size={20} />, title: 'Build Apps', view: 'build', path: '/build' },
+        { icon: <BrainCircuit size={20} />, title: 'Voice Chat Builder', view: 'voice-chat', path: '/voice-chat' },
     ];
 
     const handleNavigation = (item) => {

@@ -11,6 +11,7 @@ import LandingPage from './components/LandingPage';
 import SignupPage from './components/SignupPage';
 import LoginPage from './components/LoginPage';
 import ProtectedRoute from './components/ProtectedRoute';
+import VoiceChatInterface from './components/VoiceChatInterface';
 
 
 
@@ -34,6 +35,11 @@ function App() {
             <Route path="/build" element={
               <ProtectedRoute>
                 <div className="page"><ProjectBuilder /></div>
+              </ProtectedRoute>
+            } />
+            <Route path="/voice-chat" element={
+              <ProtectedRoute>
+                <div className="page"><VoiceChatInterface onProjectGenerated={(projectName) => window.location.href = `/project/${projectName}`} /></div>
               </ProtectedRoute>
             } />
             <Route path="/deploy" element={
