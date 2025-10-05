@@ -13,12 +13,10 @@ const ProjectBuilder = () => {
   const [fileTree, setFileTree] = useState([]);
   const [selectedFile, setSelectedFile] = useState(null);
   const [fileContent, setFileContent] = useState("");
-  const [isRecording, setIsRecording] = useState(false);
   const [selectedImages, setSelectedImages] = useState([]);
   const [autoRunEnabled, setAutoRunEnabled] = useState(false);
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
-  const mediaRecorderRef = useRef(null);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -26,40 +24,6 @@ const ProjectBuilder = () => {
       textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
     }
   }, [projectIdea]);
-
-  const handleVoiceRecording = async () => {
-    if (!isRecording) {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const mediaRecorder = new MediaRecorder(stream);
-        mediaRecorderRef.current = mediaRecorder;
-        
-        const audioChunks = [];
-        mediaRecorder.addEventListener("dataavailable", (event) => {
-          audioChunks.push(event.data);
-        });
-        
-        mediaRecorder.addEventListener("stop", async () => {
-          const audioBlob = new Blob(audioChunks, { type: "audio/wav" });
-          // Convert speech to text (would need speech recognition API)
-          // For demo purposes, append "[Voice Input]" to the text
-          setProjectIdea(prev => prev + (prev ? " " : "") + "[Voice Input - Speech recognition would convert this to text]");
-          stream.getTracks().forEach(track => track.stop());
-        });
-        
-        mediaRecorder.start();
-        setIsRecording(true);
-      } catch (error) {
-        console.error("Error accessing microphone:", error);
-        alert("Unable to access microphone. Please ensure microphone permissions are granted.");
-      }
-    } else {
-      if (mediaRecorderRef.current) {
-        mediaRecorderRef.current.stop();
-        setIsRecording(false);
-      }
-    }
-  };
 
   const handleImageUpload = (event) => {
     const files = Array.from(event.target.files);
@@ -525,19 +489,6 @@ const ProjectBuilder = () => {
               
               <div className="input-container">
                 <div className="input-controls">
-                  <button
-                    onClick={handleVoiceRecording}
-                    disabled={isBuilding}
-                    className={`media-btn ${isRecording ? 'recording' : ''}`}
-                    title={isRecording ? "Stop Recording" : "Voice Input"}
-                  >
-                    {isRecording ? (
-                      <>🔴</>
-                    ) : (
-                      <>🎤</>
-                    )}
-                  </button>
-                  
                   <button
                     onClick={() => fileInputRef.current?.click()}
                     disabled={isBuilding}

@@ -10,10 +10,19 @@ import shutil
 import asyncio
 from pathlib import Path
 from typing import Dict, Set, List
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, Body
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, Body, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.websockets import WebSocketState
 from pydantic import BaseModel
+
+# Import speech functionality
+try:
+    from speechLogic import transcribe_audio_data, process_speech_request, text_to_speech
+    SPEECH_ENABLED = True
+    print("✅ Speech functionality enabled")
+except ImportError as e:
+    SPEECH_ENABLED = False
+    print(f"⚠️ Speech functionality disabled: {e}")
 
 app = FastAPI(title="Monaco Editor API", version="1.0.0")
 
@@ -1269,7 +1278,97 @@ async def create_file_endpoint(request: dict = Body(...)):
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+# --- Speech API Endpoints ---
+@app.post("/api/speech/transcribe")
+async def transcribe_speech(file: UploadFile = File(...)):
+    """Transcribe audio to text using Google Cloud Speech-to-Text"""
+    if not SPEECH_ENABLED:
+        return {"success": False, "error": "Speech functionality not available"}
+    
+    try:
+        # Read audio data
+        audio_data = await file.read()
+        
+        # Transcribe using speechLogic
+        transcript = transcribe_audio_data(audio_data)
+        
+        if transcript:
+            return {
+                "success": True,
+                "transcript": transcript
+            }
+        else:
+            return {
+                "success": False,
+                "error": "Could not transcribe audio"
+            }
+            
+    except Exception as e:
+        print(f"Transcription error: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+@app.post("/api/speech/process")
+async def process_speech(request: dict = Body(...)):
+    """Process transcribed text through speech logic conversation system"""
+    if not SPEECH_ENABLED:
+        return {"success": False, "error": "Speech functionality not available"}
+    
+    try:
+        text = request.get("text")
+        if not text:
+            return {"success": False, "error": "No text provided"}
+        
+        # Process through speech logic
+        result = await process_speech_request(text)
+        
+        return {
+            "success": True,
+            **result
+        }
+        
+    except Exception as e:
+        print(f"Speech processing error: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+@app.post("/api/speech/speak")
+async def speak_text_endpoint(request: dict = Body(...)):
+    """Convert text to speech using Google Cloud Text-to-Speech"""
+    if not SPEECH_ENABLED:
+        return {"success": False, "error": "Speech functionality not available"}
+    
+    try:
+        text = request.get("text")
+        if not text:
+            return {"success": False, "error": "No text provided"}
+        
+        # Generate audio using speechLogic
+        audio_data = text_to_speech(text)
+        
+        if audio_data:
+            return {
+                "success": True,
+                "audio_data": audio_data.hex()  # Convert bytes to hex string
+            }
+        else:
+            return {
+                "success": False,
+                "error": "Could not generate speech"
+            }
+            
+    except Exception as e:
+        print(f"TTS error: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
 if __name__ == "__main__":
     import uvicorn
     print("🚀 Starting Monaco Editor API Server...")
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run(app, host="0.0.0.0", port=8000)

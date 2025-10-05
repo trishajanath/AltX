@@ -91,49 +91,96 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
     setIsLoading(true);
     
     try {
-      // Convert to format expected by backend
+      // Step 1: Transcribe audio
       const formData = new FormData();
-      formData.append('audio', audioBlob, 'audio.webm');
+      formData.append('file', audioBlob, 'recording.wav');
       
-      // Send to speech processing endpoint
-      const response = await fetch('/api/process-speech', {
+      const transcribeResponse = await fetch('/api/speech/transcribe', {
         method: 'POST',
         body: formData
       });
       
-      if (!response.ok) {
-        throw new Error('Speech processing failed');
-      }
+      const transcribeResult = await transcribeResponse.json();
       
-      const result = await response.json();
-      
-      if (result.transcript) {
-        // Add user message
-        addMessage('user', result.transcript);
+      if (transcribeResult.success && transcribeResult.transcript) {
+        // Add user message to conversation
+        const userMessage = {
+          type: 'user',
+          content: transcribeResult.transcript,
+          timestamp: new Date()
+        };
+        setConversation(prev => [...prev, userMessage]);
         
-        // Send to AI for response
-        await sendToAI(result.transcript);
-      } else if (result.error) {
-        // Show detailed error message from backend
-        addMessage('system', `🎤 ${result.error}`);
+        // Step 2: Process with speech logic
+        const processResponse = await fetch('/api/speech/process', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: transcribeResult.transcript })
+        });
         
-        // Show suggestions if available
-        if (result.suggestions) {
-          const suggestionText = "💡 Suggestions:\n" + result.suggestions.map(s => `• ${s}`).join('\n');
-          addMessage('system', suggestionText);
-        }
+        const processResult = await processResponse.json();
         
-        // Show fallback message if available
-        if (result.fallback_message) {
-          addMessage('system', `ℹ️ ${result.fallback_message}`);
+        if (processResult.success) {
+          // Add AI response to conversation
+          const aiMessage = {
+            type: 'ai',
+            content: processResult.response,
+            timestamp: new Date()
+          };
+          setConversation(prev => [...prev, aiMessage]);
+          
+          // Speak the response if not muted
+          if (!isMuted) {
+            await speakText(processResult.response);
+          }
+          
+          // Check if project was generated
+          if (processResult.code_generated && processResult.project_path) {
+            // Notify parent component that project was generated
+            if (onProjectGenerated) {
+              const projectName = processResult.project_path.split('/').pop();
+              onProjectGenerated({
+                name: projectName,
+                path: processResult.project_path,
+                files: processResult.files_created
+              });
+            }
+          }
+          
+          // Update conversation state if provided
+          if (processResult.conversation_state) {
+            // You can use this to show progress or summary
+            const state = processResult.conversation_state;
+            if (state.project_summary) {
+              setProjectSummary(state.project_summary);
+            }
+          }
+        } else {
+          // Handle error
+          const errorMessage = {
+            type: 'ai',
+            content: `Sorry, I encountered an error: ${processResult.error}`,
+            timestamp: new Date()
+          };
+          setConversation(prev => [...prev, errorMessage]);
         }
       } else {
-        addMessage('system', 'Could not understand speech. Please try again or use text input.');
+        // Transcription failed
+        const errorMessage = {
+          type: 'ai',
+          content: "I couldn't understand that. Could you please try again?",
+          timestamp: new Date()
+        };
+        setConversation(prev => [...prev, errorMessage]);
       }
-      
     } catch (error) {
-      console.error('Speech processing error:', error);
-      addMessage('system', '🎤 Speech processing failed. Please use the text input below instead.');
+      console.error('Voice processing error:', error);
+      const errorMessage = {
+        type: 'ai',
+        content: "Sorry, I'm having trouble processing your request. Please try again.",
+        timestamp: new Date()
+      };
+      setConversation(prev => [...prev, errorMessage]);
     } finally {
       setIsLoading(false);
     }
@@ -187,10 +234,40 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
     }
   };
 
-  // Text-to-Speech
-  const speakText = (text) => {
+  // Text-to-Speech using server-side TTS first, fallback to browser
+  const speakText = async (text) => {
     if (isMuted || !text) return;
     
+    try {
+      // Try server-side TTS first
+      const response = await fetch('/api/speech/speak', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text })
+      });
+      
+      const result = await response.json();
+      
+      if (result.success && result.audio_data) {
+        // Convert hex string back to audio data
+        const audioData = new Uint8Array(
+          result.audio_data.match(/.{1,2}/g).map(byte => parseInt(byte, 16))
+        );
+        const audioBlob = new Blob([audioData], { type: 'audio/mp3' });
+        const audioUrl = URL.createObjectURL(audioBlob);
+        const audio = new Audio(audioUrl);
+        await audio.play();
+      } else {
+        // Fallback to browser speech synthesis
+        useBrowserTTS(text);
+      }
+    } catch (error) {
+      console.error('TTS error, using browser fallback:', error);
+      useBrowserTTS(text);
+    }
+  };
+
+  const useBrowserTTS = (text) => {
     // Cancel any ongoing speech
     if (speechSynthRef.current) {
       speechSynthesis.cancel();
@@ -201,28 +278,11 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
       .replace(/[#*_`]/g, '')
       .replace(/PROJECT SUMMARY:/g, 'Project Summary:')
       .replace(/- /g, '. ');
-    
+
     const utterance = new SpeechSynthesisUtterance(cleanText);
     utterance.rate = 0.9;
     utterance.pitch = 1;
     utterance.volume = 0.8;
-    
-    // Find a good voice
-    const voices = speechSynthesis.getVoices();
-    const preferredVoice = voices.find(voice => 
-      voice.name.includes('Google') || 
-      voice.name.includes('Microsoft') ||
-      voice.lang.includes('en-US')
-    );
-    if (preferredVoice) {
-      utterance.voice = preferredVoice;
-    }
-    
-    utterance.onstart = () => setIsPlaying(true);
-    utterance.onend = () => setIsPlaying(false);
-    utterance.onerror = () => setIsPlaying(false);
-    
-    speechSynthRef.current = utterance;
     speechSynthesis.speak(utterance);
   };
 

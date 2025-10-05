@@ -8,6 +8,9 @@ from google.cloud import speech, texttospeech
 import re
 import json
 from datetime import datetime
+from pure_ai_generator import PureAIGenerator
+import asyncio
+from pathlib import Path
 
 # --- Load .env ---
 load_dotenv()
@@ -58,14 +61,17 @@ RULES:
 - If user wants changes, ask what to modify"""
 )
 
-# Initialize chat and state
+# Initialize chat, AI generator, and state
 chat = model.start_chat(history=[])
+ai_generator = PureAIGenerator()
 conversation_state = {
     "gathering_requirements": False,
     "requirements_complete": False,
     "waiting_for_confirmation": False,
     "project_summary": None,
-    "ready_to_generate": False
+    "ready_to_generate": False,
+    "project_name": None,
+    "project_idea": None
 }
 
 # --- Record audio ---
@@ -209,6 +215,211 @@ def get_ai_reply(user_text):
     except Exception as e:
         print(f"❌ Error: {e}")
         return "I'm sorry, I encountered an error. Can you repeat that?"
+
+# --- API Functions for Monaco Server Integration ---
+
+def transcribe_audio_data(audio_data):
+    """Transcribe audio data from bytes"""
+    try:
+        client_speech = speech.SpeechClient()
+        audio = speech.RecognitionAudio(content=audio_data)
+
+        config = speech.RecognitionConfig(
+            encoding=speech.RecognitionConfig.AudioEncoding.WEBM_OPUS,  # Changed for web audio
+            sample_rate_hertz=48000,  # Common web audio rate
+            language_code="en-US",
+        )
+
+        response = client_speech.recognize(config=config, audio=audio)
+        if response.results:
+            transcript = response.results[0].alternatives[0].transcript
+            print(f"📝 Transcribed: {transcript}")
+            return transcript
+        return ""
+    except Exception as e:
+        print(f"Transcription error: {e}")
+        return ""
+
+def text_to_speech(text):
+    """Convert text to speech and return audio data"""
+    try:
+        if len(text) > 500:
+            text = text[:500]
+        
+        tts_client = texttospeech.TextToSpeechClient()
+        synthesis_input = texttospeech.SynthesisInput(text=text)
+        voice = texttospeech.VoiceSelectionParams(
+            language_code="en-US", 
+            name="en-US-Neural2-C",
+            ssml_gender=texttospeech.SsmlVoiceGender.FEMALE
+        )
+        audio_config = texttospeech.AudioConfig(
+            audio_encoding=texttospeech.AudioEncoding.MP3,
+            speaking_rate=1.05
+        )
+
+        response = tts_client.synthesize_speech(
+            input=synthesis_input, voice=voice, audio_config=audio_config
+        )
+        return response.audio_content
+    except Exception as e:
+        print(f"TTS error: {e}")
+        return None
+
+async def process_speech_request(text):
+    """Main function to process speech requests from Monaco server"""
+    global conversation_state, chat, ai_generator
+    
+    result = {
+        "response": "",
+        "conversation_state": conversation_state.copy(),
+        "code_generated": False,
+        "files_created": [],
+        "project_path": None
+    }
+    
+    try:
+        print(f"🎯 Processing speech: {text}")
+        
+        # 1. User initiates a build request
+        if is_build_request(text) and not conversation_state["gathering_requirements"]:
+            conversation_state["gathering_requirements"] = True
+            conversation_state["waiting_for_confirmation"] = False
+            conversation_state["ready_to_generate"] = False
+            
+            ai_response = get_ai_reply(text)
+            result["response"] = ai_response
+            result["conversation_state"] = conversation_state.copy()
+        
+        # 2. Handle confirmation
+        elif conversation_state["waiting_for_confirmation"]:
+            confirmation = is_confirmation(text)
+
+            if confirmation == "yes":
+                conversation_state["ready_to_generate"] = True
+                conversation_state["waiting_for_confirmation"] = False
+
+                # Extract project details from the summary
+                summary = conversation_state.get("project_summary", "")
+                project_name = extract_project_name_from_summary(summary)
+                conversation_state["project_name"] = project_name
+                
+                # Extract project idea from summary
+                project_idea = "web application"
+                for line in summary.split('\n'):
+                    if 'Type:' in line:
+                        project_idea = line.split('Type:')[-1].strip()
+                    elif 'Purpose:' in line:
+                        purpose = line.split('Purpose:')[-1].strip()
+                        project_idea = f"{project_idea} - {purpose}"
+
+                conversation_state["project_idea"] = project_idea
+
+                try:
+                    print(f"🚀 Starting code generation for: {project_name}")
+                    print(f"💡 Project idea: {project_idea}")
+
+                    # Create project directory
+                    project_path = Path(f"generated_projects/{project_name.lower().replace(' ', '-')}")
+                    
+                    # Use Pure AI Generator to create the project
+                    files_created = await ai_generator.generate_project_structure(
+                        project_path=project_path,
+                        idea=project_idea,
+                        project_name=project_name
+                    )
+
+                    print(f"✅ Successfully generated {len(files_created)} files!")
+                    print("📂 Files created:")
+                    for file in files_created:
+                        print(f"  - {file}")
+
+                    success_msg = f"🎉 Your {project_name} application has been successfully generated! I created {len(files_created)} files including React frontend, FastAPI backend, and all necessary configuration."
+                    print(success_msg)
+
+                    result["code_generated"] = True
+                    result["files_created"] = [str(f) for f in files_created]
+                    result["project_path"] = str(project_path)
+                    result["response"] = success_msg
+
+                except Exception as e:
+                    error_msg = f"❌ Error generating code: {e}"
+                    print(error_msg)
+                    result["response"] = f"I encountered an error while generating your application: {str(e)}. Let me try again or you can provide more details."
+                
+                # Reset state for the next conversation
+                conversation_state = {
+                    "gathering_requirements": False,
+                    "requirements_complete": False,
+                    "waiting_for_confirmation": False,
+                    "project_summary": None,
+                    "ready_to_generate": False,
+                    "project_name": None,
+                    "project_idea": None
+                }
+                
+                # Update the result with the reset state before returning
+                result["conversation_state"] = conversation_state.copy()
+
+            elif confirmation == "no":
+                # User wants to make changes
+                conversation_state["waiting_for_confirmation"] = False
+                conversation_state["gathering_requirements"] = True
+                ai_response = get_ai_reply(text + " - What would you like to change?")
+                result["response"] = ai_response
+                result["conversation_state"] = conversation_state.copy()
+            else:
+                # Unclear response, ask for clarification
+                result["response"] = "I didn't catch that. Please say 'yes' to proceed with code generation or 'no' to make changes."
+                result["conversation_state"] = conversation_state.copy()
+        
+        # 3. Gathering requirements
+        elif conversation_state["gathering_requirements"]:
+            ai_response = get_ai_reply(text)
+            
+            # Check if summary was provided
+            summary = extract_summary(ai_response)
+            if summary:
+                conversation_state["project_summary"] = summary
+                conversation_state["waiting_for_confirmation"] = True
+                conversation_state["requirements_complete"] = True
+                print(f"📋 Summary extracted: {summary[:100]}...")
+            
+            result["response"] = ai_response
+            result["conversation_state"] = conversation_state.copy()
+        
+        # 4. General conversation
+        else:
+            ai_response = get_ai_reply(text)
+            result["response"] = ai_response
+            result["conversation_state"] = conversation_state.copy()
+
+        return result
+
+    except Exception as e:
+        print(f"❌ Error in process_speech_request: {e}")
+        return {
+            "response": f"I encountered an error processing your request: {str(e)}. Please try again.",
+            "conversation_state": conversation_state.copy(),
+            "code_generated": False,
+            "files_created": [],
+            "project_path": None
+        }
+
+def extract_project_name_from_summary(summary):
+    """Extract project name from summary"""
+    lines = summary.split('\n')
+    for line in lines:
+        if 'Type:' in line:
+            project_type = line.split('Type:')[-1].strip()
+            return f"{project_type.title()} App"
+        elif 'Purpose:' in line:
+            purpose = line.split('Purpose:')[-1].strip()
+            # Extract key words for project name
+            words = purpose.split()[:3]  # First 3 words
+            return ' '.join(words).title()
+    
+    return "My App"
 
 # --- Text-to-Speech ---
 def speak_text(text, filename="output.mp3"):
