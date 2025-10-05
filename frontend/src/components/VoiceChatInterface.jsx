@@ -305,119 +305,112 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
           --text-primary: #ffffff;
           --text-secondary: #a1a1a1;
           --accent: #4ade80;
+          --accent-purple: #a855f7;
+          --accent-blue: #3b82f6;
         }
+
         .voice-chat-page {
-          background: var(--bg-black);
+          background: transparent;
           color: var(--text-primary);
           min-height: 100vh;
           font-family: "Inter", sans-serif;
-        }
-        .layout-container {
-          max-width: 900px;
-          margin: 0 auto;
-          padding: 4rem 2rem;
-        }
-        .hero-section { text-align: center; margin-bottom: 4rem; }
-        .hero-title { font-size: 3rem; font-weight: 700; margin: 0; }
-        .hero-subtitle {
-          font-size: 1.2rem;
-          color: var(--text-secondary);
-          margin-bottom: 2rem;
-          line-height: 1.6;
+          position: relative;
         }
 
-        .features-info {
+        /* Aura Designer inspired layout */
+        .designer-layout {
+          height: 100vh;
           display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+          grid-template-columns: 1fr;
           gap: 1rem;
-          margin-bottom: 2rem;
-          padding: 1.5rem;
-          background: rgba(255, 255, 255, 0.05);
+          padding: 1rem;
+        }
+
+        @media (min-width: 768px) {
+          .designer-layout {
+            grid-template-columns: 2fr 1fr;
+          }
+        }
+
+        @media (min-width: 1024px) {
+          .designer-layout {
+            grid-template-columns: 7fr 3fr;
+          }
+        }
+
+        .main-canvas-area {
+          background: rgba(17, 24, 39, 0.5);
           border-radius: 1rem;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+          backdrop-filter: blur(10px);
           border: 1px solid rgba(255, 255, 255, 0.1);
         }
 
-        .feature-item {
-          display: flex;
-          align-items: center;
-          gap: 0.75rem;
-          font-size: 0.95rem;
-          color: var(--text-primary);
-        }
-
-        .feature-icon {
-          font-size: 1.2rem;
-          opacity: 0.8;
-        }
-
-        .main-chat-card {
-          background: var(--card-bg);
-          border: 1px solid var(--card-border);
-          border-radius: 1.5rem;
-          padding: 0;
-          margin-bottom: 2rem;
-          box-shadow: 0 8px 30px rgba(0,0,0,0.2);
-          transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
-          overflow: hidden;
-          height: 500px;
-          display: flex;
-          flex-direction: column;
-        }
-        .main-chat-card:hover {
-          transform: translateY(-5px);
-          box-shadow: 0 8px 32px 0 rgba(255, 255, 255, 0.1);
-          border: 1px solid rgba(255, 255, 255, 0.2);
-        }
-
-        .chat-header {
-          padding: 1.5rem 2rem;
-          border-bottom: 1px solid var(--card-border);
+        .canvas-header {
+          padding: 1rem;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.1);
           display: flex;
           align-items: center;
           justify-content: space-between;
         }
 
-        .chat-header-left {
+        .project-title {
+          font-weight: 700;
+          font-size: 1.125rem;
+          background: linear-gradient(135deg, #3b82f6, #a855f7);
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+          background-clip: text;
+        }
+
+        .canvas-content {
+          flex: 1;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 2rem;
+          position: relative;
+        }
+
+        .conversation-display {
+          width: 100%;
+          max-width: 600px;
+          background: rgba(255, 255, 255, 0.02);
+          border-radius: 1rem;
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          overflow: hidden;
+          display: flex;
+          flex-direction: column;
+          height: 500px;
+        }
+
+        .conversation-header {
+          padding: 1rem 1.5rem;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.08);
           display: flex;
           align-items: center;
           gap: 0.75rem;
         }
 
-        .chat-controls {
+        .ai-avatar {
+          width: 2rem;
+          height: 2rem;
+          border-radius: 50%;
+          background: linear-gradient(135deg, #3b82f6, #a855f7);
           display: flex;
           align-items: center;
-          gap: 0.5rem;
+          justify-content: center;
+          font-weight: 700;
+          font-size: 0.875rem;
+          color: white;
         }
 
-        .control-btn {
-          background: rgba(255, 255, 255, 0.1);
-          border: 1px solid rgba(255, 255, 255, 0.15);
-          border-radius: 0.5rem;
-          padding: 0.5rem;
-          color: var(--text-primary);
-          cursor: pointer;
-          transition: all 0.2s ease;
-        }
-        .control-btn:hover {
-          background: rgba(255, 255, 255, 0.15);
-          border-color: rgba(255, 255, 255, 0.25);
-        }
-        .control-btn.active {
-          background: rgba(74, 222, 128, 0.2);
-          border-color: var(--accent);
-          color: var(--accent);
-        }
-        .control-btn.recording {
-          background: rgba(239, 68, 68, 0.2);
-          border-color: #ef4444;
-          color: #ef4444;
-          animation: pulse 1s infinite;
-        }
-
-        .chat-container {
+        .conversation-messages {
           flex: 1;
           overflow-y: auto;
-          padding: 1.5rem 2rem;
+          padding: 1rem;
           display: flex;
           flex-direction: column;
           gap: 1rem;
@@ -425,201 +418,270 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
 
         .message {
           display: flex;
-          margin-bottom: 1rem;
+          gap: 0.75rem;
+          align-items: flex-start;
         }
+
         .message.user {
           justify-content: flex-end;
         }
-        .message.ai {
-          justify-content: flex-start;
-        }
-        .message.system {
-          justify-content: center;
+
+        .message.user .message-bubble {
+          background: linear-gradient(135deg, #a855f7, #3b82f6);
+          color: white;
+          border-radius: 1rem 1rem 0.25rem 1rem;
         }
 
-        .message-bubble {
-          max-width: 70%;
-          padding: 1rem 1.5rem;
-          border-radius: 1rem;
-          font-size: 0.95rem;
-          line-height: 1.5;
-        }
-        .message-bubble.user {
-          background: var(--accent);
-          color: #000;
-        }
-        .message-bubble.ai {
+        .message.ai .message-bubble {
           background: rgba(255, 255, 255, 0.08);
           color: var(--text-primary);
           border: 1px solid rgba(255, 255, 255, 0.1);
+          border-radius: 1rem 1rem 1rem 0.25rem;
         }
-        .message-bubble.system {
+
+        .message.system .message-bubble {
           background: rgba(255, 255, 255, 0.04);
           color: var(--text-secondary);
-          font-size: 0.85rem;
+          font-size: 0.875rem;
           text-align: center;
+          border-radius: 1rem;
+          margin: 0 auto;
+        }
+
+        .message-bubble {
+          padding: 0.75rem 1rem;
+          max-width: 300px;
+          font-size: 0.9rem;
+          line-height: 1.5;
+          white-space: pre-wrap;
         }
 
         .message-time {
           font-size: 0.75rem;
           opacity: 0.6;
-          margin-top: 0.5rem;
+          margin-top: 0.25rem;
         }
 
-        .loading-message {
-          display: flex;
-          align-items: center;
-          gap: 0.75rem;
-          padding: 1rem 1.5rem;
-          background: rgba(255, 255, 255, 0.08);
+        .conversation-sidebar {
+          background: rgba(17, 24, 39, 0.5);
           border-radius: 1rem;
-          color: var(--text-secondary);
-          font-size: 0.9rem;
-        }
-
-        .chat-input-area {
-          padding: 1.5rem 2rem;
-          border-top: 1px solid var(--card-border);
-          background: rgba(255, 255, 255, 0.02);
-        }
-
-        .input-container {
           display: flex;
-          align-items: center;
+          flex-direction: column;
+          backdrop-filter: blur(10px);
+          border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .sidebar-header {
+          padding: 1rem 1.5rem;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .sidebar-title {
+          font-weight: 600;
+          font-size: 1rem;
+          color: var(--text-primary);
+        }
+
+        .sidebar-content {
+          flex: 1;
+          padding: 1rem;
+          display: flex;
+          flex-direction: column;
           gap: 1rem;
         }
 
-        .voice-btn {
-          background: var(--accent);
-          border: none;
-          color: #000;
-          padding: 0.75rem;
-          border-radius: 50%;
+        .voice-orb-container {
+          display: flex;
+          justify-content: center;
+          margin: 2rem 0;
+        }
+
+        .voice-orb {
+          position: relative;
+          width: 120px;
+          height: 120px;
           cursor: pointer;
           transition: all 0.3s ease;
-          font-weight: 600;
-          font-size: 1rem;
-          width: 48px;
-          height: 48px;
+        }
+
+        .voice-orb:hover {
+          transform: scale(1.05);
+        }
+
+        .orb-outer {
+          position: absolute;
+          inset: 0;
+          border-radius: 50%;
+          background: conic-gradient(from 180deg at 50% 50%, #3b82f6 0%, #a855f7 25%, #ef4444 50%, #f59e0b 75%, #3b82f6 100%);
+          animation: spin 10s linear infinite;
+          filter: blur(8px);
+        }
+
+        .orb-inner {
+          position: absolute;
+          inset: 4px;
+          background: #030712;
+          border-radius: 50%;
+          z-index: 10;
           display: flex;
           align-items: center;
           justify-content: center;
+          border: 1px solid rgba(255, 255, 255, 0.1);
         }
-        .voice-btn:hover:not(:disabled) { 
-          opacity: 0.9; 
-          transform: translateY(-2px); 
+
+        .orb-inner svg {
+          width: 2rem;
+          height: 2rem;
+          color: var(--text-secondary);
+          transition: color 0.3s ease;
         }
-        .voice-btn:disabled { 
-          opacity: 0.6; 
-          cursor: not-allowed; 
+
+        .voice-orb.recording .orb-outer {
+          animation: pulse 1.5s infinite, spin 10s linear infinite;
         }
-        .voice-btn.recording {
-          background: #ef4444;
-          color: #fff;
-          animation: pulse 1s infinite;
+
+        .voice-orb.recording .orb-inner svg {
+          color: #ef4444;
+        }
+
+        .input-section {
+          margin-top: auto;
+        }
+
+        .text-input-container {
+          position: relative;
+          margin-bottom: 1rem;
         }
 
         .text-input {
-          flex: 1;
+          width: 100%;
           background: rgba(255, 255, 255, 0.08);
           border: 1px solid rgba(255, 255, 255, 0.15);
-          border-radius: 1rem;
+          border-radius: 2rem;
           color: var(--text-primary);
-          font-size: 1rem;
-          padding: 0.75rem 1.25rem;
+          font-size: 0.9rem;
+          padding: 0.75rem 3rem 0.75rem 1rem;
           transition: all 0.2s ease;
         }
-        .text-input:focus { 
+
+        .text-input:focus {
           outline: none;
-          border-color: var(--accent);
-          box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.1);
+          border-color: var(--accent-purple);
+          box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.1);
         }
+
         .text-input::placeholder {
           color: var(--text-secondary);
           opacity: 0.7;
         }
 
-        .send-btn {
-          background: rgba(255, 255, 255, 0.1);
-          border: 1px solid rgba(255, 255, 255, 0.15);
-          color: var(--text-primary);
-          padding: 0.75rem 1.25rem;
-          border-radius: 1rem;
+        .send-button {
+          position: absolute;
+          right: 0.25rem;
+          top: 50%;
+          transform: translateY(-50%);
+          width: 2rem;
+          height: 2rem;
+          border-radius: 50%;
+          background: linear-gradient(135deg, #3b82f6, #a855f7);
+          border: none;
+          display: flex;
+          align-items: center;
+          justify-content: center;
           cursor: pointer;
-          font-weight: 600;
           transition: all 0.2s ease;
         }
-        .send-btn:hover:not(:disabled) {
-          background: rgba(255, 255, 255, 0.15);
-          border-color: rgba(255, 255, 255, 0.25);
+
+        .send-button:hover:not(:disabled) {
+          transform: translateY(-50%) scale(1.1);
         }
-        .send-btn:disabled {
+
+        .send-button:disabled {
           opacity: 0.5;
           cursor: not-allowed;
         }
 
-        .status-bar {
+        .send-button svg {
+          width: 0.875rem;
+          height: 0.875rem;
+          color: white;
+        }
+
+        .status-indicators {
           display: flex;
-          justify-content: space-between;
           align-items: center;
-          margin-top: 1rem;
-          font-size: 0.85rem;
+          justify-content: space-between;
+          font-size: 0.8rem;
           color: var(--text-secondary);
         }
 
+        .control-buttons {
+          display: flex;
+          gap: 0.5rem;
+        }
+
+        .control-btn {
+          background: rgba(255, 255, 255, 0.08);
+          border: 1px solid rgba(255, 255, 255, 0.15);
+          border-radius: 0.5rem;
+          padding: 0.5rem;
+          color: var(--text-secondary);
+          cursor: pointer;
+          transition: all 0.2s ease;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .control-btn:hover {
+          background: rgba(255, 255, 255, 0.12);
+          color: var(--text-primary);
+        }
+
+        .control-btn.active {
+          background: rgba(168, 85, 247, 0.2);
+          border-color: var(--accent-purple);
+          color: var(--accent-purple);
+        }
+
+        .loading-indicator {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          padding: 0.75rem 1rem;
+          background: rgba(255, 255, 255, 0.05);
+          border-radius: 1rem;
+          color: var(--text-secondary);
+          font-size: 0.875rem;
+        }
+
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+
         @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.5; }
+          0%, 100% { opacity: 0.8; transform: scale(1); }
+          50% { opacity: 1; transform: scale(1.05); }
+        }
+
+        .fade-in {
+          animation: fadeIn 0.5s ease-in-out forwards;
+        }
+
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(10px); }
+          to { opacity: 1; transform: translateY(0); }
         }
       `}</style>
       
       <div className="voice-chat-page">
-        <div className="layout-container">
-          {/* Hero Section */}
-          <div className="hero-section">
-            <h1 className="hero-title">
-              🎤 Voice Chat Builder
-            </h1>
-            <p className="hero-subtitle">
-              Build full-stack applications through natural conversation with AI
-            </p>
-            
-            {/* Features Info */}
-            <div className="features-info">
-              <div className="feature-item">
-                <span className="feature-icon">🗣️</span>
-                <span>Voice Recognition</span>
-              </div>
-              <div className="feature-item">
-                <span className="feature-icon">🤖</span>
-                <span>AI Assistant</span>
-              </div>
-              <div className="feature-item">
-                <span className="feature-icon">⚡</span>
-                <span>Real-time Generation</span>
-              </div>
-              <div className="feature-item">
-                <span className="feature-icon">🚀</span>
-                <span>Auto Deploy</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Main Chat Interface */}
-          <div className="main-chat-card">
-            {/* Chat Header */}
-            <div className="chat-header">
-              <div className="chat-header-left">
-                <BrainCircuit size={24} style={{ color: 'var(--accent)' }} />
-                <div>
-                  <div style={{ fontWeight: '600', fontSize: '1.1rem' }}>AI Assistant</div>
-                  <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                    Voice-powered project generation
-                  </div>
-                </div>
-              </div>
-              
-              <div className="chat-controls">
+        <main className="designer-layout fade-in">
+          {/* Main Canvas Area - Left Side */}
+          <div className="main-canvas-area">
+            <div className="canvas-header">
+              <div className="project-title">🎤 AI Voice Builder</div>
+              <div className="control-buttons">
                 <button
                   onClick={() => setIsMuted(!isMuted)}
                   className={`control-btn ${isMuted ? 'active' : ''}`}
@@ -640,71 +702,103 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
               </div>
             </div>
 
-            {/* Chat Container */}
-            <div ref={chatContainerRef} className="chat-container">
-              {conversation.map((message, index) => (
-                <div key={index} className={`message ${message.type}`}>
-                  <div className={`message-bubble ${message.type}`}>
-                    <div className="whitespace-pre-wrap">{message.content}</div>
-                    <div className="message-time">
-                      {message.timestamp.toLocaleTimeString()}
+            <div className="canvas-content">
+              <div className="conversation-display">
+                <div className="conversation-header">
+                  <div className="ai-avatar">A</div>
+                  <div>
+                    <div style={{ fontWeight: '600', fontSize: '0.95rem' }}>AI Assistant</div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                      Voice-powered project generation
                     </div>
                   </div>
                 </div>
-              ))}
-              
-              {isLoading && (
-                <div className="loading-message">
-                  <Loader size={16} className="animate-spin" />
-                  <span>AI is thinking...</span>
-                </div>
-              )}
-            </div>
 
-            {/* Chat Input Area */}
-            <div className="chat-input-area">
-              <div className="input-container">
-                <button
-                  onClick={isRecording ? stopRecording : startRecording}
-                  disabled={isLoading}
-                  className={`voice-btn ${isRecording ? 'recording' : ''}`}
-                  title={isRecording ? 'Stop recording' : 'Start voice recording'}
-                >
-                  {isRecording ? <Square size={20} /> : <Mic size={20} />}
-                </button>
-                
-                <input
-                  type="text"
-                  value={textInput}
-                  onChange={(e) => setTextInput(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && sendTextMessage()}
-                  placeholder="Describe your app idea or ask questions..."
-                  className="text-input"
-                  disabled={isLoading}
-                />
-                
-                <button
-                  onClick={sendTextMessage}
-                  disabled={!textInput.trim() || isLoading}
-                  className="send-btn"
-                >
-                  Send
-                </button>
-              </div>
-              
-              <div className="status-bar">
-                <span>
-                  {isRecording && '🔴 Recording...'}
-                  {isPlaying && '🔊 AI Speaking...'}
-                  {!isRecording && !isPlaying && '💬 Ready for conversation'}
-                </span>
-                <span>
-                  Voice & text input • Real-time AI responses
-                </span>
+                <div ref={chatContainerRef} className="conversation-messages">
+                  {conversation.map((message, index) => (
+                    <div key={index} className={`message ${message.type}`}>
+                      {message.type === 'ai' && (
+                        <div className="ai-avatar">A</div>
+                      )}
+                      <div className={`message-bubble ${message.type}`}>
+                        <div className="whitespace-pre-wrap">{message.content}</div>
+                        <div className="message-time">
+                          {message.timestamp.toLocaleTimeString()}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  
+                  {isLoading && (
+                    <div className="loading-indicator">
+                      <Loader size={16} className="animate-spin" />
+                      <span>AI is thinking...</span>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
-        </div>
+
+          {/* Conversation Sidebar - Right Side */}
+          <div className="conversation-sidebar">
+            <div className="sidebar-header">
+              <div className="sidebar-title">Voice Interface</div>
+            </div>
+
+            <div className="sidebar-content">
+              {/* Voice Orb */}
+              <div className="voice-orb-container">
+                <div 
+                  className={`voice-orb ${isRecording ? 'recording' : ''}`}
+                  onClick={isRecording ? stopRecording : startRecording}
+                >
+                  <div className="orb-outer"></div>
+                  <div className="orb-inner">
+                    {isRecording ? <Square size={32} /> : <Mic size={32} />}
+                  </div>
+                </div>
+              </div>
+
+              {/* Status */}
+              <div className="status-indicators">
+                <span>
+                  {isRecording && '🔴 Recording...'}
+                  {isPlaying && '🔊 AI Speaking...'}
+                  {!isRecording && !isPlaying && '💬 Ready to chat'}
+                </span>
+              </div>
+
+              {/* Text Input Section */}
+              <div className="input-section">
+                <div className="text-input-container">
+                  <input
+                    type="text"
+                    value={textInput}
+                    onChange={(e) => setTextInput(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && sendTextMessage()}
+                    placeholder="Describe your app idea..."
+                    className="text-input"
+                    disabled={isLoading}
+                  />
+                  <button
+                    onClick={sendTextMessage}
+                    disabled={!textInput.trim() || isLoading}
+                    className="send-button"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                </div>
+
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textAlign: 'center', marginTop: '0.5rem' }}>
+                  Click the orb to speak • Type as backup
+                </div>
+              </div>
+            </div>
+          </div>
+        </main>
       </div>
     </PageWrapper>
   );
