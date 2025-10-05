@@ -6,7 +6,7 @@ import json
 import tempfile
 from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 import google.generativeai as genai
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
@@ -38,7 +38,9 @@ genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
 conversation_model = genai.GenerativeModel(
     'gemini-2.5-flash',
-    system_instruction="""You are a professional software requirements analyst and conversational AI assistant.
+    system_instruction="""You are a professional software requirements analyst and conversational AI assistant that supports multiple languages.
+
+LANGUAGE HANDLING: Always respond in the SAME language the user is speaking. If the user speaks in Spanish, respond in Spanish. If French, respond in French, etc. Adapt your responses naturally to the user's language while maintaining the same professional tone.
 
 YOUR JOB: Gather complete app specifications through natural conversation, then generate projects.
 
@@ -133,20 +135,24 @@ async def process_speech(audio: UploadFile = File(...)):
         
         # Try different configurations - start with most likely to work
         configs_to_try = [
-            # WebM Opus (most common for web browsers) - 48kHz
+            # WebM Opus with automatic language detection (supports 120+ languages)
             speech.RecognitionConfig(
                 encoding=speech.RecognitionConfig.AudioEncoding.WEBM_OPUS,
                 sample_rate_hertz=48000,
-                language_code="en-US",
+                language_code="en-US",  # Primary language
+                alternative_language_codes=["es-ES", "fr-FR", "de-DE", "it-IT", "pt-BR", "hi-IN", "zh-CN", "ja-JP", "ko-KR", "ar-SA", "ru-RU"],
                 enable_automatic_punctuation=True,
                 model="latest_long",
-                use_enhanced=True
+                use_enhanced=True,
+                enable_spoken_punctuation=True,
+                enable_spoken_emojis=True
             ),
-            # WebM Opus without model specification
+            # WebM Opus with automatic language detection (fallback)
             speech.RecognitionConfig(
                 encoding=speech.RecognitionConfig.AudioEncoding.WEBM_OPUS,
                 sample_rate_hertz=48000,
                 language_code="en-US",
+                alternative_language_codes=["es-ES", "fr-FR", "de-DE", "it-IT", "pt-BR", "hi-IN", "zh-CN"],
                 enable_automatic_punctuation=True
             ),
             # WebM Opus with auto sample rate detection
@@ -232,17 +238,38 @@ async def chat_with_ai(chat_data: ChatMessage):
         # Add current message
         conversation_context += f"User: {chat_data.message}\n"
         
-        # Generate response
+        # Generate response with safety handling
+        prompt = f"""Conversation so far:
+{conversation_context}
+
+Instructions: Respond as a helpful AI assistant for app development. If the user is speaking English, respond in English. Only use other languages if the user is clearly communicating in that language. Keep responses friendly, professional, and focused on gathering app requirements.
+
+Response:"""
+        
         response = conversation_model.generate_content(
-            f"Conversation so far:\n{conversation_context}\n\nRespond as the AI assistant:",
+            prompt,
             generation_config={
                 "temperature": 0.7,
                 "top_p": 0.8,
                 "max_output_tokens": 500
-            }
+            },
+            safety_settings=[
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+            ]
         )
         
-        ai_response = response.text
+        # Handle blocked responses
+        if response.candidates and len(response.candidates) > 0:
+            candidate = response.candidates[0]
+            if hasattr(candidate, 'finish_reason') and candidate.finish_reason != 1:  # 1 = STOP (normal completion)
+                ai_response = "I'm here to help you build your app! Could you tell me more about what you'd like to create? For example, is it a web app, mobile app, or something else?"
+            else:
+                ai_response = response.text if response.text else "I'm ready to help you build your app! What would you like to create?"
+        else:
+            ai_response = "I'm your AI assistant and I'm ready to help you build amazing projects! What kind of app would you like to create today?"
         
         # Check if this is a project confirmation
         should_generate = False
@@ -268,11 +295,20 @@ async def chat_with_ai(chat_data: ChatMessage):
         
     except Exception as e:
         print(f"Chat AI error: {e}")
-        raise HTTPException(status_code=500, detail=f"AI chat failed: {str(e)}")
+        # Return a fallback response instead of throwing an error
+        return {
+            "response": "I'm here to help you build your app! Could you tell me what kind of project you'd like to create? For example, a website, mobile app, or desktop application?",
+            "should_generate": False,
+            "project_spec": None
+        }
+
+class TextToSpeechRequest(BaseModel):
+    text: str
 
 @router.post("/synthesize-speech")
-async def synthesize_speech(text: str):
+async def synthesize_speech(request: TextToSpeechRequest):
     """Convert text to speech and return audio file"""
+    text = request.text
     
     if not GOOGLE_CLOUD_AVAILABLE:
         return JSONResponse(
@@ -314,14 +350,16 @@ async def synthesize_speech(text: str):
         # Return the file path or base64 encoded audio
         import base64
         with open(temp_file_path, "rb") as audio_file:
-            audio_base64 = base64.b64encode(audio_file.read()).decode()
+            audio_content = audio_file.read()
         
         os.unlink(temp_file_path)
         
-        return {
-            "audio_base64": audio_base64,
-            "mime_type": "audio/mp3"
-        }
+        # Return as audio blob
+        return Response(
+            content=audio_content,
+            media_type="audio/mpeg",
+            headers={"Content-Disposition": "inline; filename=speech.mp3"}
+        )
         
     except Exception as e:
         print(f"TTS error: {e}")

@@ -12,6 +12,7 @@ import SignupPage from './components/SignupPage';
 import LoginPage from './components/LoginPage';
 import ProtectedRoute from './components/ProtectedRoute';
 import VoiceChatInterface from './components/VoiceChatInterface';
+import MonacoProjectEditor from './components/MonacoProjectEditor';
 
 
 
@@ -40,6 +41,11 @@ function App() {
             <Route path="/voice-chat" element={
               <ProtectedRoute>
                 <div className="page"><VoiceChatInterface onProjectGenerated={(projectName) => window.location.href = `/project/${projectName}`} /></div>
+              </ProtectedRoute>
+            } />
+            <Route path="/project/:projectName" element={
+              <ProtectedRoute>
+                <div className="page"><MonacoProjectEditor /></div>
               </ProtectedRoute>
             } />
             <Route path="/deploy" element={

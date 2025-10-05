@@ -17,6 +17,7 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
   const audioChunksRef = useRef([]);
   const chatContainerRef = useRef(null);
   const speechSynthRef = useRef(null);
+  const currentAudioRef = useRef(null);
 
   // Initialize with greeting
   useEffect(() => {
@@ -27,11 +28,15 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
     };
     setConversation([greeting]);
     
-    // Speak the greeting
-    if (!isMuted) {
-      speakText(greeting.content);
-    }
-  }, []);
+    // Speak the greeting only once
+    const timer = setTimeout(() => {
+      if (!isMuted) {
+        speakText(greeting.content);
+      }
+    }, 500); // Small delay to ensure component is ready
+    
+    return () => clearTimeout(timer);
+  }, []); // Empty dependency array to run only once
 
   // Auto-scroll to latest message
   useEffect(() => {
@@ -40,15 +45,100 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
     }
   }, [conversation]);
 
+  // Cleanup effect: Stop all audio when component unmounts (navigation away)
+  useEffect(() => {
+    return () => {
+      // Stop any playing audio
+      stopSpeaking();
+      
+      // Stop recording if active
+      if (mediaRecorderRef.current && isRecording) {
+        mediaRecorderRef.current.stop();
+      }
+      
+      // Clean up any media streams
+      if (mediaRecorderRef.current && mediaRecorderRef.current.stream) {
+        mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, []); // Empty dependency array means this runs only on unmount
+
+  // Handle page visibility changes (tab switching, minimizing)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden && isPlaying) {
+        // Page is hidden (user switched tabs/minimized), stop audio
+        stopSpeaking();
+        setAudioStoppedMessage('🔇 Audio stopped (tab switched)');
+        setTimeout(() => setAudioStoppedMessage(''), 3000);
+      }
+    };
+
+    const handleBeforeUnload = () => {
+      // Page is being unloaded (navigation/close), stop all audio
+      stopSpeaking();
+      if (mediaRecorderRef.current && isRecording) {
+        mediaRecorderRef.current.stop();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [isPlaying, isRecording]);
+
   // Speech-to-Text setup
   const startRecording = async () => {
     try {
+      // First, get all available audio devices
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const audioInputs = devices.filter(device => device.kind === 'audioinput');
+      
+      console.log('Available audio inputs:', audioInputs);
+      
+      // Use selected device or find the best microphone
+      let deviceId = selectedDeviceId;
+      
+      if (!deviceId) {
+        // Look for microphone devices (avoid system audio mixers)
+        const micDevice = audioInputs.find(device => 
+          device.label.toLowerCase().includes('mic') || 
+          device.label.toLowerCase().includes('microphone') ||
+          (!device.label.toLowerCase().includes('stereo') && 
+           !device.label.toLowerCase().includes('speaker') &&
+           !device.label.toLowerCase().includes('mix') &&
+           !device.label.toLowerCase().includes('what u hear') &&
+           !device.label.toLowerCase().includes('what you hear'))
+        );
+        
+        if (micDevice) {
+          deviceId = micDevice.deviceId;
+          console.log('Using microphone device:', micDevice.label);
+          addMessage('system', `🎤 Using: ${micDevice.label}`);
+        } else {
+          console.log('Using default audio input');
+          addMessage('system', '⚠️ Could not find microphone - using default input. Please select your microphone below.');
+        }
+      } else {
+        const selectedDevice = audioInputs.find(d => d.deviceId === deviceId);
+        console.log('Using selected device:', selectedDevice?.label);
+        addMessage('system', `🎤 Using: ${selectedDevice?.label || 'Selected device'}`);
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: { 
-          sampleRate: 16000,
+          deviceId: deviceId ? { exact: deviceId } : undefined,
+          sampleRate: 48000, // Changed to 48000 to match WebM format
           channelCount: 1,
           echoCancellation: true,
-          noiseSuppression: true
+          noiseSuppression: true,
+          autoGainControl: true,
+          // Explicitly request microphone capture
+          mediaSource: 'microphone'
         } 
       });
       
@@ -91,18 +181,18 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
     setIsLoading(true);
     
     try {
-      // Step 1: Transcribe audio
+      // Step 1: Transcribe audio using our voice chat API
       const formData = new FormData();
-      formData.append('file', audioBlob, 'recording.wav');
+      formData.append('audio', audioBlob, 'recording.webm');
       
-      const transcribeResponse = await fetch('/api/speech/transcribe', {
+      const transcribeResponse = await fetch('/api/process-speech', {
         method: 'POST',
         body: formData
       });
       
       const transcribeResult = await transcribeResponse.json();
       
-      if (transcribeResult.success && transcribeResult.transcript) {
+      if (transcribeResult.transcript) {
         // Add user message to conversation
         const userMessage = {
           type: 'user',
@@ -111,64 +201,68 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
         };
         setConversation(prev => [...prev, userMessage]);
         
-        // Step 2: Process with speech logic
-        const processResponse = await fetch('/api/speech/process', {
+        // Step 2: Process with AI chat
+        const chatResponse = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: transcribeResult.transcript })
+          body: JSON.stringify({ 
+            message: transcribeResult.transcript,
+            conversation_history: conversation 
+          })
         });
         
-        const processResult = await processResponse.json();
+        if (!chatResponse.ok) {
+          throw new Error('Chat API failed');
+        }
         
-        if (processResult.success) {
-          // Add AI response to conversation
-          const aiMessage = {
-            type: 'ai',
-            content: processResult.response,
+        const chatResult = await chatResponse.json();
+        
+        // Add AI response to conversation
+        const aiMessage = {
+          type: 'ai',
+          content: chatResult.response,
+          timestamp: new Date()
+        };
+        setConversation(prev => [...prev, aiMessage]);
+        
+        // Check if this is a project summary
+        if (chatResult.response.includes('PROJECT SUMMARY:')) {
+          setProjectSummary(chatResult.response);
+        }
+        
+        // Check if user confirmed and ready to generate
+        if (chatResult.should_generate) {
+          await handleProjectGeneration(chatResult.project_spec);
+        }
+        
+        // Speak the response if not muted
+        if (!isMuted) {
+          await speakText(chatResult.response);
+        }
+      } else if (transcribeResult.error) {
+        // Show detailed error message from backend
+        const errorMessage = {
+          type: 'system',
+          content: `🎤 ${transcribeResult.error}`,
+          timestamp: new Date()
+        };
+        setConversation(prev => [...prev, errorMessage]);
+        
+        // Show suggestions if available
+        if (transcribeResult.suggestions) {
+          const suggestionText = "💡 Suggestions:\n" + transcribeResult.suggestions.map(s => `• ${s}`).join('\n');
+          const suggestionMessage = {
+            type: 'system',
+            content: suggestionText,
             timestamp: new Date()
           };
-          setConversation(prev => [...prev, aiMessage]);
-          
-          // Speak the response if not muted
-          if (!isMuted) {
-            await speakText(processResult.response);
-          }
-          
-          // Check if project was generated
-          if (processResult.code_generated && processResult.project_path) {
-            // Notify parent component that project was generated
-            if (onProjectGenerated) {
-              const projectName = processResult.project_path.split('/').pop();
-              onProjectGenerated({
-                name: projectName,
-                path: processResult.project_path,
-                files: processResult.files_created
-              });
-            }
-          }
-          
-          // Update conversation state if provided
-          if (processResult.conversation_state) {
-            // You can use this to show progress or summary
-            const state = processResult.conversation_state;
-            if (state.project_summary) {
-              setProjectSummary(state.project_summary);
-            }
-          }
-        } else {
-          // Handle error
-          const errorMessage = {
-            type: 'ai',
-            content: `Sorry, I encountered an error: ${processResult.error}`,
-            timestamp: new Date()
-          };
-          setConversation(prev => [...prev, errorMessage]);
+          setConversation(prev => [...prev, suggestionMessage]);
         }
       } else {
         // Transcription failed
         const errorMessage = {
-          type: 'ai',
-          content: "I couldn't understand that. Could you please try again?",
+          type: 'system',
+          content: "I couldn't understand that. Could you please try again or use text input?",
           timestamp: new Date()
         };
         setConversation(prev => [...prev, errorMessage]);
@@ -236,26 +330,39 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
 
   // Text-to-Speech using server-side TTS first, fallback to browser
   const speakText = async (text) => {
-    if (isMuted || !text) return;
+    if (isMuted || !text || isPlaying) return; // Don't play if already playing
+    
+    // Stop any current audio
+    stopSpeaking();
     
     try {
-      // Try server-side TTS first
-      const response = await fetch('/api/speech/speak', {
+      // Try server-side TTS first using our voice chat API
+      const response = await fetch('/api/synthesize-speech', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text })
       });
       
-      const result = await response.json();
-      
-      if (result.success && result.audio_data) {
-        // Convert hex string back to audio data
-        const audioData = new Uint8Array(
-          result.audio_data.match(/.{1,2}/g).map(byte => parseInt(byte, 16))
-        );
-        const audioBlob = new Blob([audioData], { type: 'audio/mp3' });
+      if (response.ok) {
+        const audioBlob = await response.blob();
         const audioUrl = URL.createObjectURL(audioBlob);
         const audio = new Audio(audioUrl);
+        
+        // Store reference to current audio
+        currentAudioRef.current = audio;
+        
+        setIsPlaying(true);
+        audio.onended = () => {
+          setIsPlaying(false);
+          currentAudioRef.current = null;
+          URL.revokeObjectURL(audioUrl); // Clean up URL
+        };
+        audio.onerror = () => {
+          setIsPlaying(false);
+          currentAudioRef.current = null;
+          URL.revokeObjectURL(audioUrl); // Clean up URL
+        };
+        
         await audio.play();
       } else {
         // Fallback to browser speech synthesis
@@ -287,7 +394,24 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
   };
 
   const stopSpeaking = () => {
-    speechSynthesis.cancel();
+    try {
+      // Stop browser speech synthesis
+      speechSynthesis.cancel();
+    } catch (error) {
+      console.warn('Error stopping speech synthesis:', error);
+    }
+    
+    try {
+      // Stop current audio if playing
+      if (currentAudioRef.current) {
+        currentAudioRef.current.pause();
+        currentAudioRef.current.currentTime = 0;
+        currentAudioRef.current = null;
+      }
+    } catch (error) {
+      console.warn('Error stopping current audio:', error);
+    }
+    
     setIsPlaying(false);
   };
 
@@ -306,14 +430,23 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
     addMessage('system', '🚀 Starting project generation...');
     
     try {
+      // Generate a project name from the description
+      const projectName = projectSpec.description
+        ?.split(' ')
+        .slice(0, 3)
+        .join('-')
+        .toLowerCase()
+        .replace(/[^a-z0-9-]/g, '') || 'my-app';
+
       const response = await fetch('/api/build-with-ai', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
+          project_name: projectName,
           idea: projectSpec.description,
-          requirements: projectSpec
+          tech_stack: projectSpec.tech_stack || []
         })
       });
       
@@ -324,18 +457,18 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
       const result = await response.json();
       
       if (result.success) {
-        addMessage('system', `✅ Project "${result.project_name}" generated successfully!`);
+        addMessage('system', `✅ Project "${projectName}" generated successfully!`);
         
         // Redirect to Monaco editor
         setTimeout(() => {
           if (onProjectGenerated) {
-            onProjectGenerated(result.project_name);
+            onProjectGenerated(projectName);
           } else {
-            window.location.href = `/project/${result.project_name}`;
+            window.location.href = `/project/${projectName}`;
           }
         }, 2000);
       } else {
-        addMessage('system', '❌ Project generation failed. Please try again.');
+        addMessage('system', `❌ Project generation failed: ${result.error || 'Unknown error'}`);
       }
       
     } catch (error) {
@@ -346,6 +479,29 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
 
   // Manual text input for fallback
   const [textInput, setTextInput] = useState('');
+  const [audioDevices, setAudioDevices] = useState([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState('');
+  const [audioStoppedMessage, setAudioStoppedMessage] = useState('');
+  
+  // Load available audio devices
+  useEffect(() => {
+    const loadAudioDevices = async () => {
+      try {
+        // Request permission first
+        await navigator.mediaDevices.getUserMedia({ audio: true });
+        
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const audioInputs = devices.filter(device => device.kind === 'audioinput');
+        setAudioDevices(audioInputs);
+        
+        console.log('Audio devices loaded:', audioInputs);
+      } catch (error) {
+        console.error('Error loading audio devices:', error);
+      }
+    };
+    
+    loadAudioDevices();
+  }, []);
   
   const sendTextMessage = () => {
     if (textInput.trim()) {
@@ -825,9 +981,39 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
                 <span>
                   {isRecording && '🔴 Recording...'}
                   {isPlaying && '🔊 AI Speaking...'}
-                  {!isRecording && !isPlaying && '💬 Ready to chat'}
+                  {audioStoppedMessage && audioStoppedMessage}
+                  {!isRecording && !isPlaying && !audioStoppedMessage && '💬 Ready to chat'}
                 </span>
               </div>
+
+              {/* Microphone Selector */}
+              {audioDevices.length > 1 && (
+                <div style={{ marginBottom: '1rem' }}>
+                  <label style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '0.5rem' }}>
+                    🎤 Select Microphone:
+                  </label>
+                  <select
+                    value={selectedDeviceId}
+                    onChange={(e) => setSelectedDeviceId(e.target.value)}
+                    style={{
+                      width: '100%',
+                      background: 'rgba(255, 255, 255, 0.08)',
+                      border: '1px solid rgba(255, 255, 255, 0.15)',
+                      borderRadius: '0.5rem',
+                      color: 'var(--text-primary)',
+                      fontSize: '0.85rem',
+                      padding: '0.5rem',
+                    }}
+                  >
+                    <option value="">Default Microphone</option>
+                    {audioDevices.map(device => (
+                      <option key={device.deviceId} value={device.deviceId}>
+                        {device.label || `Microphone ${device.deviceId.slice(0, 8)}...`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               {/* Text Input Section */}
               <div className="input-section">
@@ -854,6 +1040,8 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
 
                 <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textAlign: 'center', marginTop: '0.5rem' }}>
                   Click the orb to speak • Type as backup
+                  <br />
+                  🌍 Supports 12+ languages automatically
                 </div>
               </div>
             </div>
