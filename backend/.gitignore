@@ -4,3 +4,4 @@ vector_db/
 *.sqlite3
 backend/.env
 .env
+*.json
