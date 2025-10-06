@@ -443,6 +443,9 @@ async def create_project_structure(request: dict = Body(...)):
         project_name = request.get("project_name")
         idea = request.get("idea") 
         tech_stack = request.get("tech_stack", [])
+        project_type = request.get("project_type", "web app")
+        features = request.get("features", [])
+        requirements = request.get("requirements", {})
         
         # Send progress updates via WebSocket
         await manager.send_to_project(project_name, {
@@ -464,9 +467,17 @@ async def create_project_structure(request: dict = Body(...)):
         # Determine tech stack based on AI analysis of the idea
         detected_stack = await analyze_tech_stack_for_idea(idea)
         
-        # Create project structure
+        # Create project structure with full specifications
+        full_spec = {
+            "idea": idea,
+            "project_type": project_type,
+            "features": features,
+            "tech_stack": detected_stack,
+            "requirements": requirements
+        }
+        
         files_created = await create_complete_project_structure(
-            project_path, idea, project_slug, detected_stack
+            project_path, full_spec, project_slug, detected_stack
         )
         
         await manager.send_to_project(project_name, {
@@ -518,13 +529,18 @@ async def analyze_tech_stack_for_idea(idea: str) -> List[str]:
     
     return base_stack + additional_features[:4]  # Limit to 8 total items
 
-async def create_complete_project_structure(project_path: Path, idea: str, project_name: str, tech_stack: List[str]) -> List[str]:
+async def create_complete_project_structure(project_path: Path, project_spec: dict, project_name: str, tech_stack: List[str]) -> List[str]:
     """Create complete project with OPTIMIZED Pure AI generation - 100% AI code, NO templates, FAST"""
+    
+    # Extract details from project_spec
+    idea = project_spec.get("idea", "")
+    project_type = project_spec.get("project_type", "web app")
+    features = project_spec.get("features", [])
     
     # Send initial progress
     await manager.send_to_project(project_name, {
         "type": "file_creation_start",
-        "message": "🚀 Starting OPTIMIZED Pure AI generation - 100% AI code in ~60 seconds...",
+        "message": f"🚀 Creating {project_type}: {idea[:50]}{'...' if len(idea) > 50 else ''}",
         "total_files": 15
     })
     
@@ -540,7 +556,12 @@ async def create_complete_project_structure(project_path: Path, idea: str, proje
             })
             
             generator = PureAIGenerator()
-            files_created = await generator.generate_project_structure(project_path, idea, project_name)
+            files_created = await generator.generate_project_structure(
+                project_path, 
+                project_spec, 
+                project_name,
+                tech_stack
+            )
             
             await manager.send_to_project(project_name, {
                 "type": "file_creation_complete", 
@@ -990,8 +1011,8 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
             addToConsole(args.join(' '), 'warn');
         }};
         
-        // Error Boundary Component
-        class ErrorBoundary extends React.Component {{
+        // Sandbox Error Boundary Component (renamed to avoid conflicts with app code)
+        class SandboxErrorBoundary extends React.Component {{
             constructor(props) {{
                 super(props);
                 this.state = {{ hasError: false, error: null }};
@@ -1048,7 +1069,7 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
             if (typeof window.App === 'function') {{
                 const root = ReactDOM.createRoot(document.getElementById('root'));
                 root.render(
-                    React.createElement(ErrorBoundary, null,
+                    React.createElement(SandboxErrorBoundary, null,
                         React.createElement(window.App)
                     )
                 );
@@ -1159,11 +1180,14 @@ async def build_with_ai(request: dict = Body(...)):
         project_name = request.get("project_name")
         idea = request.get("idea") or ""
         tech_stack = request.get("tech_stack", [])
+        project_type = request.get("project_type", "web app")
+        features = request.get("features", [])
+        requirements = request.get("requirements", {})
 
         if not project_name:
             raise HTTPException(status_code=400, detail="project_name is required")
 
-        # 1) Create structure
+        # 1) Create structure with full project details
         await manager.send_to_project(project_name, {
             "type": "status",
             "phase": "create",
@@ -1173,7 +1197,10 @@ async def build_with_ai(request: dict = Body(...)):
         create_resp = await create_project_structure({
             "project_name": project_name,
             "idea": idea,
-            "tech_stack": tech_stack
+            "tech_stack": tech_stack,
+            "project_type": project_type,
+            "features": features,
+            "requirements": requirements
         })
         if not create_resp.get("success"):
             return create_resp
@@ -2432,6 +2459,195 @@ async def run_project(request: dict = Body(...)):
         })
         return {"success": False, "error": str(e)}
 
+# --- Auto-Fix Project Errors Endpoint ---
+@app.post("/api/auto-fix-project-errors")
+async def auto_fix_project_errors(project_name: str = Query(...)):
+    """Automatically fix common project errors"""
+    try:
+        project_slug = project_name.lower().replace(" ", "-")
+        projects_dir = Path("generated_projects")
+        project_path = projects_dir / project_slug
+        
+        if not project_path.exists():
+            return {"success": False, "error": "Project not found"}
+        
+        fixes_applied = []
+        
+        # Run the existing validation and fix function
+        fix_success = await validate_and_fix_project_files(project_path, project_name)
+        if fix_success:
+            fixes_applied.append("Fixed package.json structure")
+        
+        # Additional common fixes
+        frontend_path = project_path / "frontend"
+        if frontend_path.exists():
+            src_path = frontend_path / "src"
+            
+            # Fix duplicate ErrorBoundary declarations in App.jsx
+            app_jsx_path = src_path / "App.jsx"
+            if app_jsx_path.exists():
+                try:
+                    with open(app_jsx_path, 'r', encoding='utf-8') as f:
+                        app_content = f.read()
+                    
+                    # Check for duplicate ErrorBoundary class declarations
+                    error_boundary_count = app_content.count('class ErrorBoundary extends React.Component')
+                    if error_boundary_count > 1:
+                        # Remove duplicate declarations by keeping only the first one
+                        parts = app_content.split('class ErrorBoundary extends React.Component')
+                        if len(parts) > 2:
+                            # Find the end of the first ErrorBoundary class
+                            first_part = parts[0] + 'class ErrorBoundary extends React.Component' + parts[1]
+                            
+                            # Find where the first class ends (look for the closing brace of the class)
+                            brace_count = 0
+                            class_end_pos = len(first_part)
+                            in_class = False
+                            
+                            for i, char in enumerate(first_part[first_part.rfind('class ErrorBoundary'):]):
+                                if char == '{':
+                                    in_class = True
+                                    brace_count += 1
+                                elif char == '}' and in_class:
+                                    brace_count -= 1
+                                    if brace_count == 0:
+                                        class_end_pos = first_part.rfind('class ErrorBoundary') + i + 1
+                                        break
+                            
+                            # Reconstruct content without duplicate ErrorBoundary
+                            fixed_content = first_part[:class_end_pos] + '\n'
+                            
+                            # Add the remaining content after skipping duplicate classes
+                            remaining_parts = parts[2:]
+                            for i, part in enumerate(remaining_parts):
+                                if i == 0:
+                                    # Skip the duplicate class content, find where it ends
+                                    brace_count = 0
+                                    skip_to = 0
+                                    for j, char in enumerate(part):
+                                        if char == '{':
+                                            brace_count += 1
+                                        elif char == '}':
+                                            brace_count -= 1
+                                            if brace_count <= 0:
+                                                skip_to = j + 1
+                                                break
+                                    fixed_content += part[skip_to:]
+                                else:
+                                    fixed_content += part
+                            
+                            # Write the fixed content
+                            with open(app_jsx_path, 'w', encoding='utf-8') as f:
+                                f.write(fixed_content)
+                            fixes_applied.append("Removed duplicate ErrorBoundary class declaration")
+                    
+                    # Fix other common React errors
+                    original_content = app_content
+                    
+                    # Fix spread operator on non-iterable
+                    if "...(" in app_content or "TypeError: Invalid attempt to spread non-iterable" in str(project_name):
+                        app_content = re.sub(r'\.\.\.\s*\([^)]*\)', '...(data || {})', app_content)
+                        app_content = re.sub(r'\.\.\.\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*(?=\})', r'...(\1 || {})', app_content)
+                        fixes_applied.append("Fixed spread operator on potentially undefined values")
+                    
+                    # Fix array.map() errors by ensuring proper initialization
+                    if ".map(" in app_content and "useState([])" not in app_content:
+                        # Look for useState patterns and ensure arrays are initialized
+                        app_content = re.sub(
+                            r'useState\(\s*\)',
+                            'useState([])',
+                            app_content
+                        )
+                        app_content = re.sub(
+                            r'useState\(\s*null\s*\)',
+                            'useState([])',
+                            app_content
+                        )
+                        fixes_applied.append("Fixed array initialization in useState")
+                    
+                    # Fix JSON.parse without error handling
+                    if "JSON.parse(" in app_content and "try" not in app_content:
+                        json_parse_pattern = r'JSON\.parse\(([^)]+)\)'
+                        def replace_json_parse(match):
+                            variable = match.group(1)
+                            return f'(function() {{ try {{ return JSON.parse({variable}); }} catch(e) {{ console.error("JSON parse error:", e); return null; }} }})()'
+                        
+                        app_content = re.sub(json_parse_pattern, replace_json_parse, app_content)
+                        fixes_applied.append("Added error handling to JSON.parse calls")
+                    
+                    # Write fixed content if changes were made
+                    if app_content != original_content:
+                        with open(app_jsx_path, 'w', encoding='utf-8') as f:
+                            f.write(app_content)
+                        
+                except Exception as e:
+                    print(f"Error fixing App.jsx: {e}")
+            
+            # Ensure src/main.jsx exists
+            main_jsx_path = src_path / "main.jsx"
+            
+            if not main_jsx_path.exists():
+                src_path.mkdir(exist_ok=True)
+                main_jsx_content = '''import React from 'react'
+import ReactDOM from 'react-dom/client'
+import App from './App.jsx'
+import './index.css'
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+)'''
+                main_jsx_path.write_text(main_jsx_content, encoding='utf-8')
+                fixes_applied.append("Created missing main.jsx")
+            
+            # Ensure src/App.jsx exists
+            if not app_jsx_path.exists():
+                app_jsx_content = '''import React from 'react'
+import './App.css'
+
+function App() {
+  return (
+    <div className="App">
+      <h1>Welcome to Your Project</h1>
+      <p>This project has been auto-generated and fixed!</p>
+    </div>
+  )
+}
+
+export default App'''
+                app_jsx_path.write_text(app_jsx_content, encoding='utf-8')
+                fixes_applied.append("Created missing App.jsx")
+            
+            # Ensure index.html exists
+            index_html_path = frontend_path / "index.html"
+            if not index_html_path.exists():
+                index_html_content = '''<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>''' + project_name + '''</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>'''
+                index_html_path.write_text(index_html_content, encoding='utf-8')
+                fixes_applied.append("Created missing index.html")
+        
+        return {
+            "success": True,
+            "fixes_applied": fixes_applied,
+            "message": f"Applied {len(fixes_applied)} fixes" if fixes_applied else "No fixes needed"
+        }
+        
+    except Exception as e:
+        print(f"Auto-fix errors: {e}")
+        return {"success": False, "error": str(e)}
+
 # --- Stop Project Endpoint ---
 @app.post("/api/stop-project")
 async def check_project_errors(project_name: str = Query(...)):
@@ -2731,6 +2947,90 @@ async def execute_command(request: dict = Body(...)):
             return {"success": False, "error": str(e)}
         
     except Exception as e:
+        return {"success": False, "error": str(e)}
+
+# --- Project History Endpoint ---
+@app.get("/api/project-history")
+async def get_project_history():
+    """Get list of all generated projects with metadata"""
+    try:
+        projects_dir = Path("generated_projects")
+        
+        if not projects_dir.exists():
+            return {"success": True, "projects": []}
+        
+        projects = []
+        
+        for project_folder in projects_dir.iterdir():
+            if project_folder.is_dir() and not project_folder.name.startswith('.'):
+                try:
+                    # Get project metadata
+                    project_info = {
+                        "name": project_folder.name.replace("-", " ").title(),
+                        "slug": project_folder.name,
+                        "created_date": project_folder.stat().st_ctime,
+                        "modified_date": project_folder.stat().st_mtime,
+                        "preview_url": f"http://localhost:8000/api/sandbox-preview/{project_folder.name}",
+                        "editor_url": f"/project/{project_folder.name}",
+                        "has_frontend": (project_folder / "frontend").exists(),
+                        "has_backend": (project_folder / "backend").exists(),
+                        "tech_stack": []
+                    }
+                    
+                    # Try to detect tech stack from package.json
+                    package_json = project_folder / "frontend" / "package.json"
+                    if package_json.exists():
+                        try:
+                            import json
+                            with open(package_json, 'r', encoding='utf-8') as f:
+                                pkg_data = json.load(f)
+                            
+                            dependencies = list(pkg_data.get("dependencies", {}).keys())
+                            dev_dependencies = list(pkg_data.get("devDependencies", {}).keys())
+                            
+                            # Detect React
+                            if "react" in dependencies:
+                                project_info["tech_stack"].append("React")
+                            
+                            # Detect Vite
+                            if "vite" in dev_dependencies:
+                                project_info["tech_stack"].append("Vite")
+                            
+                            # Detect other common packages
+                            if "tailwindcss" in dependencies or "tailwindcss" in dev_dependencies:
+                                project_info["tech_stack"].append("TailwindCSS")
+                                
+                        except Exception:
+                            pass
+                    
+                    # Check for backend tech stack
+                    requirements_txt = project_folder / "backend" / "requirements.txt"
+                    if requirements_txt.exists():
+                        project_info["tech_stack"].append("FastAPI")
+                        project_info["tech_stack"].append("Python")
+                    
+                    # Format created date
+                    import datetime
+                    created_dt = datetime.datetime.fromtimestamp(project_info["created_date"])
+                    project_info["created_date_formatted"] = created_dt.strftime("%Y-%m-%d %H:%M")
+                    
+                    projects.append(project_info)
+                    
+                except Exception as e:
+                    print(f"Error processing project {project_folder.name}: {e}")
+                    continue
+        
+        # Sort by creation date (newest first)
+        projects.sort(key=lambda x: x["created_date"], reverse=True)
+        
+        return {
+            "success": True,
+            "projects": projects,
+            "total_count": len(projects)
+        }
+        
+    except Exception as e:
+        print(f"Error fetching project history: {e}")
         return {"success": False, "error": str(e)}
 
 # --- Get Project File Tree Endpoint ---

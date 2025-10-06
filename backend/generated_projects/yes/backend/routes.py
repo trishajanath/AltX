@@ -1,214 +1,240 @@
-import uuid
 from fastapi import APIRouter, HTTPException, Depends, status
-from typing import List, Dict, Any
-from datetime import date, datetime, timedelta
+from typing import List, Optional, Dict
+import uuid
+from datetime import datetime
 
-# In a real application, these models would be in a separate 'models.py' file.
-# To fulfill the request of providing a single file, they are defined here.
-from pydantic import BaseModel, Field
+# In a real application, these models would be in a separate `models.py` file.
+# from .models import (
+#     Proposal, ProposalCreate, ProposalDetail, ProposalStatus, Commitment, Milestone
+# )
+from pydantic import BaseModel, Field, EmailStr
+from enum import Enum
 
-# --- Models ---
 
-class MilestoneBase(BaseModel):
+# --- Pydantic Models (should be in models.py) ---
+
+class ProposalStatus(str, Enum):
+    """Enum for the status of a proposal."""
+    DRAFT = "DRAFT"
+    COMMITTED = "COMMITTED"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+
+
+class Commitment(BaseModel):
+    """Represents a stakeholder's commitment to a proposal."""
+    stakeholder_email: EmailStr
+    committed_at: datetime
+
+
+class Milestone(BaseModel):
+    """Represents a key milestone for a proposal."""
     title: str
-    description: str | None = None
+    due_date: datetime
 
-class MilestoneCreate(MilestoneBase):
-    pass
 
-class MilestoneOut(MilestoneBase):
-    id: int
-    is_complete: bool
+class ProposalBase(BaseModel):
+    """Base model for a proposal's core fields."""
+    title: str = Field(..., min_length=3, max_length=100)
+    description: str = Field(..., min_length=10)
+    success_metric: str
 
-    class Config:
-        from_attributes = True
 
-class GoalBase(BaseModel):
-    title: str
-    description: str | None = None
-    target_date: date
+class ProposalCreate(ProposalBase):
+    """Model for creating a new proposal."""
+    stakeholder_emails: List[EmailStr]
 
-class GoalCreate(GoalBase):
-    # When creating a goal, users can optionally provide initial milestones
-    milestones: List[MilestoneCreate] = []
 
-class GoalOut(GoalBase):
-    id: int
-    created_at: datetime
-    milestones: List[MilestoneOut]
+class Proposal(ProposalBase):
+    """Model representing a proposal in the system (e.g., for list views)."""
+    id: str
+    owner_id: str
+    status: ProposalStatus
+    stakeholder_emails: List[EmailStr]
 
     class Config:
-        from_attributes = True
-
-class HabitCompletion(BaseModel):
-    date: date
-    is_complete: bool
-
-    class Config:
-        from_attributes = True
-
-class HabitOut(BaseModel):
-    id: int
-    title: str
-    completions_this_week: List[HabitCompletion]
-
-    class Config:
-        from_attributes = True
+        orm_mode = True
 
 
-# --- In-Memory Storage (acting as a mock database) ---
+class ProposalDetail(Proposal):
+    """Full proposal model including nested commitments and milestones."""
+    commitments: List[Commitment] = []
+    milestones: List[Milestone] = []
 
-# A mock user for authentication purposes
-MOCK_USER = {"id": 1, "username": "testuser"}
+# --- End of Models ---
 
-db: Dict[str, List[Dict[str, Any]]] = {
-    "goals": [
-        {
-            "id": 1, "user_id": 1, "title": "Learn FastAPI",
-            "description": "Master the framework by building a project.",
-            "target_date": date(2024, 12, 31), "created_at": datetime.utcnow()
-        },
-        {
-            "id": 2, "user_id": 1, "title": "Run a 5k",
-            "description": "Train and complete a 5k race.",
-            "target_date": date(2024, 9, 30), "created_at": datetime.utcnow()
-        },
-        # This goal belongs to another user and should not be returned
-        {
-            "id": 3, "user_id": 2, "title": "Another User's Goal",
-            "description": "This should not be visible to user 1.",
-            "target_date": date(2024, 8, 1), "created_at": datetime.utcnow()
-        }
-    ],
-    "milestones": [
-        {"id": 101, "goal_id": 1, "title": "Complete the official tutorial", "description": None, "is_complete": True},
-        {"id": 102, "goal_id": 1, "title": "Build a simple CRUD app", "description": None, "is_complete": False},
-        {"id": 103, "goal_id": 2, "title": "Run 1k without stopping", "description": None, "is_complete": True},
-        {"id": 104, "goal_id": 2, "title": "Run 3k without stopping", "description": None, "is_complete": False},
-    ],
-    "habits": [
-        {"id": 201, "user_id": 1, "title": "Drink 8 glasses of water"},
-        {"id": 202, "user_id": 1, "title": "Read for 15 minutes"},
-        {"id": 203, "user_id": 2, "title": "Another User's Habit"}
-    ],
-    "habit_completions": [
-        {"id": 301, "habit_id": 201, "date": date.today() - timedelta(days=1), "is_complete": True},
-        {"id": 302, "habit_id": 201, "date": date.today(), "is_complete": False},
-        {"id": 303, "habit_id": 202, "date": date.today() - timedelta(days=2), "is_complete": True},
-        {"id": 304, "habit_id": 202, "date": date.today() - timedelta(days=1), "is_complete": True},
-        # A completion from last week that should be filtered out
-        {"id": 305, "habit_id": 201, "date": date.today() - timedelta(days=8), "is_complete": True},
-    ]
-}
 
-# --- Dependency for Authentication ---
-
-async def get_current_user() -> Dict[str, Any]:
-    """A mock dependency to simulate retrieving an authenticated user."""
-    return MOCK_USER
-
-# --- APIRouter Setup ---
+# --- API Router Setup ---
 
 router = APIRouter(
     prefix="/api/v1",
-    tags=["Productivity"],
+    tags=["Proposals"],
+    responses={404: {"description": "Not found"}},
 )
 
-# --- Helper Functions ---
 
-def get_next_id(table_name: str) -> int:
-    """Generates a new unique ID for a given table."""
-    if not db[table_name]:
-        return 1
-    return max(item["id"] for item in db[table_name]) + 1
+# --- In-Memory Database ---
 
-# --- Routes ---
+# We use a dictionary to store proposal details, with the proposal ID as the key.
+db: Dict[str, ProposalDetail] = {}
 
-@router.get("/goals", response_model=List[GoalOut], summary="Get All Goals")
-async def get_goals(current_user: Dict[str, Any] = Depends(get_current_user)):
-    """
-    Retrieve all goals and their associated milestones for the authenticated user.
-    """
-    user_id = current_user["id"]
-    user_goals = [goal for goal in db["goals"] if goal["user_id"] == user_id]
-
-    result = []
-    for goal in user_goals:
-        goal_milestones = [ms for ms in db["milestones"] if ms["goal_id"] == goal["id"]]
-        goal_with_milestones = {**goal, "milestones": goal_milestones}
-        result.append(goal_with_milestones)
-
-    return result
-
-@router.post("/goals", response_model=GoalOut, status_code=status.HTTP_201_CREATED, summary="Create a New Goal")
-async def create_goal(goal_in: GoalCreate, current_user: Dict[str, Any] = Depends(get_current_user)):
-    """
-    Create a new goal for the user. Request body includes title, description,
-    target_date, and an optional list of initial milestones.
-    """
-    new_goal_id = get_next_id("goals")
-    new_goal = {
-        "id": new_goal_id,
-        "user_id": current_user["id"],
-        "title": goal_in.title,
-        "description": goal_in.description,
-        "target_date": goal_in.target_date,
-        "created_at": datetime.utcnow()
-    }
-    db["goals"].append(new_goal)
-
-    created_milestones = []
-    for milestone_in in goal_in.milestones:
-        new_milestone = {
-            "id": get_next_id("milestones"),
-            "goal_id": new_goal_id,
-            "title": milestone_in.title,
-            "description": milestone_in.description,
-            "is_complete": False
-        }
-        db["milestones"].append(new_milestone)
-        created_milestones.append(new_milestone)
-
-    return {**new_goal, "milestones": created_milestones}
-
-@router.put("/milestones/{milestone_id}/toggle", response_model=MilestoneOut, summary="Toggle Milestone Completion")
-async def toggle_milestone_completion(milestone_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
-    """
-    Mark a specific milestone as complete or incomplete.
-    This operation is idempotent.
-    """
-    milestone = next((ms for ms in db["milestones"] if ms["id"] == milestone_id), None)
-    if not milestone:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Milestone not found")
-
-    # Authorization check: ensure the milestone belongs to a goal owned by the current user
-    goal = next((g for g in db["goals"] if g["id"] == milestone["goal_id"]), None)
-    if not goal or goal["user_id"] != current_user["id"]:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to modify this milestone")
-
-    milestone["is_complete"] = not milestone["is_complete"]
-    return milestone
-
-@router.get("/habits", response_model=List[HabitOut], summary="Get All Habits for the Week")
-async def get_habits(current_user: Dict[str, Any] = Depends(get_current_user)):
-    """
-    Retrieve all habits and their completion status for the current week
-    for the authenticated user.
-    """
-    user_id = current_user["id"]
-    user_habits = [habit for habit in db["habits"] if habit["user_id"] == user_id]
-
-    today = date.today()
-    start_of_week = today - timedelta(days=today.weekday())
-    end_of_week = start_of_week + timedelta(days=6)
-
-    result = []
-    for habit in user_habits:
-        completions = [
-            comp for comp in db["habit_completions"]
-            if comp["habit_id"] == habit["id"] and start_of_week <= comp["date"] <= end_of_week
+# Pre-populate with some dummy data for demonstration
+def setup_dummy_data():
+    proposal1_id = str(uuid.uuid4())
+    db[proposal1_id] = ProposalDetail(
+        id=proposal1_id,
+        title="Project Phoenix",
+        description="Rebuild the customer portal from scratch for better performance.",
+        success_metric="Achieve a 20% increase in user engagement.",
+        owner_id="user1",
+        status=ProposalStatus.COMMITTED,
+        stakeholder_emails=["stakeholder1@example.com", "stakeholder2@example.com"],
+        commitments=[
+            Commitment(stakeholder_email="stakeholder1@example.com", committed_at=datetime.utcnow()),
+            Commitment(stakeholder_email="stakeholder2@example.com", committed_at=datetime.utcnow())
+        ],
+        milestones=[
+            Milestone(title="Design phase complete", due_date=datetime.utcnow()),
         ]
-        habit_with_completions = {**habit, "completions_this_week": completions}
-        result.append(habit_with_completions)
+    )
+    proposal2_id = str(uuid.uuid4())
+    db[proposal2_id] = ProposalDetail(
+        id=proposal2_id,
+        title="Marketing Campaign Q3",
+        description="Launch a new social media campaign to boost brand awareness.",
+        success_metric="Increase lead generation by 15%.",
+        owner_id="user1",
+        status=ProposalStatus.DRAFT,
+        stakeholder_emails=["stakeholder1@example.com", "marketing_lead@example.com"],
+        commitments=[],
+        milestones=[]
+    )
+    proposal3_id = str(uuid.uuid4())
+    db[proposal3_id] = ProposalDetail(
+        id=proposal3_id,
+        title="Internal Tool Upgrade",
+        description="Upgrade the internal CRM to the latest version.",
+        success_metric="Reduce ticket resolution time by 10%.",
+        owner_id="user2", # Belongs to a different user
+        status=ProposalStatus.DRAFT,
+        stakeholder_emails=["stakeholder3@example.com"],
+        commitments=[],
+        milestones=[]
+    )
 
-    return result
+setup_dummy_data()
+
+
+# --- Simulated Authentication Dependency ---
+
+async def get_current_user() -> Dict[str, str]:
+    """
+    Simulates retrieving the current authenticated user.
+    In a real app, this would decode a JWT token or validate a session.
+    """
+    return {"user_id": "user1", "email": "stakeholder1@example.com"}
+
+
+# --- API Endpoints ---
+
+@router.get("/proposals", response_model=List[Proposal])
+async def get_all_proposals(
+    status: Optional[ProposalStatus] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Retrieve all proposals for the authenticated user.
+    Can be filtered by status, e.g., ?status=COMMITTED.
+    """
+    user_id = current_user["user_id"]
+    user_proposals = [p for p in db.values() if p.owner_id == user_id]
+
+    if status:
+        return [p for p in user_proposals if p.status == status]
+
+    return user_proposals
+
+
+@router.post("/proposals", response_model=Proposal, status_code=status.HTTP_201_CREATED)
+async def create_proposal(
+    proposal_in: ProposalCreate,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Create a new proposal.
+    Body includes title, description, success_metric, and stakeholder emails.
+    """
+    user_id = current_user["user_id"]
+    new_proposal_id = str(uuid.uuid4())
+
+    # Create the full proposal detail object to store in our "DB"
+    db_proposal = ProposalDetail(
+        id=new_proposal_id,
+        owner_id=user_id,
+        status=ProposalStatus.DRAFT,
+        **proposal_in.dict()
+    )
+
+    db[new_proposal_id] = db_proposal
+    return db_proposal
+
+
+@router.get("/proposals/{proposalId}", response_model=ProposalDetail)
+async def get_proposal_by_id(proposalId: str):
+    """
+    Get detailed information for a single proposal, including its
+    commitments and milestones.
+    """
+    proposal = db.get(proposalId)
+    if not proposal:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Proposal with ID {proposalId} not found"
+        )
+    return proposal
+
+
+@router.post("/proposals/{proposalId}/commit", response_model=Commitment)
+async def commit_to_proposal(
+    proposalId: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Allows an invited user to make a commitment (say 'Yes') to a proposal.
+    """
+    proposal = db.get(proposalId)
+    if not proposal:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Proposal with ID {proposalId} not found"
+        )
+
+    user_email = current_user["email"]
+
+    # Check if the user is an invited stakeholder
+    if user_email not in proposal.stakeholder_emails:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not an invited stakeholder for this proposal."
+        )
+
+    # Check if the user has already committed
+    if any(c.stakeholder_email == user_email for c in proposal.commitments):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="You have already committed to this proposal."
+        )
+
+    # Create and add the new commitment
+    new_commitment = Commitment(
+        stakeholder_email=user_email,
+        committed_at=datetime.utcnow()
+    )
+    proposal.commitments.append(new_commitment)
+
+    # Optional: Update proposal status if all stakeholders have committed
+    committed_emails = {c.stakeholder_email for c in proposal.commitments}
+    if set(proposal.stakeholder_emails).issubset(committed_emails):
+        proposal.status = ProposalStatus.COMMITTED
+
+    return new_commitment

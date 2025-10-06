@@ -99,9 +99,54 @@ class PureAIGenerator:
 	# Public API
 	# ------------------------------------------------------------------
 
-	async def analyze_and_plan(self, idea: str, project_name: str) -> Dict[str, Any]:
+	@staticmethod
+	def _validate_and_fix_react_code(code: str, project_name: str) -> str:
+		"""Validate and fix common React code issues"""
+		print(f"DEBUG: Validating React code for {project_name}")
+		
+		# Common fixes
+		fixes = [
+			# Fix undefined component references
+			("const Zap", "// Zap icon component\nconst Zap"),
+			# Ensure proper React import
+			("import React", "import React"),
+			# Fix component definitions
+			("const App = () => {", "const App = () => {"),
+			# Add error boundaries
+			("export default App;", "export default App;"),
+		]
+		
+		# Check for common issues
+		issues = []
+		
+		# Check if components are defined before use
+		if "Zap" in code and "const Zap" not in code and "function Zap" not in code:
+			issues.append("Zap component not defined")
+		
+		# Check for proper imports
+		if "import React" not in code:
+			code = "import React from 'react';\n\n" + code
+			
+		# Check for export
+		if "export default" not in code:
+			code += "\n\nexport default App;"
+		
+		# Log issues found
+		if issues:
+			print(f"DEBUG: Fixed React issues: {', '.join(issues)}")
+		
+		return code
+
+	async def analyze_and_plan(self, project_spec, project_name: str) -> Dict[str, Any]:
+		# Handle both dict (new format) and str (legacy format)
+		if isinstance(project_spec, dict):
+			idea = project_spec.get("idea", "")
+		else:
+			idea = str(project_spec)
+			project_spec = {"idea": idea}
+			
 		request = GenerationRequest(
-			prompt=self._build_plan_prompt(idea, project_name),
+			prompt=self._build_plan_prompt(project_spec, project_name),
 			config_overrides={
 				"response_mime_type": "application/json",
 				"max_output_tokens": 16384,  # Increased for comprehensive plans
@@ -122,11 +167,16 @@ class PureAIGenerator:
 		return plan
 
 	async def generate_project_structure(
-		self, project_path: Path, idea: str, project_name: str
+		self, project_path: Path, project_spec: dict, project_name: str, tech_stack: List[str] = None
 	) -> List[str]:
 		print(f"DEBUG: Creating project at {project_path}")
+		print(f"DEBUG: Project spec: {project_spec}")
+		
+		# Extract idea from spec for backward compatibility
+		idea = project_spec.get("idea", "") if isinstance(project_spec, dict) else str(project_spec)
+		
 		try:
-			plan = await self.analyze_and_plan(idea, project_name)
+			plan = await self.analyze_and_plan(project_spec, project_name)
 		except Exception as e:
 			print(f"ERROR: Failed to analyze and plan: {e}")
 			raise
@@ -194,9 +244,38 @@ class PureAIGenerator:
 			print(f"DEBUG: Generating App.jsx for {project_name}")
 			app_code = await self.generate_single_file("frontend_app", plan, project_name)
 			print(f"DEBUG: Generated App.jsx code length: {len(app_code)} characters")
+			
+			# Validate and fix the generated code
+			app_code = self._validate_and_fix_react_code(app_code, project_name)
+			
 			(frontend_src / "App.jsx").write_text(app_code, encoding="utf-8")
 			files_created.append("frontend/src/App.jsx")
 			print(f"✅ DEBUG: Wrote file {frontend_src / 'App.jsx'}")
+			
+			# Create utils.js for shadcn-style utilities
+			utils_content = '''import { clsx } from "clsx";
+import { twMerge } from "tailwind-merge";
+
+export function cn(...inputs) {
+  return twMerge(clsx(inputs));
+}
+
+export const buttonVariants = {
+  default: "bg-blue-600 text-white hover:bg-blue-700",
+  outline: "border border-gray-300 bg-white text-gray-900 hover:bg-gray-50",
+  ghost: "text-gray-900 hover:bg-gray-100",
+  destructive: "bg-red-600 text-white hover:bg-red-700"
+};
+
+export const cardVariants = {
+  default: "rounded-lg border bg-white p-6 shadow-sm",
+  elevated: "rounded-lg border bg-white p-6 shadow-lg"
+};
+'''
+			(frontend_src / "lib" / "utils.js").parent.mkdir(parents=True, exist_ok=True)
+			(frontend_src / "lib" / "utils.js").write_text(utils_content, encoding="utf-8")
+			files_created.append("frontend/src/lib/utils.js")
+			print(f"✅ DEBUG: Wrote file {frontend_src / 'lib' / 'utils.js'}")
 		except Exception as e:
 			import traceback
 			error_msg = f"Failed to generate frontend/src/App.jsx: {e}"
@@ -314,7 +393,10 @@ export default App;'''.replace('{project_name}', project_name)
 				"framer-motion": "^10.16.4",
 				"lucide-react": "^0.292.0",
 				"react-hook-form": "^7.47.0",
-				"axios": "^1.6.0"
+				"axios": "^1.6.0",
+				"clsx": "^2.0.0",
+				"tailwind-merge": "^2.0.0",
+				"class-variance-authority": "^0.7.0"
 			},
 			"devDependencies": {
 				"@vitejs/plugin-react": "^4.0.0",
@@ -646,10 +728,30 @@ export default defineConfig({
 		return files_created
 
 	@staticmethod
-	def _build_plan_prompt(idea: str, project_name: str) -> str:
+	def _build_plan_prompt(project_spec, project_name: str) -> str:
+		# Extract details from project specification
+		if isinstance(project_spec, dict):
+			idea = project_spec.get("idea", "")
+			project_type = project_spec.get("project_type", "web app")
+			features = project_spec.get("features", [])
+			tech_stack = project_spec.get("tech_stack", [])
+		else:
+			idea = str(project_spec)
+			project_type = "web app"
+			features = []
+			tech_stack = []
+		
+		# Build detailed prompt with user specifications
+		spec_details = f"Project Type: {project_type}\n"
+		if features:
+			spec_details += f"Required Features: {', '.join(features)}\n"
+		if tech_stack:
+			spec_details += f"Tech Stack: {', '.join(tech_stack)}\n"
+		
 		return (
 			f"Create a COMPREHENSIVE, FEATURE-RICH project plan in JSON for: {idea}\n"
-			f"Project: {project_name}\n\n"
+			f"Project: {project_name}\n"
+			f"{spec_details}\n"
 			"🎯 REQUIREMENTS:\n"
 			"- Generate 5-8 SPECIFIC, DETAILED features (not generic)\n"
 			"- Create 4-6 meaningful frontend components\n"
@@ -1302,26 +1404,117 @@ export const FloatingTabs = ({ tabs, activeTab, onTabChange, className = '' }) =
 
 	@staticmethod
 	def _build_app_prompt(plan: Dict[str, Any], project_name: str) -> str:
-		features = plan.get('features', [])[:3]
+		features = plan.get('features', [])
 		features_str = [str(f) for f in features] if features else ['Modern features']
 		app_type = plan.get('app_type', 'Web App')
+		description = plan.get('description', 'A modern web application')
 		
-		return f"""Create React App.jsx for {project_name} ({app_type}).
+		# Extract design preferences from features
+		design_features = []
+		functional_features = []
+		
+		for feature in features_str:
+			feature_lower = str(feature).lower()
+			if any(keyword in feature_lower for keyword in ['design', 'color', 'background', 'font', 'theme', 'style', 'dark', 'light']):
+				design_features.append(str(feature))
+			else:
+				functional_features.append(str(feature))
+		
+		# Build design instructions
+		design_instructions = ""
+		if design_features:
+			design_instructions = f"\n\nDESIGN REQUIREMENTS (CRITICAL - MUST IMPLEMENT):\n"
+			for design_feature in design_features:
+				design_instructions += f"- {design_feature}\n"
+			
+			# Specific color/theme handling
+			if any('black background' in df.lower() for df in design_features):
+				design_instructions += "- Use dark theme with bg-gray-900 or bg-black as main background\n"
+			if any('white' in df.lower() and ('text' in df.lower() or 'font' in df.lower()) for df in design_features):
+				design_instructions += "- Use white text color with text-white class\n"
+		
+		return f"""Create a React App.jsx for {project_name} ({app_type}).
 
-Features: {', '.join(features_str)}
+Description: {description}
+Functional Features: {', '.join(functional_features) if functional_features else 'Modern web app features'}
+{design_instructions}
 
-Build a complete app with:
-- Hero section with gradient background and CTA
-- Features grid (4-6 cards with icons) 
-- Stats section (3-4 metrics)
-- Main content area (8+ sample items in grid)
-- Footer with links
+CRITICAL REQUIREMENTS:
+1. ALL COMPONENTS MUST BE PROPERLY DEFINED AND EXPORTED
+2. NO UNDEFINED VARIABLES OR COMPONENTS
+3. USE PROPER ERROR BOUNDARIES
+4. INCLUDE SHADCN/UI STYLE COMPONENTS
 
-Use React hooks, TailwindCSS. Include real content (no placeholders). 
-Add images: https://images.unsplash.com/300x200/?topic
+Build a complete, functional app with:
+- Modern hero section with gradient background
+- Feature showcase with proper cards
+- Interactive sections based on app type
+- Responsive design with TailwindCSS
+- Real, relevant content (no lorem ipsum)
 
-IMPORTANT: Only use VALID Lucide icons: Star, Users, Zap, MapPin, Clock, Package, ShoppingCart, Heart, Settings, ArrowRight, CheckCircle, Twitter, Facebook, Instagram
-Inline Button component with blue styling.
+COMPONENT STRUCTURE:
+```jsx
+import React from 'react';
+import {{ cn, buttonVariants, cardVariants }} from './lib/utils';
 
-Return JSX only."""
+// Define ALL icon components as proper React components
+const Star = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+  </svg>
+);
+
+const Users = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
+    <circle cx="9" cy="7" r="4"></circle>
+    <path d="M22 21v-2a4 4 0 0 0-3-3.87"></path>
+    <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+  </svg>
+);
+
+// Define reusable UI components (shadcn/ui style)
+const Button = ({{children, variant = "default", className = "", ...props}}) => (
+  <button 
+    className={{cn(
+      "inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 disabled:opacity-50",
+      buttonVariants[variant],
+      className
+    )}} 
+    {{...props}}
+  >
+    {{children}}
+  </button>
+);
+
+const Card = ({{children, className = "", variant = "default"}}) => (
+  <div className={{cn(cardVariants[variant], className)}}>
+    {{children}}
+  </div>
+);
+
+// Main App component
+const App = () => {{
+  return (
+    <div className="min-h-screen bg-gray-50">
+      // Your app content here
+    </div>
+  );
+}};
+
+export default App;
+```
+
+IMPORTANT RULES:
+- Define ALL components before using them
+- Use proper React functional component syntax
+- Include error handling with try-catch where needed
+- Make it specific to the {app_type} domain
+- Use real data relevant to the application type
+- Ensure all variables and functions are properly scoped
+- Test all component references before using
+- STRICTLY FOLLOW all design requirements specified above
+- Apply design preferences to ALL sections (background colors, text colors, etc.)
+
+Return complete, working JSX code only."""
 

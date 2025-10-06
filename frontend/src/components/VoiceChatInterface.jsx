@@ -12,6 +12,9 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [currentTranscript, setCurrentTranscript] = useState('');
   const [projectSummary, setProjectSummary] = useState(null);
+  const [projectHistory, setProjectHistory] = useState([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
@@ -90,6 +93,30 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, [isPlaying, isRecording]);
+
+  // Fetch project history
+  const fetchProjectHistory = async () => {
+    try {
+      setIsLoadingHistory(true);
+      const response = await fetch('http://localhost:8000/api/project-history');
+      const data = await response.json();
+      
+      if (data.success) {
+        setProjectHistory(data.projects || []);
+      } else {
+        console.error('Failed to fetch project history:', data.error);
+      }
+    } catch (error) {
+      console.error('Error fetching project history:', error);
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  };
+
+  // Load project history on component mount
+  useEffect(() => {
+    fetchProjectHistory();
+  }, []);
 
   // Speech-to-Text setup
   const startRecording = async () => {
@@ -430,13 +457,28 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
     addMessage('system', '🚀 Starting project generation...');
     
     try {
-      // Generate a project name from the description
-      const projectName = projectSpec.description
-        ?.split(' ')
-        .slice(0, 3)
-        .join('-')
-        .toLowerCase()
-        .replace(/[^a-z0-9-]/g, '') || 'my-app';
+      // Generate a meaningful project name from the description and type
+      const generateProjectName = (description, type) => {
+        const timestamp = Date.now().toString().slice(-6); // Last 6 digits for uniqueness
+        
+        if (!description || description === 'AI-generated application') {
+          return `app-${timestamp}`;
+        }
+        
+        // Extract key words from description
+        const cleanDesc = description.toLowerCase()
+          .replace(/[^\w\s]/g, '')
+          .split(' ')
+          .filter(word => word.length > 2 && !['the', 'and', 'for', 'with', 'app', 'application'].includes(word))
+          .slice(0, 2)
+          .join('-');
+        
+        const typePrefix = (type || 'app').toLowerCase().split(' ')[0];
+        
+        return cleanDesc ? `${typePrefix}-${cleanDesc}-${timestamp}` : `${typePrefix}-app-${timestamp}`;
+      };
+
+      const projectName = generateProjectName(projectSpec.description, projectSpec.type);
 
       const response = await fetch('/api/build-with-ai', {
         method: 'POST',
@@ -446,7 +488,10 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
         body: JSON.stringify({
           project_name: projectName,
           idea: projectSpec.description,
-          tech_stack: projectSpec.tech_stack || []
+          tech_stack: projectSpec.tech_stack || [],
+          project_type: projectSpec.type || 'web app',
+          features: projectSpec.features || [],
+          requirements: projectSpec
         })
       });
       
@@ -458,6 +503,9 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
       
       if (result.success) {
         addMessage('system', `✅ Project "${projectName}" generated successfully!`);
+        
+        // Refresh project history to include the new project
+        fetchProjectHistory();
         
         // Redirect to Monaco editor
         setTimeout(() => {
@@ -1015,6 +1063,157 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
                 </div>
               )}
 
+              {/* Project History Section */}
+              <div style={{ marginBottom: '1.5rem' }}>
+                <div style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'space-between', 
+                  marginBottom: '0.75rem' 
+                }}>
+                  <label style={{ 
+                    fontSize: '0.85rem', 
+                    color: 'var(--text-secondary)', 
+                    fontWeight: '600' 
+                  }}>
+                    📂 Your Projects
+                  </label>
+                  <button
+                    onClick={() => setShowHistory(!showHistory)}
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.08)',
+                      border: '1px solid rgba(255, 255, 255, 0.15)',
+                      borderRadius: '0.375rem',
+                      color: 'var(--text-secondary)',
+                      fontSize: '0.75rem',
+                      padding: '0.25rem 0.5rem',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {showHistory ? 'Hide' : `Show (${projectHistory.length})`}
+                  </button>
+                </div>
+                
+                {showHistory && (
+                  <div style={{
+                    background: 'rgba(255, 255, 255, 0.04)',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                    borderRadius: '0.5rem',
+                    maxHeight: '200px',
+                    overflowY: 'auto',
+                  }}>
+                    {isLoadingHistory ? (
+                      <div style={{ 
+                        padding: '1rem', 
+                        textAlign: 'center', 
+                        color: 'var(--text-secondary)',
+                        fontSize: '0.85rem'
+                      }}>
+                        <Loader size={16} className="animate-spin" style={{ marginRight: '0.5rem' }} />
+                        Loading projects...
+                      </div>
+                    ) : projectHistory.length === 0 ? (
+                      <div style={{ 
+                        padding: '1rem', 
+                        textAlign: 'center', 
+                        color: 'var(--text-secondary)',
+                        fontSize: '0.85rem'
+                      }}>
+                        No projects yet. Build your first app! 🚀
+                      </div>
+                    ) : (
+                      <div style={{ padding: '0.5rem' }}>
+                        {projectHistory.slice(0, 5).map((project, index) => (
+                          <div
+                            key={project.slug}
+                            style={{
+                              padding: '0.75rem',
+                              borderRadius: '0.375rem',
+                              marginBottom: '0.5rem',
+                              background: 'rgba(255, 255, 255, 0.02)',
+                              border: '1px solid rgba(255, 255, 255, 0.05)',
+                              cursor: 'pointer',
+                              transition: 'all 0.2s ease',
+                            }}
+                            onMouseEnter={(e) => {
+                              e.target.style.background = 'rgba(255, 255, 255, 0.08)';
+                              e.target.style.borderColor = 'rgba(255, 255, 255, 0.15)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.target.style.background = 'rgba(255, 255, 255, 0.02)';
+                              e.target.style.borderColor = 'rgba(255, 255, 255, 0.05)';
+                            }}
+                          >
+                            <div style={{ 
+                              fontSize: '0.8rem', 
+                              fontWeight: '600', 
+                              color: 'var(--text-primary)',
+                              marginBottom: '0.25rem'
+                            }}>
+                              {project.name}
+                            </div>
+                            <div style={{ 
+                              fontSize: '0.7rem', 
+                              color: 'var(--text-secondary)',
+                              marginBottom: '0.5rem'
+                            }}>
+                              {project.tech_stack.join(', ') || 'Web App'} • {project.created_date_formatted}
+                            </div>
+                            <div style={{ display: 'flex', gap: '0.5rem' }}>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  window.open(project.preview_url, '_blank');
+                                }}
+                                style={{
+                                  background: 'rgba(59, 130, 246, 0.2)',
+                                  border: '1px solid rgba(59, 130, 246, 0.3)',
+                                  borderRadius: '0.25rem',
+                                  color: '#60a5fa',
+                                  fontSize: '0.7rem',
+                                  padding: '0.25rem 0.5rem',
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                👁️ Preview
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  window.location.href = project.editor_url;
+                                }}
+                                style={{
+                                  background: 'rgba(168, 85, 247, 0.2)',
+                                  border: '1px solid rgba(168, 85, 247, 0.3)',
+                                  borderRadius: '0.25rem',
+                                  color: '#c084fc',
+                                  fontSize: '0.7rem',
+                                  padding: '0.25rem 0.5rem',
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                ✏️ Edit
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                        
+                        {projectHistory.length > 5 && (
+                          <div style={{ 
+                            textAlign: 'center', 
+                            padding: '0.5rem',
+                            fontSize: '0.75rem',
+                            color: 'var(--text-secondary)'
+                          }}>
+                            +{projectHistory.length - 5} more projects
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {/* Text Input Section */}
               <div className="input-section">
                 <div className="text-input-container">
@@ -1041,7 +1240,7 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
                 <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textAlign: 'center', marginTop: '0.5rem' }}>
                   Click the orb to speak • Type as backup
                   <br />
-                  🌍 Supports 12+ languages automatically
+                  �🇸 Optimized for English language
                 </div>
               </div>
             </div>

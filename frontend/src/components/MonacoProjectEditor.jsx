@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import MonacoEditor from '@monaco-editor/react';
+import PageWrapper from './PageWrapper';
 
 // Add CSS animations for live generation
 const styleSheet = document.createElement('style');
@@ -383,7 +385,20 @@ const styles = {
   }
 };
 
-const MonacoProjectEditor = ({ project, onClose }) => {
+const MonacoProjectEditor = () => {
+  const { projectName } = useParams();
+  const navigate = useNavigate();
+  
+  // Handle close action - navigate back to home
+  const handleClose = () => {
+    console.log('Closing Monaco editor, navigating to home');
+    navigate('/home');
+  };
+  
+  // Create project object from URL parameter
+  const [project, setProject] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  
   const [fileTree, setFileTree] = useState([]);
   const [selectedFile, setSelectedFile] = useState(null);
   const [fileContents, setFileContents] = useState({});
@@ -391,6 +406,8 @@ const MonacoProjectEditor = ({ project, onClose }) => {
   const [errors, setErrors] = useState([]);
   const [isBuilding, setIsBuilding] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
+  const [isAutoFixing, setIsAutoFixing] = useState(false);
+  const [hasErrors, setHasErrors] = useState(false);
   const [previewUrl, setPreviewUrl] = useState(null);
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
@@ -403,6 +420,26 @@ const MonacoProjectEditor = ({ project, onClose }) => {
   const chatEndRef = useRef(null);
   const wsRef = useRef(null);
   const connectTimerRef = useRef(null);
+
+  // Initialize project from URL parameter
+  useEffect(() => {
+    console.log('MonacoProjectEditor initializing with projectName:', projectName);
+    if (projectName) {
+      const projectData = {
+        name: projectName,
+        tech_stack: ['React', 'FastAPI'], // Default tech stack
+        isBuilding: false,
+        preview_url: null
+      };
+      console.log('Setting project data:', projectData);
+      setProject(projectData);
+      setIsLoading(false);
+    } else {
+      // No project name in URL, redirect to home
+      console.log('No project name found, redirecting to home');
+      navigate('/home');
+    }
+  }, [projectName, navigate]);
 
   // Initialize project
   useEffect(() => {
@@ -455,6 +492,31 @@ Just tell me what you'd like to do with your project!`
       };
     }
   }, [project]);
+
+  // Handle error notifications
+  useEffect(() => {
+    if (hasErrors && errors.length > 0) {
+      const errorMessage = {
+        role: 'assistant',
+        content: `⚠️ I detected ${errors.length} error(s) in your project:
+
+${errors.slice(-3).map(err => `• ${err.message}`).join('\n')}
+
+💡 I can automatically fix common issues! Click the "Auto-Fix" button in the toolbar above, or just ask me to "fix the errors" and I'll take care of it for you.`
+      };
+      
+      // Only add if we don't already have a recent error message
+      setChatMessages(prev => {
+        const lastMessage = prev[prev.length - 1];
+        if (lastMessage && lastMessage.content.includes('detected') && lastMessage.content.includes('error')) {
+          // Replace the last error message with the updated one
+          return [...prev.slice(0, -1), errorMessage];
+        } else {
+          return [...prev, errorMessage];
+        }
+      });
+    }
+  }, [hasErrors, errors.length]);
 
   // Keep chat scrolled to the latest message
   useEffect(() => {
@@ -521,6 +583,9 @@ Just tell me what you'd like to do with your project!`
           setIsBuilding(false);
           setIsRunning(true);
           setTerminalOutput(prev => [...prev, `🌐 Live preview ready!`]);
+          // Clear errors on successful preview
+          setHasErrors(false);
+          setErrors([]);
           break;
         case 'status':
           if (data.phase === 'ready') {
@@ -565,10 +630,33 @@ Just tell me what you'd like to do with your project!`
         case 'terminal_output':
           // Show general terminal output
           setTerminalOutput(prev => [...prev, data.message]);
+          
+          // Check for error patterns in terminal output
+          if (data.level === 'error' || data.message.includes('Error:') || 
+              data.message.includes('Failed to') || data.message.includes('Cannot find')) {
+            setHasErrors(true);
+            setErrors(prev => [...prev, {
+              message: data.message,
+              severity: 'error',
+              timestamp: new Date().toISOString()
+            }]);
+          }
           break;
         case 'file_changed':
           // Reload file tree when files change
           initializeProject();
+          break;
+        case 'build_error':
+          // Handle build errors specifically
+          setHasErrors(true);
+          setErrors(prev => [...prev, {
+            message: data.message || 'Build failed',
+            file: data.file,
+            line: data.line,
+            severity: 'error',
+            timestamp: new Date().toISOString()
+          }]);
+          setTerminalOutput(prev => [...prev, `❌ ${data.message}`]);
           break;
       }
       };
@@ -591,11 +679,72 @@ Just tell me what you'd like to do with your project!`
       if (result.success && result.preview_url) {
         setPreviewUrl(result.preview_url);
         setIsRunning(true);
+        // Clear previous errors on successful run
+        setHasErrors(false);
+        setErrors([]);
+      } else {
+        // Handle API-level errors
+        const errorMsg = result.error || 'Failed to run project';
+        setHasErrors(true);
+        setErrors(prev => [...prev, {
+          message: errorMsg,
+          severity: 'error',
+          timestamp: new Date().toISOString()
+        }]);
       }
     } catch (error) {
       console.error('Failed to run project:', error);
     } finally {
       setIsBuilding(false);
+    }
+  };
+
+  const autoFixErrors = async () => {
+    setIsAutoFixing(true);
+    try {
+      const response = await fetch(`http://localhost:8000/api/auto-fix-project-errors?project_name=${encodeURIComponent(project.name)}`, {
+        method: 'POST'
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        // Add success message to chat
+        const successMessage = {
+          role: 'assistant',
+          content: `🔧 Auto-fix completed! ${result.message}
+
+${result.fixes_applied && result.fixes_applied.length > 0 ? `Fixes applied:
+${result.fixes_applied.map(fix => `• ${fix}`).join('\n')}` : ''}
+
+Your project has been automatically repaired. Try running it again!`
+        };
+        setChatMessages(prev => [...prev, successMessage]);
+        
+        // Reload project structure and clear errors
+        setErrors([]);
+        setHasErrors(false);
+        initializeProject();
+        
+        // Auto-run the project after fixing
+        setTimeout(() => {
+          runProject();
+        }, 1000);
+      } else {
+        const errorMessage = {
+          role: 'assistant',
+          content: `❌ Auto-fix failed: ${result.error || 'Unknown error'}`
+        };
+        setChatMessages(prev => [...prev, errorMessage]);
+      }
+    } catch (error) {
+      const errorMessage = {
+        role: 'assistant',
+        content: `❌ Failed to auto-fix errors: ${error.message}`
+      };
+      setChatMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setIsAutoFixing(false);
     }
   };
 
@@ -666,6 +815,27 @@ Just tell me what you'd like to do with your project!`
     const messageToSend = chatInput;
     setChatInput('');
     setIsAiThinking(true);
+    
+    // Check if user is asking for error fixing
+    const errorFixKeywords = ['fix error', 'fix the error', 'fix bug', 'fix issue', 'auto fix', 'repair', 'fix problems'];
+    const isErrorFixRequest = errorFixKeywords.some(keyword => 
+      messageToSend.toLowerCase().includes(keyword)
+    );
+    
+    if (isErrorFixRequest && hasErrors) {
+      setIsAiThinking(false);
+      const fixMessage = {
+        role: 'assistant',
+        content: `🔧 I'll help you fix those errors! Let me run the auto-fix tool for you.`
+      };
+      setChatMessages(prev => [...prev, fixMessage]);
+      
+      // Trigger auto-fix
+      setTimeout(() => {
+        autoFixErrors();
+      }, 500);
+      return;
+    }
     
     try {
       const response = await fetch('http://localhost:8000/api/ai-project-assistant', {
@@ -757,11 +927,52 @@ The changes have been applied and your preview has been updated.`
     return langMap[ext] || 'plaintext';
   };
 
+  // Show loading state while project is being initialized
+  if (isLoading || !project) {
+    return (
+      <div style={styles.monacoProjectEditor}>
+        <div style={styles.editorHeader}>
+          <div style={styles.editorTitle}>
+            <span style={styles.projectIcon}>⏳</span>
+            <span style={styles.projectName}>Loading project...</span>
+          </div>
+        </div>
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'center', 
+          flex: 1,
+          fontSize: '18px',
+          color: '#666'
+        }}>
+          🚀 Initializing {projectName}...
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div style={styles.monacoProjectEditor}>
+    <PageWrapper>
+      <div style={styles.monacoProjectEditor}>
       {/* Header */}
       <div style={styles.editorHeader}>
         <div style={styles.editorTitle}>
+          <button 
+            style={{
+              background: 'none',
+              border: 'none',
+              color: '#ffffff',
+              fontSize: '18px',
+              cursor: 'pointer',
+              marginRight: '12px',
+              padding: '4px',
+              borderRadius: '4px',
+            }}
+            onClick={handleClose}
+            title="Back to Home"
+          >
+            ≡
+          </button>
           <span style={styles.projectIcon}>🚀</span>
           <span style={styles.projectName}>{project.name}</span>
           <span style={styles.projectType}>({project.tech_stack?.join(', ') || 'Mixed'})</span>
@@ -782,6 +993,22 @@ The changes have been applied and your preview has been updated.`
             {isBuilding ? 'Building' : 'Run'}
           </button>
           
+          {hasErrors && (
+            <button 
+              style={{
+                ...styles.btnEditorAction,
+                backgroundColor: '#ff6b35',
+                ...(isAutoFixing ? { opacity: 0.5 } : {})
+              }}
+              onClick={autoFixErrors}
+              disabled={isAutoFixing}
+              title="Auto-fix detected errors"
+            >
+              {isAutoFixing ? '🔧' : '🛠️'} 
+              {isAutoFixing ? 'Fixing...' : 'Auto-Fix'}
+            </button>
+          )}
+          
           {previewUrl && (
             <button 
               style={{...styles.btnEditorAction, ...styles.btnEditorActionPreview}}
@@ -794,7 +1021,7 @@ The changes have been applied and your preview has been updated.`
           
           <button 
             style={{...styles.btnEditorAction, ...styles.btnEditorActionClose}}
-            onClick={onClose}
+            onClick={handleClose}
             title="Close Editor"
           >
             ✕
@@ -1113,6 +1340,7 @@ The changes have been applied and your preview has been updated.`
         </div>
       </div>
     </div>
+    </PageWrapper>
   );
 };
 

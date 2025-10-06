@@ -1,102 +1,115 @@
-from datetime import date, datetime
+import uuid
+from datetime import datetime
 from enum import Enum
-from typing import Optional
-from uuid import UUID
+from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict
-
-
-# A base model with ORM mode enabled
-class OrmBase(BaseModel):
-    """Base Pydantic model with from_attributes=True for ORM compatibility."""
-    model_config = ConfigDict(from_attributes=True)
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
-# ------------------ User Models ------------------
+# --- Enums ---
 
-class UserBase(OrmBase):
-    """Base model for User, containing common fields."""
-    email: str
+class ProposalStatus(str, Enum):
+    """Enumeration for the status of a Proposal."""
+    DRAFT = "DRAFT"
+    PENDING = "PENDING"
+    COMMITTED = "COMMITTED"
+    COMPLETED = "COMPLETED"
+    ARCHIVED = "ARCHIVED"
+
+
+# --- User Models ---
+
+class UserBase(BaseModel):
+    """Base model for User with common attributes."""
+    email: EmailStr
+    name: str
+    avatar_url: Optional[str] = None
 
 
 class UserCreate(UserBase):
-    """Model for creating a new user. Expects a password."""
-    hashed_password: str
+    """Model for creating a new user. Expects a plain password."""
+    password: str
 
 
-class UserUpdate(OrmBase):
-    """Model for updating a user. All fields are optional."""
-    email: Optional[str] = None
-    hashed_password: Optional[str] = None
+class UserUpdate(BaseModel):
+    """Model for updating an existing user. All fields are optional."""
+    email: Optional[EmailStr] = None
+    name: Optional[str] = None
+    avatar_url: Optional[str] = None
+    password: Optional[str] = None  # For password change operations
 
 
-class UserResponse(UserBase):
-    """Model for returning a user in API responses."""
-    id: UUID
+class User(UserBase):
+    """Response model for a User. Excludes sensitive data like password_hash."""
+    id: uuid.UUID
     created_at: datetime
 
-
-# ------------------ Goal Models ------------------
-
-class GoalStatusEnum(str, Enum):
-    """Enum for the status of a goal."""
-    ACTIVE = "active"
-    COMPLETED = "completed"
-    ARCHIVED = "archived"
+    # Pydantic V2 config to allow ORM model mapping
+    model_config = ConfigDict(from_attributes=True)
 
 
-class GoalBase(OrmBase):
-    """Base model for Goal, containing common fields."""
+# --- Proposal Models ---
+
+class ProposalBase(BaseModel):
+    """Base model for Proposal with common attributes."""
     title: str
-    description: str
-    category: str
-    target_date: date
-    status: GoalStatusEnum = GoalStatusEnum.ACTIVE
+    description: Optional[Any] = None  # Allows for flexible JSON content
+    success_metric: str
+    status: ProposalStatus = Field(default=ProposalStatus.DRAFT)
 
 
-class GoalCreate(GoalBase):
-    """Model for creating a new goal."""
-    user_id: UUID
+class ProposalCreate(ProposalBase):
+    """Model for creating a new proposal.
+    
+    The creator_id will typically be derived from the authenticated user context
+    in the API endpoint, not from the request body.
+    """
+    pass
 
 
-class GoalUpdate(OrmBase):
-    """Model for updating a goal. All fields are optional."""
+class ProposalUpdate(BaseModel):
+    """Model for updating an existing proposal. All fields are optional."""
     title: Optional[str] = None
-    description: Optional[str] = None
-    category: Optional[str] = None
-    target_date: Optional[date] = None
-    status: Optional[GoalStatusEnum] = None
+    description: Optional[Any] = None
+    success_metric: Optional[str] = None
+    status: Optional[ProposalStatus] = None
 
 
-class GoalResponse(GoalBase):
-    """Model for returning a goal in API responses."""
-    id: UUID
-    user_id: UUID
+class Proposal(ProposalBase):
+    """Response model for a Proposal."""
+    id: uuid.UUID
+    creator_id: uuid.UUID
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
 
 
-# ------------------ Milestone Models ------------------
+# --- Commitment Models ---
 
-class MilestoneBase(OrmBase):
-    """Base model for Milestone, containing common fields."""
-    title: str
-    target_date: date
-
-
-class MilestoneCreate(MilestoneBase):
-    """Model for creating a new milestone."""
-    goal_id: UUID
-    is_completed: bool = False
+class CommitmentBase(BaseModel):
+    """Base model for Commitment with common attributes."""
+    role: str
 
 
-class MilestoneUpdate(OrmBase):
-    """Model for updating a milestone. All fields are optional."""
-    title: Optional[str] = None
-    is_completed: Optional[bool] = None
-    target_date: Optional[date] = None
+class CommitmentCreate(CommitmentBase):
+    """Model for creating a new commitment.
+    
+    Requires user_id and proposal_id to establish the relationship.
+    """
+    user_id: uuid.UUID
+    proposal_id: uuid.UUID
 
 
-class MilestoneResponse(MilestoneBase):
-    """Model for returning a milestone in API responses."""
-    id: UUID
-    goal_id: UUID
-    is_completed: bool
+class CommitmentUpdate(BaseModel):
+    """Model for updating an existing commitment. Role is optional."""
+    role: Optional[str] = None
+
+
+class Commitment(CommitmentBase):
+    """Response model for a Commitment."""
+    id: uuid.UUID
+    user_id: uuid.UUID
+    proposal_id: uuid.UUID
+    commitment_timestamp: datetime
+
+    model_config = ConfigDict(from_attributes=True)
