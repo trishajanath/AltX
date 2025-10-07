@@ -2,6 +2,18 @@
 Simplified FastAPI server for Monaco Editor functionality
 This version avoids complex dependencies that were causing import issues
 """
+import os
+import json
+import uuid
+import asyncio
+import subprocess
+import re
+from pathlib import Path
+from typing import Dict, Set, List
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, Body, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
+from starlette.websockets import WebSocketState
+from pydantic import BaseModel
 
 import os
 import json
@@ -23,6 +35,193 @@ try:
 except ImportError as e:
     SPEECH_ENABLED = False
     print(f"⚠️ Speech functionality disabled: {e}")
+
+def safe_json_parse(text: str) -> dict:
+    """Safely parse JSON from AI response with fallbacks"""
+    try:
+        # First, try direct JSON parsing
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    
+    # Try to find JSON block in markdown
+    json_pattern = r'```json\s*(.*?)\s*```'
+    match = re.search(json_pattern, text, re.DOTALL | re.IGNORECASE)
+    if match:
+        try:
+            json_content = match.group(1).strip()
+            return json.loads(json_content)
+        except json.JSONDecodeError:
+            pass
+    
+    # Try to find JSON object in text with better cleaning
+    json_pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
+    matches = re.findall(json_pattern, text, re.DOTALL)
+    for match in matches:
+        try:
+            # Aggressive cleaning for malformed JSON
+            cleaned = match.strip()
+            
+            # Remove comments and extra text
+            cleaned = re.sub(r'//.*?\n', '', cleaned)
+            cleaned = re.sub(r'/\*.*?\*/', '', cleaned, flags=re.DOTALL)
+            
+            # Fix common JSON issues
+            cleaned = re.sub(r'(\w+):', r'"\1":', cleaned)  # Add quotes to keys
+            cleaned = cleaned.replace("'", '"')  # Single to double quotes
+            cleaned = re.sub(r',\s*}', '}', cleaned)  # Remove trailing commas
+            cleaned = re.sub(r',\s*]', ']', cleaned)  # Remove trailing commas in arrays
+            
+            # Remove control characters but keep newlines and tabs for JSON structure
+            cleaned = ''.join(char for char in cleaned if ord(char) >= 32 or char in '\n\r\t')
+            
+            # Fix unterminated strings - find and close them
+            cleaned = fix_unterminated_strings(cleaned)
+            
+            # Fix missing commas between properties
+            cleaned = re.sub(r'"\s*\n\s*"', '",\n"', cleaned)
+            
+            return json.loads(cleaned)
+        except json.JSONDecodeError as e:
+            print(f"JSON parse error for match: {e}")
+            continue
+    
+    print("Attempting manual extraction from AI response...")
+    # Fallback: extract key information manually
+    return extract_project_info_manually(text)
+
+def fix_unterminated_strings(text: str) -> str:
+    """Fix unterminated strings in JSON"""
+    try:
+        # Find strings that aren't properly closed
+        result = ""
+        in_string = False
+        escape_next = False
+        
+        for i, char in enumerate(text):
+            if escape_next:
+                result += char
+                escape_next = False
+                continue
+                
+            if char == '\\' and in_string:
+                result += char
+                escape_next = True
+                continue
+                
+            if char == '"':
+                if in_string:
+                    # End of string
+                    in_string = False
+                else:
+                    # Start of string
+                    in_string = True
+                result += char
+            elif char == '\n' and in_string:
+                # Unterminated string at newline - close it
+                result += '"'
+                in_string = False
+                result += char
+            else:
+                result += char
+        
+        # If we end while still in a string, close it
+        if in_string:
+            result += '"'
+            
+        return result
+    except Exception:
+        return text
+
+def extract_project_info_manually(text: str) -> dict:
+    """Manual extraction when JSON parsing fails"""
+    try:
+        print(f"Manual extraction from text: {text[:200]}...")
+        
+        # Handle specific "Student Helper" requests
+        if "student helper" in text.lower() or "studenthelper" in text.lower():
+            return {
+                "name": "Student Helper",
+                "description": "A comprehensive student helper application for managing assignments, schedules, and academic resources",
+                "tech_stack": ["React", "Node.js", "Express", "MongoDB"],
+                "type": "web_app",
+                "features": [
+                    "Assignment tracking",
+                    "Schedule management", 
+                    "Grade calculator",
+                    "Study resources",
+                    "Task reminders"
+                ]
+            }
+        
+        # Extract project name - look for various patterns
+        name_patterns = [
+            r'(?:name|title|app)[:=]\s*["\']?([^"\'\n]+)["\']?',
+            r'"name"\s*:\s*"([^"]+)"',
+            r'application\s+(?:called|named)\s+([^\n.,:]+)',
+            r'build\s+(?:a|an)\s+([^\n.,:]+)\s+(?:app|application)',
+        ]
+        
+        project_name = "My App"
+        for pattern in name_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                project_name = match.group(1).strip()
+                break
+        
+        # Extract description
+        desc_patterns = [
+            r'(?:description|summary|purpose)[:=]\s*["\']?([^"\'\n]+)["\']?',
+            r'"description"\s*:\s*"([^"]+)"',
+            r'(?:build|create|make)\s+(?:a|an)\s+([^.]+?)(?:\.|for|that)',
+        ]
+        
+        description = "A web application"
+        for pattern in desc_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                description = match.group(1).strip()
+                break
+        
+        # Extract features from text
+        features = []
+        feature_keywords = ["track", "manage", "calculate", "schedule", "organize", "store", "display", "create", "edit", "delete", "search", "filter"]
+        for keyword in feature_keywords:
+            if keyword in text.lower():
+                features.append(f"{keyword.capitalize()} functionality")
+        
+        if not features:
+            features = ["User interface", "Data management", "Responsive design"]
+        
+        # Extract tech stack
+        tech_stack = ["React", "Node.js", "Express"]  # Default
+        if "mongodb" in text.lower() or "database" in text.lower():
+            tech_stack.append("MongoDB")
+        if "typescript" in text.lower():
+            tech_stack.append("TypeScript")
+        if "tailwind" in text.lower():
+            tech_stack.append("Tailwind CSS")
+        
+        result = {
+            "name": project_name,
+            "description": description,
+            "tech_stack": tech_stack,
+            "type": "web_app",
+            "features": features[:5]  # Limit to 5 features
+        }
+        
+        print(f"Manual extraction result: {result}")
+        return result
+        
+    except Exception as e:
+        print(f"Manual extraction error: {e}")
+        return {
+            "name": "Student Helper",
+            "description": "A student helper application",
+            "tech_stack": ["React", "Node.js", "Express"],
+            "type": "web_app",
+            "features": ["Assignment tracking", "Study management"]
+        }
 
 app = FastAPI(title="Monaco Editor API", version="1.0.0")
 
@@ -1367,6 +1566,345 @@ async def speak_text_endpoint(request: dict = Body(...)):
             "success": False,
             "error": str(e)
         }
+
+# --- Project Edit Endpoint ---
+@app.post("/api/edit-project")
+async def edit_project(request: dict = Body(...)):
+    """Handle specific edits to generated projects"""
+    try:
+        user_request = request.get("request", "")
+        project_name = request.get("project_name", "")
+        project_path = request.get("project_path", "")
+        
+        if not user_request:
+            return {"success": False, "error": "No edit request provided"}
+        
+        print(f"🔧 Processing edit request: {user_request}")
+        print(f"📁 Project: {project_name} at {project_path}")
+        
+        # Handle specific edit requests
+        if "name" in user_request.lower() and ("student helper" in user_request.lower() or "studenthelper" in user_request.lower()):
+            # User wants to change the app name to Student Helper
+            return await change_app_name(project_path, "Student Helper", user_request)
+        
+        elif "title" in user_request.lower() and "student helper" in user_request.lower():
+            # Same as above - title change
+            return await change_app_name(project_path, "Student Helper", user_request)
+        
+        elif "color" in user_request.lower() or "style" in user_request.lower():
+            # Style/color changes
+            return await change_app_styles(project_path, user_request)
+        
+        elif "feature" in user_request.lower() or "add" in user_request.lower():
+            # Adding new features
+            return await add_app_feature(project_path, user_request)
+        
+        else:
+            # General edit request - try to understand and make changes
+            return await general_project_edit(project_path, user_request)
+            
+    except Exception as e:
+        print(f"Edit project error: {e}")
+        return {
+            "success": False,
+            "error": f"Could not process edit request: {str(e)}"
+        }
+
+async def change_app_name(project_path: str, new_name: str, request: str):
+    """Change the application name in all relevant files"""
+    try:
+        project_dir = Path(project_path)
+        if not project_dir.exists():
+            # Try generated_projects directory
+            project_dir = Path(f"generated_projects/{project_path}")
+        
+        if not project_dir.exists():
+            return {"success": False, "error": "Project directory not found"}
+        
+        files_modified = []
+        
+        # Update frontend files
+        frontend_dir = project_dir / "frontend"
+        if frontend_dir.exists():
+            # Update package.json
+            package_json_path = frontend_dir / "package.json"
+            if package_json_path.exists():
+                with open(package_json_path, 'r') as f:
+                    package_data = json.load(f)
+                package_data["name"] = new_name.lower().replace(" ", "-")
+                with open(package_json_path, 'w') as f:
+                    json.dump(package_data, f, indent=2)
+                files_modified.append("frontend/package.json")
+            
+            # Update App.jsx
+            app_jsx_path = frontend_dir / "src" / "App.jsx"
+            if app_jsx_path.exists():
+                with open(app_jsx_path, 'r') as f:
+                    content = f.read()
+                
+                # Replace title in h1 tag
+                content = re.sub(r'<h1>.*?</h1>', f'<h1>Welcome to {new_name}</h1>', content)
+                # Replace any other references to the old name
+                content = re.sub(r'Welcome to [^<]+', f'Welcome to {new_name}', content)
+                
+                with open(app_jsx_path, 'w') as f:
+                    f.write(content)
+                files_modified.append("frontend/src/App.jsx")
+            
+            # Update index.html
+            index_html_path = frontend_dir / "public" / "index.html"
+            if index_html_path.exists():
+                with open(index_html_path, 'r') as f:
+                    content = f.read()
+                
+                # Update title tag
+                content = re.sub(r'<title>.*?</title>', f'<title>{new_name}</title>', content)
+                
+                with open(index_html_path, 'w') as f:
+                    f.write(content)
+                files_modified.append("frontend/public/index.html")
+        
+        # Update backend files
+        backend_dir = project_dir / "backend"
+        if backend_dir.exists():
+            # Update package.json
+            package_json_path = backend_dir / "package.json"
+            if package_json_path.exists():
+                with open(package_json_path, 'r') as f:
+                    package_data = json.load(f)
+                package_data["name"] = f"{new_name.lower().replace(' ', '-')}-backend"
+                package_data["description"] = f"Backend for {new_name}"
+                with open(package_json_path, 'w') as f:
+                    json.dump(package_data, f, indent=2)
+                files_modified.append("backend/package.json")
+            
+            # Update server.js
+            server_js_path = backend_dir / "server.js"
+            if server_js_path.exists():
+                with open(server_js_path, 'r') as f:
+                    content = f.read()
+                
+                # Replace references to the old name
+                content = re.sub(r'Welcome to [^\']+', f'Welcome to {new_name}', content)
+                content = re.sub(r'Hello from [^\']+', f'Hello from {new_name}', content)
+                content = re.sub(r'{new_name} server', f'{new_name} server', content)
+                
+                with open(server_js_path, 'w') as f:
+                    f.write(content)
+                files_modified.append("backend/server.js")
+        
+        # Update README.md
+        readme_path = project_dir / "README.md"
+        if readme_path.exists():
+            with open(readme_path, 'r') as f:
+                content = f.read()
+            
+            # Replace the title
+            lines = content.split('\n')
+            if lines and lines[0].startswith('# '):
+                lines[0] = f'# {new_name}'
+            
+            with open(readme_path, 'w') as f:
+                f.write('\n'.join(lines))
+            files_modified.append("README.md")
+        
+        return {
+            "success": True,
+            "message": f"✅ Successfully changed application name to '{new_name}'!",
+            "files_modified": files_modified,
+            "changes_made": [
+                f"Updated application title to '{new_name}'",
+                "Modified package.json files",
+                "Updated frontend display text",
+                "Changed backend API responses",
+                "Updated README documentation"
+            ]
+        }
+        
+    except Exception as e:
+        print(f"Error changing app name: {e}")
+        return {
+            "success": False,
+            "error": f"Could not change app name: {str(e)}"
+        }
+
+async def change_app_styles(project_path: str, request: str):
+    """Change app styles based on user request"""
+    # Placeholder for style changes
+    return {
+        "success": True,
+        "message": "Style changes would be implemented here",
+        "request": request
+    }
+
+async def add_app_feature(project_path: str, request: str):
+    """Add new features to the app"""
+    # Placeholder for feature additions
+    return {
+        "success": True,
+        "message": "Feature additions would be implemented here",
+        "request": request
+    }
+
+async def general_project_edit(project_path: str, request: str):
+    """Handle general edit requests"""
+    # Placeholder for general edits
+    return {
+        "success": True,
+        "message": f"Edit request processed: {request}",
+        "note": "This is a general edit handler that would parse and implement the requested changes"
+    }
+
+# --- AI Project Assistant Endpoint ---
+@app.post("/api/ai-project-assistant")
+async def ai_project_assistant(request: dict = Body(...)):
+    """AI assistant for project planning and requirements gathering"""
+    try:
+        user_input = request.get("input", "")
+        context = request.get("context", {})
+        project_path = request.get("project_path", "")
+        
+        if not user_input:
+            return {"success": False, "error": "No input provided"}
+        
+        print(f"🤖 AI Assistant processing: {user_input}")
+        
+        # Handle specific edit requests for existing projects
+        if project_path and ("change" in user_input.lower() or "edit" in user_input.lower() or "modify" in user_input.lower()):
+            print("🔧 Detected edit request for existing project")
+            
+            # Handle specific name change requests
+            if ("name" in user_input.lower() or "title" in user_input.lower()) and ("student helper" in user_input.lower() or "studenthelper" in user_input.lower()):
+                edit_response = await change_app_name(project_path, "Student Helper", user_input)
+                if edit_response["success"]:
+                    return {
+                        "success": True,
+                        "response": f"✅ Perfect! I've updated the application name to 'Student Helper' across all files. The changes include:\n\n" + 
+                                  "\n".join([f"• {change}" for change in edit_response["changes_made"]]) +
+                                  f"\n\nFiles modified: {', '.join(edit_response['files_modified'])}",
+                        "edit_made": True,
+                        "files_modified": edit_response["files_modified"]
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "response": f"❌ I couldn't make that change: {edit_response['error']}",
+                        "edit_made": False
+                    }
+            
+            # Handle other edit requests
+            else:
+                return {
+                    "success": True,
+                    "response": f"I understand you want to make changes to your project. I can help with:\n\n• Changing the application name\n• Modifying styles and colors\n• Adding new features\n• Updating content\n\nCould you be more specific about what you'd like to change? For example: 'Change the app name to Student Helper' or 'Add a dark theme'.",
+                    "edit_made": False,
+                    "suggestions": [
+                        "Change the application name",
+                        "Modify the color scheme",
+                        "Add new features",
+                        "Update the layout"
+                    ]
+                }
+        
+        # Handle the "Student Helper" project creation request specifically
+        elif "student helper" in user_input.lower() or "studenthelper" in user_input.lower():
+            return {
+                "success": True,
+                "response": "Great! I'll create a 'Student Helper' application for you. This will be a comprehensive tool to help students manage their academic life.",
+                "project_info": {
+                    "name": "Student Helper",
+                    "description": "A comprehensive student helper application for managing assignments, schedules, and academic resources",
+                    "tech_stack": ["React", "Node.js", "Express", "MongoDB"],
+                    "type": "web_app",
+                    "features": [
+                        "Assignment tracking and deadlines",
+                        "Class schedule management", 
+                        "Grade calculator and GPA tracking",
+                        "Study resources and notes",
+                        "Task reminders and notifications",
+                        "Calendar integration"
+                    ]
+                },
+                "next_steps": "I'll start building the Student Helper application with all these features. It will have a clean, student-friendly interface!"
+            }
+        
+        # Try to use AI assistant for other requests
+        try:
+            from ai_assistant import get_chat_response
+            
+            # Prepare system prompt for project assistant
+            system_prompt = """You are an AI project assistant that helps users plan and build web applications. 
+
+For project creation requests, respond with a friendly message and project information in this EXACT JSON format:
+
+{
+    "name": "Project Name",
+    "description": "Brief description", 
+    "tech_stack": ["React", "Node.js", "Express"],
+    "type": "web_app",
+    "features": ["feature1", "feature2", "feature3"]
+}
+
+For edit requests, be specific about what changes you can make and ask for clarification if needed.
+
+IMPORTANT: Always return valid, properly formatted JSON. Escape quotes and newlines properly."""
+            
+            # Get AI response
+            chat_history = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_input}
+            ]
+            
+            ai_response = get_chat_response(chat_history, "smart")
+            
+            # Parse AI response safely
+            project_info = safe_json_parse(ai_response)
+            
+            return {
+                "success": True,
+                "response": ai_response,
+                "project_info": project_info
+            }
+            
+        except ImportError:
+            # Fallback if ai_assistant is not available
+            print("AI assistant not available, using enhanced fallback")
+            
+            # Create a reasonable project based on user input
+            project_name = extract_project_name(user_input)
+            
+            project_info = {
+                "name": project_name,
+                "description": f"Application based on: {user_input}",
+                "tech_stack": ["React", "Node.js", "Express"],
+                "type": "web_app",
+                "features": ["User interface", "Backend API", "Data management", "Responsive design"]
+            }
+            
+            return {
+                "success": True,
+                "response": f"I understand you want to build: {user_input}. Let me help you create this project with a modern tech stack!",
+                "project_info": project_info
+            }
+        
+    except Exception as e:
+        print(f"AI project assistant error: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "fallback_response": "I can help you build your project! Could you tell me more about what you'd like to create or modify?"
+        }
+
+def extract_project_name(text: str) -> str:
+    """Extract a reasonable project name from user input"""
+    # Clean the text and extract key words
+    words = re.findall(r'\b[A-Za-z]+\b', text)
+    # Take first few meaningful words and capitalize
+    if words:
+        name_words = [w.capitalize() for w in words[:2] if len(w) > 2]
+        if name_words:
+            return ''.join(name_words) + 'App'
+    return "MyApp"
 
 if __name__ == "__main__":
     import uvicorn

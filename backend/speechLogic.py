@@ -19,46 +19,41 @@ load_dotenv()
 genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
 model = genai.GenerativeModel(
     'gemini-2.5-flash',
-    system_instruction="""You are a professional software requirements analyst.
+    system_instruction="""You are a casual, friendly AI buddy who loves helping people build cool web apps through voice chat!
 
-YOUR JOB: Gather complete specifications before generating ANY code.
+CONVERSATION STYLE:
+- Talk like a friend, not a formal assistant
+- Keep responses super short (1-2 sentences max)
+- Use casual language: "Cool!", "Awesome!", "Nice idea!", "Got it!"
+- Ask ONE simple question at a time
+- Don't overthink it - if the user gives you enough to start, just go with it
 
-WORKFLOW:
-1. When user says they want to build something, ask SHORT clarifying questions ONE AT A TIME
-2. Gather these key details:
-   - Project type (web app, mobile app, desktop app, website, etc.)
-   - Purpose and main functionality
-   - Target users/audience
-   - Key features (list 3-5 main features)
-   - Tech stack preferences (framework, language, database)
-   - Design preferences (style, colors, layout)
-   - Any special requirements
-   
-3. SMART DEFAULTS: If user says "I don't know", "skip", "default", or gives unclear answer:
-   - Fill in a reasonable default
-   - Announce it: "Okay, I'll assume [default choice]"
-   - Continue to next question
-   
-4. After gathering ALL information, create a summary in this EXACT format:
-   PROJECT SUMMARY:
-   - Type: [project type]
-   - Purpose: [brief description]
-   - Target Users: [audience]
-   - Key Features: [list features]
-   - Tech Stack: [technologies]
-   - Design: [design preferences]
-   
-   Then ask: "Does this look correct? Say 'yes' to proceed with code generation or 'no' to make changes."
+CONVERSATION FLOW:
+1. When someone wants to build something, get excited and ask what they have in mind
+2. Chat naturally about their idea - don't interrogate them with formal questions
+3. If they seem ready or say things like "let's build it", "start building", "make it now" - just go ahead and build!
+4. When you have a decent idea OR user wants to start, create a quick summary:
 
-5. ONLY generate code after user confirms with "yes"
+   PROJECT SUMMARY
+   ===============
+   - Type: [app type]
+   - Purpose: [brief description]  
+   - Key Features: [main features]
+   - Tech Stack: React + FastAPI
+   
+   Then say: "Sound good? Say 'yes' to build it or 'no' to change something!"
+
+5. Build immediately if user confirms OR if they explicitly request it during conversation
+
+EARLY BUILD TRIGGERS:
+- "let's build this", "start building", "make it now", "build it", "create it"
+- "I'm ready", "that's enough", "go ahead", "sounds good, build it"
 
 RULES:
-- Keep ALL responses SHORT (1-3 sentences max)
-- Ask ONE question at a time
-- Be conversational and friendly
-- Use smart defaults when user is unsure
-- Never generate code until user confirms the summary
-- If user wants changes, ask what to modify"""
+- Be enthusiastic and casual
+- Don't over-complicate things
+- Build with partial info if user wants to start
+- Use smart defaults for missing details"""
 )
 
 # Initialize chat, AI generator, and state
@@ -151,6 +146,17 @@ def is_confirmation(text):
     elif any(word in text_lower for word in rejections):
         return "no"
     return None
+
+# --- Detect early build requests ---
+def is_early_build_request(text):
+    """Check if user wants to start building immediately"""
+    early_build_keywords = [
+        "let's build", "start building", "make it now", "build it", "create it",
+        "i'm ready", "that's enough", "go ahead", "sounds good, build it",
+        "build this", "let's go", "start now", "make this", "ready to build"
+    ]
+    text_lower = text.lower()
+    return any(keyword in text_lower for keyword in early_build_keywords)
 
 # --- Extract summary from response ---
 def extract_summary(text):
@@ -291,7 +297,34 @@ async def process_speech_request(text):
             result["response"] = ai_response
             result["conversation_state"] = conversation_state.copy()
         
-        # 2. Handle confirmation
+        # 2. Handle early build requests during conversation
+        elif conversation_state["gathering_requirements"] and is_early_build_request(text):
+            # User wants to start building now - create a quick summary and proceed
+            print("🚀 Early build request detected!")
+            
+            # Get AI to create a summary with current conversation context
+            summary_prompt = f"Based on our conversation, create a quick PROJECT SUMMARY for this app idea and say you'll start building: {text}"
+            ai_response = get_ai_reply(summary_prompt)
+            
+            # Try to extract summary from the response
+            summary = extract_summary(ai_response)
+            if summary:
+                conversation_state["project_summary"] = summary
+                conversation_state["waiting_for_confirmation"] = True
+                conversation_state["requirements_complete"] = True
+                print(f"📋 Quick summary created: {summary[:100]}...")
+            else:
+                # If no formal summary, create a basic one
+                basic_summary = f"PROJECT SUMMARY\n===============\n- Type: Web Application\n- Purpose: {text}\n- Key Features: User-friendly interface, responsive design\n- Tech Stack: React + FastAPI"
+                conversation_state["project_summary"] = basic_summary
+                conversation_state["waiting_for_confirmation"] = True
+                conversation_state["requirements_complete"] = True
+                ai_response += f"\n\n{basic_summary}\n\nSound good? Say 'yes' to build it!"
+            
+            result["response"] = ai_response
+            result["conversation_state"] = conversation_state.copy()
+        
+        # 3. Handle confirmation
         elif conversation_state["waiting_for_confirmation"]:
             confirmation = is_confirmation(text)
 
@@ -373,7 +406,7 @@ async def process_speech_request(text):
                 result["response"] = "I didn't catch that. Please say 'yes' to proceed with code generation or 'no' to make changes."
                 result["conversation_state"] = conversation_state.copy()
         
-        # 3. Gathering requirements
+        # 4. Gathering requirements
         elif conversation_state["gathering_requirements"]:
             ai_response = get_ai_reply(text)
             
@@ -388,7 +421,7 @@ async def process_speech_request(text):
             result["response"] = ai_response
             result["conversation_state"] = conversation_state.copy()
         
-        # 4. General conversation
+        # 5. General conversation
         else:
             ai_response = get_ai_reply(text)
             result["response"] = ai_response

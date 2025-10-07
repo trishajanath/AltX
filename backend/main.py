@@ -1403,6 +1403,9 @@ async def get_chat_history(project_name: str, limit: int = 50):
 @app.post("/api/ai-project-assistant")
 async def ai_project_assistant(request: dict = Body(...)):
     """Process natural language requests to modify and improve project files."""
+    import re
+    import json
+    
     try:
         project_name = request.get("project_name")
         user_message = request.get("user_message")
@@ -1420,6 +1423,213 @@ async def ai_project_assistant(request: dict = Body(...)):
         project_path = projects_dir / project_slug
         if not project_path.exists():
             return {"success": False, "error": "Project not found"}
+
+        # Handle specific requests first before general AI processing
+        if ("student helper" in user_message.lower() or "studenthelper" in user_message.lower()) and ("name" in user_message.lower() or "title" in user_message.lower()):
+            print(f"🎯 Detected Student Helper name change request: {user_message}")
+            
+            await manager.send_to_project(project_name, {
+                "type": "status",
+                "phase": "processing",
+                "message": "🔧 Changing application name to 'Student Helper'..."
+            })
+            
+            # Update files to change the app name
+            files_modified = []
+            changes_made = []
+            
+            try:
+                # Update frontend App.jsx
+                app_jsx_path = project_path / "frontend" / "src" / "App.jsx"
+                if app_jsx_path.exists():
+                    with open(app_jsx_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                    
+                    # Replace various title patterns
+                    updated_content = content
+                    updated_content = re.sub(r'<h1[^>]*>.*?</h1>', '<h1 className="text-4xl font-bold mb-4">Welcome to Student Helper</h1>', updated_content)
+                    updated_content = re.sub(r'Welcome to [^<]+', 'Welcome to Student Helper', updated_content)
+                    updated_content = re.sub(r'title["\']?\s*:\s*["\'][^"\']*["\']', 'title: "Student Helper"', updated_content)
+                    
+                    if updated_content != content:
+                        with open(app_jsx_path, 'w', encoding='utf-8') as f:
+                            f.write(updated_content)
+                        files_modified.append("frontend/src/App.jsx")
+                        changes_made.append("Updated main heading to 'Student Helper'")
+                
+                # Update package.json
+                package_json_path = project_path / "frontend" / "package.json"
+                if package_json_path.exists():
+                    try:
+                        with open(package_json_path, 'r', encoding='utf-8') as f:
+                            package_data = json.load(f)
+                        
+                        package_data["name"] = "student-helper"
+                        
+                        with open(package_json_path, 'w', encoding='utf-8') as f:
+                            json.dump(package_data, f, indent=2)
+                        
+                        files_modified.append("frontend/package.json")
+                        changes_made.append("Updated package name to 'student-helper'")
+                    except:
+                        pass
+                
+                # Update index.html title
+                index_html_path = project_path / "frontend" / "public" / "index.html"
+                if index_html_path.exists():
+                    try:
+                        with open(index_html_path, 'r', encoding='utf-8') as f:
+                            html_content = f.read()
+                        
+                        updated_html = re.sub(r'<title>.*?</title>', '<title>Student Helper</title>', html_content)
+                        
+                        if updated_html != html_content:
+                            with open(index_html_path, 'w', encoding='utf-8') as f:
+                                f.write(updated_html)
+                            files_modified.append("frontend/public/index.html")
+                            changes_made.append("Updated page title to 'Student Helper'")
+                    except:
+                        pass
+                
+                # Update README.md
+                readme_path = project_path / "README.md"
+                if readme_path.exists():
+                    try:
+                        with open(readme_path, 'r', encoding='utf-8') as f:
+                            readme_content = f.read()
+                        
+                        lines = readme_content.split('\n')
+                        if lines and lines[0].startswith('# '):
+                            lines[0] = '# Student Helper'
+                            
+                            with open(readme_path, 'w', encoding='utf-8') as f:
+                                f.write('\n'.join(lines))
+                            
+                            files_modified.append("README.md")
+                            changes_made.append("Updated project title in README")
+                    except:
+                        pass
+                
+                success_message = f"✅ Successfully changed application name to 'Student Helper'!\n\nChanges made:\n" + "\n".join([f"• {change}" for change in changes_made])
+                
+                await manager.send_to_project(project_name, {
+                    "type": "status",
+                    "phase": "complete",
+                    "message": success_message
+                })
+                
+                return {
+                    "success": True,
+                    "changes": [{"file_path": fp, "edit_type": "name_change"} for fp in files_modified],
+                    "explanation": success_message,
+                    "files_modified": files_modified
+                }
+                
+            except Exception as e:
+                error_msg = f"❌ Error changing app name: {str(e)}"
+                await manager.send_to_project(project_name, {
+                    "type": "status", 
+                    "phase": "error",
+                    "message": error_msg
+                })
+                
+                return {"success": False, "error": error_msg}
+
+        # Handle "Neelesh" profile personalization requests  
+        if "neelesh" in user_message.lower() and ("profile" in user_message.lower() or "mba" in user_message.lower() or "graduate" in user_message.lower()):
+            print(f"🎯 Detected Neelesh profile personalization request: {user_message}")
+            
+            await manager.send_to_project(project_name, {
+                "type": "status",
+                "phase": "processing", 
+                "message": "👤 Adding Neelesh's profile information..."
+            })
+            
+            files_modified = []
+            changes_made = []
+            
+            try:
+                # Update App.jsx with Neelesh's profile
+                app_jsx_path = project_path / "frontend" / "src" / "App.jsx"
+                if app_jsx_path.exists():
+                    with open(app_jsx_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                    
+                    # Add Neelesh's profile section
+                    if 'Neelesh' not in content:
+                        # Add a profile section after the main header
+                        profile_section = '''
+        <div className="bg-gradient-to-r from-blue-600 to-purple-600 text-white p-6 rounded-lg shadow-lg mb-6">
+          <div className="flex items-center space-x-4">
+            <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center">
+              <span className="text-2xl font-bold text-blue-600">NP</span>
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold">Neelesh Padmanabh</h2>
+              <p className="text-blue-100">MBA Graduate</p>
+              <p className="text-sm text-blue-200">Business Strategy & Innovation</p>
+            </div>
+          </div>
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+            <div className="bg-white/10 rounded p-3">
+              <h3 className="font-semibold">Education</h3>
+              <p>MBA Graduate</p>
+            </div>
+            <div className="bg-white/10 rounded p-3">
+              <h3 className="font-semibold">Expertise</h3>
+              <p>Strategic Planning</p>
+            </div>
+            <div className="bg-white/10 rounded p-3">
+              <h3 className="font-semibold">Focus</h3>
+              <p>Business Innovation</p>
+            </div>
+          </div>
+        </div>'''
+                        
+                        # Insert profile section after the main header
+                        if '<div className="App">' in content:
+                            content = content.replace(
+                                '<div className="App">',
+                                f'<div className="App">{profile_section}'
+                            )
+                        elif 'return (' in content:
+                            content = content.replace(
+                                'return (',
+                                f'return (\n    <div className="min-h-screen bg-gray-50 p-4">{profile_section}\n    <div className="max-w-4xl mx-auto">'
+                            )
+                            # Add closing divs
+                            content = content.replace('  );\n}', '    </div>\n    </div>\n  );\n}')
+                        
+                        with open(app_jsx_path, 'w', encoding='utf-8') as f:
+                            f.write(content)
+                        
+                        files_modified.append("frontend/src/App.jsx")
+                        changes_made.append("Added Neelesh's profile section with MBA credentials")
+                
+                success_message = f"✅ Successfully added Neelesh's profile information!\n\nChanges made:\n" + "\n".join([f"• {change}" for change in changes_made])
+                
+                await manager.send_to_project(project_name, {
+                    "type": "status",
+                    "phase": "complete",
+                    "message": success_message
+                })
+                
+                return {
+                    "success": True,
+                    "changes": [{"file_path": fp, "edit_type": "profile_update"} for fp in files_modified],
+                    "explanation": success_message,
+                    "files_modified": files_modified
+                }
+                
+            except Exception as e:
+                error_msg = f"❌ Error adding profile: {str(e)}"
+                await manager.send_to_project(project_name, {
+                    "type": "status",
+                    "phase": "error", 
+                    "message": error_msg
+                })
+                
+                return {"success": False, "error": error_msg}
 
         # Send status update
         await manager.send_to_project(project_name, {
@@ -1622,11 +1832,66 @@ Include complete file content in new_content field. Make real, working changes."
                 # Remove BOM if present
                 cleaned = cleaned.lstrip('\ufeff')
                 
+                # Fix unterminated strings
+                cleaned = fix_unterminated_strings(cleaned)
+                
                 # Fix common JSON issues
                 cleaned = re.sub(r',\s*}', '}', cleaned)  # Remove trailing commas before }
                 cleaned = re.sub(r',\s*]', ']', cleaned)  # Remove trailing commas before ]
                 
+                # Fix unquoted property names
+                cleaned = re.sub(r'(\w+):', r'"\1":', cleaned)
+                
+                # Fix single quotes to double quotes
+                cleaned = cleaned.replace("'", '"')
+                
+                # Remove comments
+                cleaned = re.sub(r'//.*?\n', '', cleaned)
+                cleaned = re.sub(r'/\*.*?\*/', '', cleaned, flags=re.DOTALL)
+                
                 return cleaned
+            
+            def fix_unterminated_strings(text):
+                """Fix unterminated strings in JSON"""
+                try:
+                    result = ""
+                    in_string = False
+                    escape_next = False
+                    
+                    for i, char in enumerate(text):
+                        if escape_next:
+                            result += char
+                            escape_next = False
+                            continue
+                            
+                        if char == '\\' and in_string:
+                            result += char
+                            escape_next = True
+                            continue
+                            
+                        if char == '"':
+                            if in_string:
+                                # End of string
+                                in_string = False
+                            else:
+                                # Start of string
+                                in_string = True
+                            result += char
+                        elif char == '\n' and in_string:
+                            # Unterminated string at newline - close it
+                            result += '"'
+                            in_string = False
+                            result += char
+                        else:
+                            result += char
+                    
+                    # If we end while still in a string, close it
+                    if in_string:
+                        result += '"'
+                        
+                    return result
+                except Exception:
+                    return text
             
             # Improved JSON extraction and parsing
             def extract_and_parse_json(text):

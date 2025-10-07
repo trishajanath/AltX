@@ -1,0 +1,21 @@
+INFO:     Started server process [33003]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+🚀 RAG Query Engine created (FAST MODE - lazy loading enabled)
+✅ GitHub private key loaded from: /Users/trishajanath/xverta-deployer.2025-08-17.private-key.pem
+✅ GitHub App JWT generated successfully
+✅ GitHub client initialized with App authentication
+✅ Initialized fast model (models/gemini-2.5-flash)
+✅ Initialized smart model (models/gemini-2.5-pro)
+🎯 Detected Student Helper name change request: make sure the application name is Student Helper
+INFO:     127.0.0.1:56115 - "POST /api/ai-project-assistant HTTP/1.1" 200 OK
+🎯 Detected Neelesh profile personalization request: the profile is neelesh padmanabh and he is a mba graduate. make these changes
+INFO:     127.0.0.1:56131 - "POST /api/ai-project-assistant HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56153 - "OPTIONS /api/ai-project-assistant HTTP/1.1" 200 OK
+JSON parse error for match: Expecting ',' delimiter: line 6 column 870 (char 967)
+JSON parse error for match: Expecting ',' delimiter: line 6 column 870 (char 967)
+JSON parse error for match: Expecting ',' delimiter: line 4 column 870 (char 946)
+Attempting manual extraction from AI response...
+JSON parsing failed, creating fallback response for: can u change the name to neelesh padmanabh
+INFO:     127.0.0.1:56153 - "POST /api/ai-project-assistant HTTP/1.1" 200 OK

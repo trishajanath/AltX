@@ -26,7 +26,7 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
   useEffect(() => {
     const greeting = {
       type: 'ai',
-      content: "Hi! I'm your AI assistant. I'll help you build your app by gathering requirements first. What would you like to build today?",
+      content: "Hey there! 👋 I'm your coding buddy and I'm super excited to help you build something awesome! What cool idea do you have in mind?",
       timestamp: new Date()
     };
     setConversation([greeting]);

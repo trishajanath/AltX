@@ -1,0 +1,14 @@
+INFO:     Started server process [30913]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [30913]
+🚀 RAG Query Engine created (FAST MODE - lazy loading enabled)
+✅ GitHub private key loaded from: /Users/trishajanath/xverta-deployer.2025-08-17.private-key.pem
+✅ GitHub App JWT generated successfully
+✅ GitHub client initialized with App authentication
+✅ Initialized fast model (models/gemini-2.5-flash)
+✅ Initialized smart model (models/gemini-2.5-pro)
