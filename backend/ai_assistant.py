@@ -877,6 +877,411 @@ def format_analysis_for_context(analysis_data: Dict[str, Any]) -> str:
     except Exception as e:
         return f"Error formatting analysis context: {str(e)}"
 
+def get_code_fix_response(
+    error_message: str, 
+    file_content: str = None,
+    file_path: str = None,
+    project_context: str = None,
+    model_type: str = 'fast'
+) -> Dict[str, Any]:
+    """
+    Generates AI-powered code fixes and suggestions for console errors and development issues.
+    
+    This function is specifically designed for:
+    - Fixing JavaScript/React syntax errors
+    - Resolving compilation issues
+    - Providing code improvements
+    - Handling runtime errors
+    - General development assistance
+    
+    Args:
+        error_message: The error message from console or compilation
+        file_content: Current content of the file with issues (optional)
+        file_path: Path to the file with issues (optional)
+        project_context: Additional context about the project (optional)
+        model_type: The type of model to use ('fast' or 'smart')
+    
+    Returns:
+        Dict containing:
+        - success: Boolean indicating if fix was generated
+        - fixed_content: The corrected code content
+        - explanation: Explanation of what was fixed
+        - suggestions: Additional improvement suggestions
+    """
+    
+    # Check rate limits first
+    can_proceed, rate_limit_message = check_rate_limit()
+    if not can_proceed:
+        return {
+            "success": False,
+            "error": f"Rate Limit: {rate_limit_message}",
+            "fixed_content": file_content,
+            "explanation": "Please wait before making another request.",
+            "suggestions": []
+        }
+    
+    model = get_model(model_type)
+    if model is None:
+        return {
+            "success": False,
+            "error": f"AI model ({model_type}) is not available",
+            "fixed_content": file_content,
+            "explanation": "AI service unavailable",
+            "suggestions": []
+        }
+    
+    try:
+        # Build the context for code fixing
+        context = """You are GitHub Copilot, an expert code assistant specialized in fixing errors and improving code quality.
+
+🔧 **CODE FIXING EXPERTISE:**
+• JavaScript/React syntax error resolution
+• TypeScript compilation issue fixes
+• CSS and styling problem solutions
+• Package.json and dependency fixes
+• Build configuration corrections
+• Runtime error debugging and fixes
+
+💡 **CODING BEST PRACTICES:**
+• Modern JavaScript/React patterns
+• Clean, readable code structure
+• Error handling and validation
+• Performance optimization
+• Accessibility considerations
+• Security-conscious coding
+
+🎯 **RESPONSE FORMAT:**
+When fixing code, provide:
+1. **FIXED CODE**: Complete corrected code block
+2. **EXPLANATION**: Clear explanation of what was wrong and how you fixed it
+3. **IMPROVEMENTS**: Suggest additional enhancements if applicable
+
+**IMPORTANT RULES:**
+- Always provide complete, working code
+- Fix ALL syntax errors, not just the reported one
+- Use modern JavaScript/React patterns
+- Convert Python-style syntax to JavaScript (e.g., 'if/else' → ternary operators)
+- Ensure proper JSX structure and React conventions
+- Add proper error handling where needed
+- Keep code clean and well-formatted"""
+
+        # Add error context
+        if error_message:
+            context += f"\n\n🚨 **CURRENT ERROR TO FIX:**\n```\n{error_message}\n```"
+        
+        # Add file context
+        if file_path:
+            context += f"\n\n📁 **FILE PATH:** {file_path}"
+        
+        # Add project context
+        if project_context:
+            context += f"\n\n📋 **PROJECT CONTEXT:**\n{project_context}"
+        
+        # Add file content if available
+        if file_content:
+            context += f"\n\n📄 **CURRENT FILE CONTENT:**\n```javascript\n{file_content}\n```"
+        
+        # Create the user message
+        user_message = f"""Please fix the error and provide improved code.
+
+**Error Message:** {error_message}
+
+**Instructions:**
+1. Analyze the error and identify the root cause
+2. Provide the complete fixed code
+3. Explain what was wrong and how you fixed it
+4. Suggest any additional improvements
+
+Please respond with:
+- FIXED_CODE: [complete corrected code]
+- EXPLANATION: [what was wrong and how you fixed it]
+- IMPROVEMENTS: [additional suggestions]"""
+        
+        # Generate the response
+        update_rate_limit_state()
+        response = model.generate_content(f"{context}\n\n{user_message}")
+        
+        if not response or not response.text:
+            return {
+                "success": False,
+                "error": "No response from AI model",
+                "fixed_content": file_content,
+                "explanation": "AI failed to generate response",
+                "suggestions": []
+            }
+        
+        ai_response = response.text.strip()
+        
+        # Parse the AI response to extract components
+        fixed_content = file_content  # Default fallback
+        explanation = "Code analysis completed"
+        suggestions = []
+        
+        # Try to extract structured parts from the response
+        import re
+        
+        # Extract FIXED_CODE section
+        fixed_code_match = re.search(r'FIXED_CODE:\s*```(?:javascript|jsx|js)?\s*(.*?)```', ai_response, re.DOTALL | re.IGNORECASE)
+        if fixed_code_match:
+            fixed_content = fixed_code_match.group(1).strip()
+        elif '```' in ai_response:
+            # Fallback: get the first code block
+            code_blocks = re.findall(r'```(?:javascript|jsx|js)?\s*(.*?)```', ai_response, re.DOTALL)
+            if code_blocks:
+                fixed_content = code_blocks[0].strip()
+        
+        # Extract EXPLANATION section
+        explanation_match = re.search(r'EXPLANATION:\s*(.*?)(?=IMPROVEMENTS:|$)', ai_response, re.DOTALL | re.IGNORECASE)
+        if explanation_match:
+            explanation = explanation_match.group(1).strip()
+        
+        # Extract IMPROVEMENTS section
+        improvements_match = re.search(r'IMPROVEMENTS:\s*(.*)', ai_response, re.DOTALL | re.IGNORECASE)
+        if improvements_match:
+            improvements_text = improvements_match.group(1).strip()
+            suggestions = [line.strip() for line in improvements_text.split('\n') if line.strip()]
+        
+        return {
+            "success": True,
+            "fixed_content": fixed_content,
+            "explanation": explanation,
+            "suggestions": suggestions,
+            "full_response": ai_response
+        }
+        
+    except Exception as e:
+        error_msg = str(e)
+        if "429" in error_msg or "rate limit" in error_msg.lower():
+            handle_rate_limit_error(error_msg)
+            return {
+                "success": False,
+                "error": "Rate limit exceeded. Please wait before trying again.",
+                "fixed_content": file_content,
+                "explanation": "Rate limit reached",
+                "suggestions": []
+            }
+        else:
+            return {
+                "success": False,
+                "error": f"Error generating fix: {error_msg}",
+                "fixed_content": file_content,
+                "explanation": f"Failed to process: {error_msg}",
+                "suggestions": []
+            }
+
+def get_user_customization_response(
+    file_content: str,
+    file_path: str,
+    user_request: str,
+    project_context: Optional[Dict] = None,
+    model_type: str = 'smart'
+) -> Dict[str, Any]:
+    """
+    Handle user customization requests like changing colors, text, layouts, etc.
+    
+    Args:
+        file_content: The current content of the file
+        file_path: Path to the file being modified
+        user_request: User's customization request (e.g., "change background to blue", "make text larger")
+        project_context: Optional context about the project
+        model_type: Model to use for generation
+        
+    Returns:
+        Dict containing success status, modified content, and explanation
+    """
+    
+    # Rate limiting check
+    can_proceed, message = check_rate_limit()
+    if not can_proceed:
+        return {
+            "success": False,
+            "error": message,
+            "modified_content": file_content,
+            "explanation": "Rate limit reached",
+            "changes_made": []
+        }
+    
+    try:
+        update_rate_limit_state()
+        
+        # Determine file type for appropriate handling
+        file_extension = Path(file_path).suffix.lower()
+        file_type = "unknown"
+        
+        if file_extension in ['.js', '.jsx', '.ts', '.tsx']:
+            file_type = "React/JavaScript"
+        elif file_extension in ['.css', '.scss', '.sass']:
+            file_type = "CSS/Styling"
+        elif file_extension in ['.html', '.htm']:
+            file_type = "HTML"
+        elif file_extension in ['.py']:
+            file_type = "Python"
+        elif file_extension in ['.json']:
+            file_type = "JSON Configuration"
+        
+        # Build context-aware prompt
+        context_info = ""
+        if project_context:
+            context_info = f"""
+Project Context:
+- Project Name: {project_context.get('name', 'Unknown')}
+- Project Type: {project_context.get('type', 'Unknown')}
+- Framework: {project_context.get('framework', 'Unknown')}
+"""
+        
+        prompt = f"""You are an expert frontend developer helping customize a {file_type} file based on user requests.
+
+{context_info}
+
+FILE PATH: {file_path}
+FILE TYPE: {file_type}
+
+CURRENT FILE CONTENT:
+```
+{file_content}
+```
+
+USER CUSTOMIZATION REQUEST:
+"{user_request}"
+
+INSTRUCTIONS:
+1. Analyze the user's request and identify what changes need to be made
+2. Apply the requested customizations while maintaining code quality and functionality
+3. For styling changes (colors, fonts, sizes, layouts):
+   - Use modern CSS practices and Tailwind classes when applicable
+   - Ensure responsive design is maintained
+   - Use appropriate color schemes and accessibility standards
+4. For text changes:
+   - Maintain proper formatting and structure
+   - Keep the same tone unless specifically requested to change it
+5. For layout changes:
+   - Ensure proper spacing and alignment
+   - Maintain responsive behavior
+   - Use modern layout techniques (flexbox, grid)
+6. Preserve all existing functionality unless explicitly asked to change it
+7. Return the COMPLETE modified file content, not just the changes
+
+SPECIFIC GUIDELINES BY FILE TYPE:
+
+For React/JavaScript files:
+- Maintain proper JSX syntax and React patterns
+- Keep all imports and exports intact
+- Preserve component structure and state management
+- Use modern React hooks and patterns
+
+For CSS files:
+- Use consistent naming conventions
+- Maintain proper cascade and specificity
+- Ensure cross-browser compatibility
+- Use CSS custom properties for reusable values
+
+For HTML files:
+- Maintain semantic markup
+- Preserve accessibility attributes
+- Keep proper document structure
+
+RESPONSE FORMAT:
+Provide the complete modified file content with all requested changes applied.
+Make sure the code is properly formatted and syntactically correct.
+"""
+
+        # Get AI response
+        model = get_model(model_type)
+        if not model:
+            return {
+                "success": False,
+                "error": "AI model not available",
+                "modified_content": file_content,
+                "explanation": "AI service is currently unavailable",
+                "changes_made": []
+            }
+        
+        response = model.generate_content(prompt)
+        
+        if not response or not response.text:
+            return {
+                "success": False,
+                "error": "Empty response from AI",
+                "modified_content": file_content,
+                "explanation": "AI did not provide a valid response",
+                "changes_made": []
+            }
+        
+        # Clean up the response
+        modified_content = response.text.strip()
+        
+        # Remove code fences if present
+        if modified_content.startswith('```'):
+            lines = modified_content.split('\n')
+            # Remove first line (opening fence) and find closing fence
+            lines = lines[1:]
+            for i, line in enumerate(lines):
+                if line.strip().startswith('```'):
+                    lines = lines[:i]
+                    break
+            modified_content = '\n'.join(lines)
+        
+        # Generate explanation of changes made
+        explanation_prompt = f"""Analyze the changes made to this file and provide a concise explanation.
+
+ORIGINAL CONTENT:
+{file_content[:500]}...
+
+MODIFIED CONTENT:
+{modified_content[:500]}...
+
+USER REQUEST: "{user_request}"
+
+Provide a brief, user-friendly explanation of what changes were made, focusing on the visual/functional improvements."""
+
+        explanation_response = model.generate_content(explanation_prompt)
+        explanation = explanation_response.text.strip() if explanation_response and explanation_response.text else "Changes applied as requested"
+        
+        # Identify key changes made
+        changes_made = []
+        if "color" in user_request.lower():
+            changes_made.append("Color scheme updated")
+        if "text" in user_request.lower() or "font" in user_request.lower():
+            changes_made.append("Typography modified")
+        if "layout" in user_request.lower() or "position" in user_request.lower():
+            changes_made.append("Layout structure adjusted")
+        if "size" in user_request.lower():
+            changes_made.append("Element sizing updated")
+        if "background" in user_request.lower():
+            changes_made.append("Background styling changed")
+        
+        return {
+            "success": True,
+            "modified_content": modified_content,
+            "explanation": explanation,
+            "changes_made": changes_made,
+            "file_type": file_type,
+            "request_processed": user_request
+        }
+        
+    except Exception as e:
+        error_msg = str(e)
+        print(f"❌ Error in get_user_customization_response: {error_msg}")
+        
+        # Handle specific error types
+        if "rate limit" in error_msg.lower() or "quota" in error_msg.lower():
+            handle_rate_limit_error(error_msg)
+            return {
+                "success": False,
+                "error": "Rate limit exceeded",
+                "modified_content": file_content,
+                "explanation": "Too many requests. Please wait before trying again.",
+                "changes_made": []
+            }
+        else:
+            return {
+                "success": False,
+                "error": f"Error processing customization: {error_msg}",
+                "modified_content": file_content,
+                "explanation": f"Failed to apply changes: {error_msg}",
+                "changes_made": []
+            }
+
 def test_github_authentication():
     """Test function to verify GitHub authentication setup"""
     print("🔍 Testing GitHub authentication setup...")

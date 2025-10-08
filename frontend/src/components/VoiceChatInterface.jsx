@@ -15,6 +15,7 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
   const [projectHistory, setProjectHistory] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [historyError, setHistoryError] = useState(null);
   
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
@@ -97,19 +98,38 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
   // Fetch project history
   const fetchProjectHistory = async () => {
     try {
+      console.log('🔄 Fetching project history...');
       setIsLoadingHistory(true);
+      setHistoryError(null);
+      
       const response = await fetch('http://localhost:8000/api/project-history');
+      
+      console.log('📡 Response status:', response.status);
+      console.log('📡 Response headers:', Object.fromEntries(response.headers.entries()));
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
       const data = await response.json();
+      console.log('📊 Project history data:', data);
       
       if (data.success) {
         setProjectHistory(data.projects || []);
+        setHistoryError(null);
+        console.log('✅ Successfully loaded', data.projects?.length || 0, 'projects');
       } else {
-        console.error('Failed to fetch project history:', data.error);
+        console.error('❌ Failed to fetch project history:', data.error);
+        setHistoryError(data.error || 'Failed to load projects');
+        setProjectHistory([]);
       }
     } catch (error) {
-      console.error('Error fetching project history:', error);
+      console.error('❌ Error fetching project history:', error);
+      setHistoryError(error.message || 'Network error while loading projects');
+      setProjectHistory([]);
     } finally {
       setIsLoadingHistory(false);
+      console.log('🏁 Finished loading project history');
     }
   };
 
@@ -1111,6 +1131,31 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
                       }}>
                         <Loader size={16} className="animate-spin" style={{ marginRight: '0.5rem' }} />
                         Loading projects...
+                      </div>
+                    ) : historyError ? (
+                      <div style={{ 
+                        padding: '1rem', 
+                        textAlign: 'center', 
+                        color: '#ef4444',
+                        fontSize: '0.85rem'
+                      }}>
+                        ❌ {historyError}
+                        <br />
+                        <button 
+                          onClick={fetchProjectHistory}
+                          style={{
+                            marginTop: '0.5rem',
+                            background: 'rgba(59, 130, 246, 0.2)',
+                            border: '1px solid rgba(59, 130, 246, 0.3)',
+                            borderRadius: '0.25rem',
+                            color: '#60a5fa',
+                            fontSize: '0.7rem',
+                            padding: '0.25rem 0.5rem',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          🔄 Retry
+                        </button>
                       </div>
                     ) : projectHistory.length === 0 ? (
                       <div style={{ 

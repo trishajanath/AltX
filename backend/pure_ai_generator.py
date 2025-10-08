@@ -1010,15 +1010,225 @@ Return Python code only.
 
 	@staticmethod
 	def _build_main_prompt(plan: Dict[str, Any], project_name: str) -> str:
+		features = plan.get('features', [])
+		app_type = plan.get('app_type', 'Web App')
+		description = plan.get('description', 'A modern web application')
+		
+		# Detect e-commerce features
+		has_ecommerce = any(keyword in str(feature).lower() for feature in features 
+		                   for keyword in ['shop', 'store', 'ecommerce', 'cart', 'product', 'buy', 'sell', 'market', 'order', 'checkout', 'payment'])
+		
 		return f"""
-Create FastAPI main.py for: {project_name}
+Create a COMPLETE, PRODUCTION-READY FastAPI main.py for: {project_name}
 
-Requirements:
-- FastAPI app with CORS
-- Include routes.py with /api/v1 prefix
-- Health check at "/"
+Project: {app_type}
+Description: {description}
+Features: {', '.join(str(f) for f in features)}
 
-Return Python code only.
+MANDATORY REQUIREMENTS:
+
+1. COMPLETE AUTHENTICATION SYSTEM (ALWAYS INCLUDE):
+   - JWT token authentication with OAuth2PasswordBearer
+   - User registration endpoint: POST /api/v1/auth/register
+   - User login endpoint: POST /api/v1/auth/login
+   - Get current user: GET /api/v1/auth/me
+   - Token refresh: POST /api/v1/auth/refresh
+   - Password hashing with bcrypt or passlib
+   - Proper JWT secret key configuration
+   - Token expiration and validation
+
+2. COMPREHENSIVE CORS CONFIGURATION:
+   - Allow all origins for development (http://localhost:3000, http://localhost:5173)
+   - Allow credentials for cookie/token handling
+   - Proper headers for authentication
+   - Methods: GET, POST, PUT, DELETE, OPTIONS
+
+3. DATABASE INTEGRATION:
+   - SQLite database with SQLAlchemy ORM
+   - User model with proper relationships
+   - Database session dependency
+   - Automatic table creation on startup
+
+4. E-COMMERCE API ENDPOINTS (If e-commerce detected):
+   - Product management: GET/POST /api/v1/products
+   - Shopping cart: POST /api/v1/cart/add, DELETE /api/v1/cart/remove, GET /api/v1/cart
+   - Order processing: POST /api/v1/orders, GET /api/v1/orders
+   - Payment processing: POST /api/v1/payments/process
+   - Inventory management: GET /api/v1/inventory
+
+5. ESSENTIAL MIDDLEWARE AND DEPENDENCIES:
+   - CORS middleware properly configured
+   - Authentication dependency for protected routes
+   - Database session dependency
+   - Error handling middleware
+   - Request logging
+
+6. SECURITY BEST PRACTICES:
+   - Password hashing (never store plain passwords)
+   - JWT token validation and expiration
+   - Protected routes with proper authentication
+   - Input validation and sanitization
+   - Rate limiting considerations
+
+CRITICAL IMPLEMENTATION REQUIREMENTS:
+- Use FastAPI 0.100+ with modern async patterns
+- Include all necessary imports and dependencies
+- Proper error handling with HTTPException
+- Pydantic models for request/response validation
+- Database models with proper relationships
+- Authentication middleware and dependencies
+- CORS configured for frontend integration
+
+AUTHENTICATION FLOW IMPLEMENTATION:
+```python
+from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, Session
+from passlib.context import CryptContext
+from jose import JWTError, jwt
+from datetime import datetime, timedelta
+import os
+from pydantic import BaseModel
+
+# JWT Configuration
+SECRET_KEY = "your-secret-key-here"  # In production, use environment variable
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
+# Password hashing
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+
+# Database setup
+SQLALCHEMY_DATABASE_URL = "sqlite:///./app.db"
+engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={{"check_same_thread": False}})
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+# User model
+class User(Base):
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, index=True)
+    email = Column(String, unique=True, index=True)
+    hashed_password = Column(String)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+# Create tables
+Base.metadata.create_all(bind=engine)
+
+# Pydantic models
+class UserCreate(BaseModel):
+    name: str
+    email: str
+    password: str
+
+class UserResponse(BaseModel):
+    id: int
+    name: str
+    email: str
+    
+    class Config:
+        from_attributes = True
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+    user: UserResponse
+
+# Dependencies
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    # JWT token validation and user retrieval
+    pass  # Implement full JWT validation
+
+# Authentication functions
+def verify_password(plain_password, hashed_password):
+    return pwd_context.verify(plain_password, hashed_password)
+
+def get_password_hash(password):
+    return pwd_context.hash(password)
+
+def create_access_token(data: dict, expires_delta: timedelta = None):
+    # Implement JWT token creation
+    pass
+```
+
+{f'''
+E-COMMERCE MODELS (REQUIRED if e-commerce detected):
+```python
+class Product(Base):
+    __tablename__ = "products"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, index=True)
+    description = Column(Text)
+    price = Column(Float)
+    image_url = Column(String)
+    category = Column(String)
+    stock_quantity = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class CartItem(Base):
+    __tablename__ = "cart_items"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    product_id = Column(Integer, ForeignKey("products.id"))
+    quantity = Column(Integer, default=1)
+
+class Order(Base):
+    __tablename__ = "orders"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    total_amount = Column(Float)
+    status = Column(String, default="pending")
+    created_at = Column(DateTime, default=datetime.utcnow)
+```
+''' if has_ecommerce else ''}
+
+MAIN APP STRUCTURE:
+```python
+app = FastAPI(title="{project_name}", description="{description}")
+
+# CORS Configuration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://localhost:5173", "http://localhost:8080"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Health check
+@app.get("/")
+async def health_check():
+    return {{"status": "healthy", "app": "{project_name}"}}
+
+# Authentication routes
+@app.post("/api/v1/auth/register", response_model=Token)
+async def register(user: UserCreate, db: Session = Depends(get_db)):
+    # Implement user registration
+    pass
+
+@app.post("/api/v1/auth/login", response_model=Token)
+async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    # Implement user login
+    pass
+
+@app.get("/api/v1/auth/me", response_model=UserResponse)
+async def get_current_user_info(current_user: User = Depends(get_current_user)):
+    return current_user
+```
+
+CRITICAL: Return COMPLETE, WORKING Python code with all imports, models, authentication, and API endpoints properly implemented. No placeholders or "TODO" comments allowed.
 """
 
 	@staticmethod
@@ -1433,54 +1643,105 @@ export const FloatingTabs = ({ tabs, activeTab, onTabChange, className = '' }) =
 			if any('white' in df.lower() and ('text' in df.lower() or 'font' in df.lower()) for df in design_features):
 				design_instructions += "- Use white text color with text-white class\n"
 		
-		return f"""Create a React App.jsx for {project_name} ({app_type}).
+		return f"""Create a COMPLETE, PRODUCTION-READY React App.jsx for {project_name} ({app_type}).
 
 Description: {description}
 Functional Features: {', '.join(functional_features) if functional_features else 'Modern web app features'}
 {design_instructions}
 
-CRITICAL REQUIREMENTS:
-1. ALL COMPONENTS MUST BE PROPERLY DEFINED AND EXPORTED
-2. NO UNDEFINED VARIABLES OR COMPONENTS
-3. USE PROPER ERROR BOUNDARIES
-4. INCLUDE SHADCN/UI STYLE COMPONENTS
+MANDATORY FULL-STACK INTEGRATION REQUIREMENTS:
+
+1. COMPLETE AUTHENTICATION SYSTEM (ALWAYS INCLUDE):
+   - Login modal with email/password form and real validation
+   - Signup modal with user registration form and validation  
+   - JWT token storage in localStorage with proper management
+   - Authentication state management with React context
+   - User profile display with logout functionality
+   - Protected content areas that require login
+   - Proper form submission with API calls to backend
+   - Error handling and success notifications
+
+2. WORKING API INTEGRATION:
+   - Real fetch() calls to backend API (http://localhost:8001/api/v1)
+   - Authentication headers: Authorization: Bearer {{token}}
+   - Proper error handling for all network requests
+   - Loading states with spinners and user feedback
+   - Success/error notifications with toast messages
+   - Automatic token refresh and logout on 401 errors
+
+3. E-COMMERCE FEATURES (If shop/store/cart/product detected):
+   - Product grid with real product data from API
+   - Add to Cart functionality that actually works
+   - Shopping cart modal with item management (add/remove/update)
+   - Cart count display in header that updates in real-time
+   - Checkout process with payment forms
+   - Order history and tracking display
+   - Search and filtering capabilities
+
+4. ADVANCED UI COMPONENTS:
+   - Header with navigation, user info, cart count
+   - Modals for login, signup, cart, payment processing
+   - Interactive forms with validation and submission
+   - Loading spinners and error boundaries
+   - Responsive navigation with mobile support
+   - Toast notifications for user feedback
+
+CRITICAL IMPLEMENTATION REQUIREMENTS:
+- ALL COMPONENTS MUST BE PROPERLY DEFINED AND EXPORTED
+- NO UNDEFINED VARIABLES OR COMPONENTS  
+- USE PROPER ERROR BOUNDARIES AND LOADING STATES
+- INCLUDE SHADCN/UI STYLE COMPONENTS
+- WORKING STATE MANAGEMENT WITH REACT HOOKS
+- REAL API CALLS WITH PROPER ERROR HANDLING
 
 Build a complete, functional app with:
-- Modern hero section with gradient background
-- Feature showcase with proper cards
-- Interactive sections based on app type
+- Authentication system with working login/signup
+- Modern hero section with call-to-action buttons
+- Feature showcase with interactive elements
+- Working e-commerce functionality (if applicable)
 - Responsive design with TailwindCSS
-- Real, relevant content (no lorem ipsum)
+- Real, relevant content and professional appearance
 
-COMPONENT STRUCTURE:
+MANDATORY COMPONENT ARCHITECTURE:
 ```jsx
-import React from 'react';
+import React, {{ useState, useEffect, createContext, useContext }} from 'react';
 import {{ cn, buttonVariants, cardVariants }} from './lib/utils';
 
-// Define ALL icon components as proper React components
-const Star = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
-  </svg>
-);
+// AUTHENTICATION CONTEXT (ALWAYS INCLUDE)
+const AuthContext = createContext();
+const useAuth = () => useContext(AuthContext);
 
-const Users = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
-    <circle cx="9" cy="7" r="4"></circle>
-    <path d="M22 21v-2a4 4 0 0 0-3-3.87"></path>
-    <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
-  </svg>
-);
+// CART CONTEXT (IF E-COMMERCE DETECTED)  
+const CartContext = createContext();
+const useCart = () => useContext(CartContext);
 
-// Define reusable UI components (shadcn/ui style)
-const Button = ({{children, variant = "default", className = "", ...props}}) => (
+// NOTIFICATION CONTEXT (ALWAYS INCLUDE)
+const NotificationContext = createContext();
+const useNotification = () => useContext(NotificationContext);
+
+// ICON COMPONENTS (PROPERLY DEFINED)
+const Star = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>;
+
+const User = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>;
+
+const ShoppingCart = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="8" cy="21" r="1"></circle><circle cx="19" cy="21" r="1"></circle><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57L23 6H6"></path></svg>;
+
+const X = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>;
+
+const Plus = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>;
+
+const Minus = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 12h14"></path></svg>;
+
+// UI COMPONENTS (SHADCN STYLE)
+const Button = ({{children, variant = "default", className = "", onClick, disabled, ...props}}) => (
   <button 
     className={{cn(
-      "inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 disabled:opacity-50",
+      "inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none disabled:opacity-50 disabled:cursor-not-allowed",
       buttonVariants[variant],
       className
     )}} 
+    onClick={{onClick}}
+    disabled={{disabled}}
     {{...props}}
   >
     {{children}}
@@ -1493,11 +1754,367 @@ const Card = ({{children, className = "", variant = "default"}}) => (
   </div>
 );
 
-// Main App component
-const App = () => {{
+const Modal = ({{ isOpen, onClose, children, title }}) => {{
+  if (!isOpen) return null;
+  
   return (
-    <div className="min-h-screen bg-gray-50">
-      // Your app content here
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-lg max-w-md w-full max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between p-6 border-b">
+          <h2 className="text-xl font-semibold">{{title}}</h2>
+          <button onClick={{onClose}} className="text-gray-400 hover:text-gray-600">
+            <X />
+          </button>
+        </div>
+        <div className="p-6">{{children}}</div>
+      </div>
+    </div>
+  );
+}};
+
+const LoadingSpinner = () => (
+  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+);
+
+const Toast = ({{ message, type = "success", onClose }}) => (
+  <div className={{cn(
+    "fixed top-4 right-4 p-4 rounded-md shadow-lg z-50 transition-all",
+    type === "success" ? "bg-green-500 text-white" : "bg-red-500 text-white"
+  )}}>
+    <div className="flex items-center justify-between">
+      <span>{{message}}</span>
+      <button onClick={{onClose}} className="ml-4 text-white hover:text-gray-200">
+        <X />
+      </button>
+    </div>
+  </div>
+);
+
+// AUTHENTICATION COMPONENTS (ALWAYS INCLUDE)
+const LoginModal = ({{ isOpen, onClose, onSuccess }}) => {{
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  
+  const handleLogin = async (e) => {{
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    
+    try {{
+      const response = await fetch('http://localhost:8001/api/v1/auth/login', {{
+        method: 'POST',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify({{ email, password }})
+      }});
+      
+      const data = await response.json();
+      
+      if (response.ok) {{
+        localStorage.setItem('token', data.access_token);
+        localStorage.setItem('user', JSON.stringify(data.user));
+        onSuccess(data.user);
+        onClose();
+      }} else {{
+        setError(data.detail || 'Login failed');
+      }}
+    }} catch (err) {{
+      setError('Network error. Please try again.');
+    }} finally {{
+      setLoading(false);
+    }}
+  }};
+  
+  return (
+    <Modal isOpen={{isOpen}} onClose={{onClose}} title="Login">
+      <form onSubmit={{handleLogin}} className="space-y-4">
+        {{error && <div className="text-red-500 text-sm">{{error}}</div>}}
+        <input
+          type="email"
+          placeholder="Email"
+          value={{email}}
+          onChange={{(e) => setEmail(e.target.value)}}
+          className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          required
+        />
+        <input
+          type="password"
+          placeholder="Password"
+          value={{password}}
+          onChange={{(e) => setPassword(e.target.value)}}
+          className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          required
+        />
+        <Button type="submit" className="w-full" disabled={{loading}}>
+          {{loading ? <LoadingSpinner /> : 'Login'}}
+        </Button>
+      </form>
+    </Modal>
+  );
+}};
+
+const SignupModal = ({{ isOpen, onClose, onSuccess }}) => {{
+  const [formData, setFormData] = useState({{ name: '', email: '', password: '', confirmPassword: '' }});
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  
+  const handleSignup = async (e) => {{
+    e.preventDefault();
+    if (formData.password !== formData.confirmPassword) {{
+      setError('Passwords do not match');
+      return;
+    }}
+    
+    setLoading(true);
+    setError('');
+    
+    try {{
+      const response = await fetch('http://localhost:8001/api/v1/auth/register', {{
+        method: 'POST',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify({{
+          name: formData.name,
+          email: formData.email,
+          password: formData.password
+        }})
+      }});
+      
+      const data = await response.json();
+      
+      if (response.ok) {{
+        localStorage.setItem('token', data.access_token);
+        localStorage.setItem('user', JSON.stringify(data.user));
+        onSuccess(data.user);
+        onClose();
+      }} else {{
+        setError(data.detail || 'Registration failed');
+      }}
+    }} catch (err) {{
+      setError('Network error. Please try again.');
+    }} finally {{
+      setLoading(false);
+    }}
+  }};
+  
+  return (
+    <Modal isOpen={{isOpen}} onClose={{onClose}} title="Sign Up">
+      <form onSubmit={{handleSignup}} className="space-y-4">
+        {{error && <div className="text-red-500 text-sm">{{error}}</div>}}
+        <input
+          type="text"
+          placeholder="Full Name"
+          value={{formData.name}}
+          onChange={{(e) => setFormData({{...formData, name: e.target.value}})}}
+          className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          required
+        />
+        <input
+          type="email"
+          placeholder="Email"
+          value={{formData.email}}
+          onChange={{(e) => setFormData({{...formData, email: e.target.value}})}}
+          className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          required
+        />
+        <input
+          type="password"
+          placeholder="Password"
+          value={{formData.password}}
+          onChange={{(e) => setFormData({{...formData, password: e.target.value}})}}
+          className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          required
+        />
+        <input
+          type="password"
+          placeholder="Confirm Password"
+          value={{formData.confirmPassword}}
+          onChange={{(e) => setFormData({{...formData, confirmPassword: e.target.value}})}}
+          className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          required
+        />
+        <Button type="submit" className="w-full" disabled={{loading}}>
+          {{loading ? <LoadingSpinner /> : 'Sign Up'}}
+        </Button>
+      </form>
+    </Modal>
+  );
+}};
+
+// HEADER COMPONENT (ALWAYS INCLUDE)
+const Header = ({{ user, onLogin, onSignup, onLogout, cartCount = 0, onCartClick }}) => (
+  <header className="bg-white shadow-sm border-b">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="flex items-center justify-between h-16">
+        <div className="flex items-center">
+          <h1 className="text-xl font-bold text-gray-900">{project_name}</h1>
+        </div>
+        <div className="flex items-center space-x-4">
+          {{cartCount > 0 && (
+            <button
+              onClick={{onCartClick}}
+              className="relative text-gray-600 hover:text-gray-900"
+            >
+              <ShoppingCart />
+              <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
+                {{cartCount}}
+              </span>
+            </button>
+          )}}
+          {{user ? (
+            <div className="flex items-center space-x-4">
+              <span className="text-gray-700">Welcome, {{user.name}}</span>
+              <Button variant="outline" onClick={{onLogout}}>Logout</Button>
+            </div>
+          ) : (
+            <div className="flex items-center space-x-2">
+              <Button variant="outline" onClick={{onLogin}}>Login</Button>
+              <Button onClick={{onSignup}}>Sign Up</Button>
+            </div>
+          )}}
+        </div>
+      </div>
+    </div>
+  </header>
+);
+
+// MAIN APP COMPONENT WITH FULL INTEGRATION
+const App = () => {{
+  const [user, setUser] = useState(null);
+  const [cart, setCart] = useState([]);
+  const [notifications, setNotifications] = useState([]);
+  const [showLogin, setShowLogin] = useState(false);
+  const [showSignup, setShowSignup] = useState(false);
+  const [showCart, setShowCart] = useState(false);
+  
+  // Initialize authentication state
+  useEffect(() => {{
+    const token = localStorage.getItem('token');
+    const savedUser = localStorage.getItem('user');
+    if (token && savedUser) {{
+      setUser(JSON.parse(savedUser));
+    }}
+  }}, []);
+  
+  // Authentication handlers
+  const handleLoginSuccess = (userData) => {{
+    setUser(userData);
+    showNotification('Login successful!', 'success');
+  }};
+  
+  const handleSignupSuccess = (userData) => {{
+    setUser(userData);
+    showNotification('Account created successfully!', 'success');
+  }};
+  
+  const handleLogout = () => {{
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    setUser(null);
+    setCart([]);
+    showNotification('Logged out successfully', 'success');
+  }};
+  
+  // Notification handler
+  const showNotification = (message, type = 'success') => {{
+    const id = Date.now();
+    setNotifications(prev => [...prev, {{ id, message, type }}]);
+    setTimeout(() => {{
+      setNotifications(prev => prev.filter(n => n.id !== id));
+    }}, 5000);
+  }};
+  
+  // Cart handlers (if e-commerce)
+  const addToCart = (product) => {{
+    setCart(prev => {{
+      const existing = prev.find(item => item.id === product.id);
+      if (existing) {{
+        return prev.map(item => 
+          item.id === product.id 
+            ? {{ ...item, quantity: item.quantity + 1 }}
+            : item
+        );
+      }}
+      return [...prev, {{ ...product, quantity: 1 }}];
+    }});
+    showNotification(`Added ${{product.name}} to cart!`, 'success');
+  }};
+  
+  const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
+  
+  return (
+    <AuthContext.Provider value={{ user, login: handleLoginSuccess, logout: handleLogout }}>
+      <CartContext.Provider value={{ cart, addToCart, cartCount }}>
+        <NotificationContext.Provider value={{ showNotification }}>
+          <div className="min-h-screen bg-gray-50">
+            <Header 
+              user={{user}}
+              onLogin={{() => setShowLogin(true)}}
+              onSignup={{() => setShowSignup(true)}}
+              onLogout={{handleLogout}}
+              cartCount={{cartCount}}
+              onCartClick={{() => setShowCart(true)}}
+            />
+            
+            {{/* YOUR MAIN CONTENT GOES HERE */}}
+            <main className="flex-1">
+              {{/* Hero Section */}}
+              <section className="bg-gradient-to-r from-blue-600 to-purple-700 text-white py-20">
+                <div className="max-w-7xl mx-auto px-4 text-center">
+                  <h1 className="text-5xl font-bold mb-6">{project_name}</h1>
+                  <p className="text-xl mb-8">{description}</p>
+                  <div className="space-x-4">
+                    {{!user && (
+                      <>
+                        <Button variant="outline" onClick={{() => setShowSignup(true)}} className="text-white border-white hover:bg-white hover:text-blue-600">
+                          Get Started
+                        </Button>
+                        <Button variant="ghost" onClick={{() => setShowLogin(true)}} className="text-white hover:bg-white/10">
+                          Learn More
+                        </Button>
+                      </>
+                    )}}
+                    {{user && (
+                      <Button variant="outline" className="text-white border-white hover:bg-white hover:text-blue-600">
+                        Welcome back, {{user.name}}!
+                      </Button>
+                    )}}
+                  </div>
+                </div>
+              </section>
+              
+              {{/* Continue with your app-specific content... */}}
+            </main>
+            
+            {{/* Modals */}}
+            <LoginModal 
+              isOpen={{showLogin}}
+              onClose={{() => setShowLogin(false)}}
+              onSuccess={{handleLoginSuccess}}
+            />
+            <SignupModal 
+              isOpen={{showSignup}}
+              onClose={{() => setShowSignup(false)}}
+              onSuccess={{handleSignupSuccess}}
+            />
+            
+            {{/* Notifications */}}
+            {{notifications.map(notification => (
+              <Toast
+                key={{notification.id}}
+                message={{notification.message}}
+                type={{notification.type}}
+                onClose={{() => setNotifications(prev => prev.filter(n => n.id !== notification.id))}}
+              />
+            ))}}
+          </div>
+        </NotificationContext.Provider>
+      </CartContext.Provider>
+    </AuthContext.Provider>
+  );
+}};
+
+export default App;
     </div>
   );
 }};

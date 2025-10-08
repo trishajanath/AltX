@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import MonacoEditor from '@monaco-editor/react';
 import PageWrapper from './PageWrapper';
@@ -416,8 +416,11 @@ const MonacoProjectEditor = () => {
   const [terminalOutput, setTerminalOutput] = useState([]); // Live generation output
   const [viewHistory, setViewHistory] = useState([]);
   const [currentViewIndex, setCurrentViewIndex] = useState(-1);
+  const [pendingChanges, setPendingChanges] = useState(false);
+  const [lastChangeTime, setLastChangeTime] = useState(null);
   
   const chatEndRef = useRef(null);
+  const changeTimeoutRef = useRef(null);
   const wsRef = useRef(null);
   const connectTimerRef = useRef(null);
 
@@ -492,6 +495,307 @@ Just tell me what you'd like to do with your project!`
       };
     }
   }, [project]);
+
+  // Console Error Monitoring and Auto-Fix
+  useEffect(() => {
+    let errorQueue = [];
+    let errorTimeoutId = null;
+    let isProcessingErrors = false;
+    
+    // Original console.error to avoid infinite loops
+    const originalConsoleError = console.error;
+    const originalConsoleWarn = console.warn;
+    
+    // Console error interceptor
+    const errorInterceptor = (...args) => {
+      // Call original console.error first
+      originalConsoleError.apply(console, args);
+      
+      // Process the error for auto-fixing
+      const errorMessage = args.map(arg => 
+        typeof arg === 'string' ? arg : JSON.stringify(arg)
+      ).join(' ');
+      
+      // Filter relevant errors (JavaScript/React compilation errors)
+      if (shouldProcessError(errorMessage)) {
+        queueErrorForProcessing(errorMessage);
+      }
+    };
+    
+    // Console warning interceptor (for React warnings)
+    const warnInterceptor = (...args) => {
+      originalConsoleWarn.apply(console, args);
+      
+      const warnMessage = args.map(arg => 
+        typeof arg === 'string' ? arg : JSON.stringify(arg)
+      ).join(' ');
+      
+      // Process React warnings that indicate syntax issues
+      if (shouldProcessWarning(warnMessage)) {
+        queueErrorForProcessing(warnMessage);
+      }
+    };
+    
+    // Function to determine if error should be processed
+    const shouldProcessError = (message) => {
+      const relevantPatterns = [
+        /SyntaxError/i,
+        /Unexpected token/i,
+        /Parse error/i,
+        /Module build failed/i,
+        /Compilation failed/i,
+        /TypeError.*Cannot read/i,
+        /ReferenceError/i,
+        /if.*else.*expected/i,
+        /Missing.*expected/i,
+        /Identifier.*already.*declared/i
+      ];
+      
+      return relevantPatterns.some(pattern => pattern.test(message)) &&
+             !message.includes('node_modules') &&
+             !message.includes('hot-reload');
+    };
+    
+    // Function to determine if warning should be processed
+    const shouldProcessWarning = (message) => {
+      const relevantWarnings = [
+        /Warning.*Failed to compile/i,
+        /Warning.*Parse error/i,
+        /Warning.*Invalid JSX/i
+      ];
+      
+      return relevantWarnings.some(pattern => pattern.test(message));
+    };
+    
+    // Queue errors for batch processing
+    const queueErrorForProcessing = (errorMessage) => {
+      if (isProcessingErrors) return;
+      
+      errorQueue.push({
+        message: errorMessage,
+        timestamp: Date.now(),
+        projectName: project?.name || projectName
+      });
+      
+      // Clear existing timeout
+      if (errorTimeoutId) {
+        clearTimeout(errorTimeoutId);
+      }
+      
+      // Process errors after 2 seconds of no new errors
+      errorTimeoutId = setTimeout(() => {
+        processErrorQueue();
+      }, 2000);
+    };
+    
+    // Process accumulated errors
+    const processErrorQueue = async () => {
+      if (errorQueue.length === 0 || isProcessingErrors) return;
+      
+      isProcessingErrors = true;
+      
+      try {
+        // Get the most recent error
+        const latestError = errorQueue[errorQueue.length - 1];
+        console.log('🔧 Processing console error for auto-fix:', latestError.message);
+        
+        // Extract file info from error message if available
+        const filePathMatch = latestError.message.match(/\/src\/[\w\/.-]+\.(jsx?|tsx?)/);
+        const lineNumberMatch = latestError.message.match(/:(\d+):/);
+        
+        const errorRequest = {
+          project_name: latestError.projectName,
+          error_message: latestError.message,
+          file_path: filePathMatch ? filePathMatch[0] : null,
+          line_number: lineNumberMatch ? parseInt(lineNumberMatch[1]) : null,
+          error_type: 'console_error'
+        };
+        
+        // Call the new Gemini auto-fix endpoint
+        const response = await fetch('http://localhost:8000/api/gemini-fix-console-error', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(errorRequest)
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+          console.log('✅ Auto-fix applied successfully:', result.explanation);
+          
+          // Show success message in chat
+          const successMessage = {
+            role: 'assistant',
+            content: `🔧 **Auto-Fix Applied!**\n\n**Issue Fixed:** ${result.explanation}\n\n${result.suggestions?.length > 0 ? `**Additional Suggestions:**\n${result.suggestions.map(s => `• ${s}`).join('\n')}` : ''}\n\n*The error has been automatically resolved using Gemini AI.*`
+          };
+          
+          setChatMessages(prev => [...prev, successMessage]);
+          
+          // Trigger reload if changes were applied
+          if (result.changes_applied) {
+            setTimeout(() => {
+              refreshPreview();
+            }, 1000);
+          }
+        } else {
+          console.log('❌ Auto-fix failed:', result.error);
+          
+          // Show error message in chat
+          const errorMessage = {
+            role: 'assistant',
+            content: `⚠️ **Auto-Fix Issue**\n\nI detected an error but couldn't fix it automatically:\n\n**Error:** ${result.error}\n\n${result.explanation ? `**Analysis:** ${result.explanation}\n\n` : ''}Please check the console for more details or ask me for help manually.`
+          };
+          
+          setChatMessages(prev => [...prev, errorMessage]);
+        }
+        
+      } catch (error) {
+        console.error('Auto-fix processing failed:', error);
+      } finally {
+        // Clear error queue and reset processing state
+        errorQueue = [];
+        isProcessingErrors = false;
+        if (errorTimeoutId) {
+          clearTimeout(errorTimeoutId);
+          errorTimeoutId = null;
+        }
+      }
+    };
+    
+    // Function to refresh preview
+    const refreshPreview = () => {
+      if (previewUrl) {
+        const iframe = document.querySelector('iframe[src*="localhost"]');
+        if (iframe) {
+          // Get the base URL and add fresh timestamp
+          const baseUrl = iframe.src.split('?')[0];
+          iframe.src = `${baseUrl}?_refresh=${Date.now()}`;
+        }
+      }
+    };
+    
+    // Install error interceptors
+    console.error = errorInterceptor;
+    console.warn = warnInterceptor;
+    
+    // Listen for unhandled errors
+    const handleError = (event) => {
+      if (shouldProcessError(event.message || event.error?.message || '')) {
+        queueErrorForProcessing(event.message || event.error?.message || 'Unknown error');
+      }
+    };
+    
+    const handleUnhandledRejection = (event) => {
+      if (shouldProcessError(event.reason?.message || event.reason || '')) {
+        queueErrorForProcessing(`Promise rejection: ${event.reason?.message || event.reason}`);
+      }
+    };
+    
+    window.addEventListener('error', handleError);
+    window.addEventListener('unhandledrejection', handleUnhandledRejection);
+    
+    // Cleanup function
+    return () => {
+      // Restore original console methods
+      console.error = originalConsoleError;
+      console.warn = originalConsoleWarn;
+      
+      // Remove event listeners
+      window.removeEventListener('error', handleError);
+      window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+      
+      // Clear timeouts
+      if (errorTimeoutId) {
+        clearTimeout(errorTimeoutId);
+      }
+    };
+  }, [project, projectName, previewUrl, setChatMessages]);
+
+  // Debounced file change detection
+  const triggerPreviewReload = useCallback(() => {
+    if (!previewUrl || isBuilding) return;
+    
+    const iframe = document.querySelector('iframe[src*="localhost"]');
+    if (iframe) {
+      const baseUrl = iframe.src.split('?')[0];
+      const timestamp = Date.now();
+      iframe.src = `${baseUrl}?_v=${timestamp}`;
+      console.log('🔄 Preview reloaded due to file changes');
+    }
+  }, [previewUrl, isBuilding]);
+
+  // Smart Auto-Reload on File Changes with Debouncing
+  useEffect(() => {
+    // Early return if project is not loaded yet
+    if (!project) return;
+    
+    let fileWatcher = null;
+    let lastFileHash = null;
+    
+    // Generate hash of current project files
+    const generateFileHash = () => {
+      if (!project?.files || Object.keys(project.files).length === 0) return '';
+      
+      const fileContents = Object.entries(project.files)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([path, content]) => `${path}:${content}`)
+        .join('|');
+      
+      // Simple hash function for change detection
+      let hash = 0;
+      for (let i = 0; i < fileContents.length; i++) {
+        const char = fileContents.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash; // Convert to 32-bit integer
+      }
+      return hash.toString();
+    };
+    
+    // Initialize hash
+    if (project?.files && Object.keys(project.files).length > 0) {
+      lastFileHash = generateFileHash();
+    }
+    
+    // Enable smart auto-reload when preview is running
+    if (previewUrl && !isBuilding && project?.files) {
+      fileWatcher = setInterval(() => {
+        const currentHash = generateFileHash();
+        
+        // Only reload if files have actually changed
+        if (currentHash !== lastFileHash && currentHash !== '') {
+          console.log('� File content changes detected');
+          lastFileHash = currentHash;
+          
+          // Show pending changes indicator
+          setPendingChanges(true);
+          setLastChangeTime(Date.now());
+          
+          // Clear any existing timeout
+          if (changeTimeoutRef.current) {
+            clearTimeout(changeTimeoutRef.current);
+          }
+          
+          // Debounce the reload to avoid excessive refreshing during editing
+          changeTimeoutRef.current = setTimeout(() => {
+            triggerPreviewReload();
+            setPendingChanges(false);
+          }, 1500); // Wait 1.5 seconds after last change
+          
+        }
+      }, 1000); // Check every 1 second for responsiveness
+    }
+    
+    return () => {
+      if (fileWatcher) {
+        clearInterval(fileWatcher);
+      }
+      if (changeTimeoutRef.current) {
+        clearTimeout(changeTimeoutRef.current);
+      }
+    };
+  }, [previewUrl, isBuilding, project?.files, triggerPreviewReload]);
 
   // Handle error notifications
   useEffect(() => {
@@ -701,7 +1005,10 @@ ${errors.slice(-3).map(err => `• ${err.message}`).join('\n')}
 
   const autoFixErrors = async () => {
     setIsAutoFixing(true);
+    let fixAttempted = false;
+    
     try {
+      // First try the traditional auto-fix endpoint
       const response = await fetch(`http://localhost:8000/api/auto-fix-project-errors?project_name=${encodeURIComponent(project.name)}`, {
         method: 'POST'
       });
@@ -709,6 +1016,8 @@ ${errors.slice(-3).map(err => `• ${err.message}`).join('\n')}
       const result = await response.json();
       
       if (result.success) {
+        fixAttempted = true;
+        
         // Add success message to chat
         const successMessage = {
           role: 'assistant',
@@ -731,20 +1040,97 @@ Your project has been automatically repaired. Try running it again!`
           runProject();
         }, 1000);
       } else {
+        // If traditional auto-fix failed, try Gemini-powered fix
+        await tryGeminiAutoFix();
+        fixAttempted = true;
+      }
+    } catch (error) {
+      if (!fixAttempted) {
+        // If first attempt failed with error, try Gemini-powered fix
+        try {
+          await tryGeminiAutoFix();
+          fixAttempted = true;
+        } catch (geminiError) {
+          const errorMessage = {
+            role: 'assistant',
+            content: `❌ Both auto-fix methods failed:
+            
+**Traditional Fix Error:** ${error.message}
+**Gemini AI Fix Error:** ${geminiError.message}
+
+Please try manually describing the issue in the chat for personalized assistance.`
+          };
+          setChatMessages(prev => [...prev, errorMessage]);
+        }
+      }
+      
+      if (!fixAttempted) {
         const errorMessage = {
           role: 'assistant',
-          content: `❌ Auto-fix failed: ${result.error || 'Unknown error'}`
+          content: `❌ Failed to auto-fix errors: ${error.message}`
         };
         setChatMessages(prev => [...prev, errorMessage]);
       }
-    } catch (error) {
-      const errorMessage = {
-        role: 'assistant',
-        content: `❌ Failed to auto-fix errors: ${error.message}`
-      };
-      setChatMessages(prev => [...prev, errorMessage]);
     } finally {
       setIsAutoFixing(false);
+    }
+  };
+  
+  // Helper function for Gemini-powered auto-fix
+  const tryGeminiAutoFix = async () => {
+    // Get the most recent console error or use generic error message
+    const recentErrors = errors.slice(-3); // Get last 3 errors
+    const errorMessage = recentErrors.length > 0 
+      ? recentErrors.map(err => `${err.severity}: ${err.message} (${err.file}:${err.line})`).join('\n')
+      : 'General compilation or runtime errors detected';
+    
+    const geminiRequest = {
+      project_name: project.name,
+      error_message: errorMessage,
+      file_path: recentErrors.length > 0 ? recentErrors[0].file : null,
+      line_number: recentErrors.length > 0 ? recentErrors[0].line : null,
+      error_type: 'manual_fix_request'
+    };
+    
+    const geminiResponse = await fetch('http://localhost:8000/api/gemini-fix-console-error', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(geminiRequest)
+    });
+    
+    const geminiResult = await geminiResponse.json();
+    
+    if (geminiResult.success) {
+      const successMessage = {
+        role: 'assistant',
+        content: `🤖 **Gemini AI Auto-Fix Applied!**
+
+**Analysis:** ${geminiResult.explanation}
+
+${geminiResult.suggestions?.length > 0 ? `**Improvements Made:**
+${geminiResult.suggestions.map(s => `• ${s}`).join('\n')}` : ''}
+
+${geminiResult.changes_applied ? '*Files have been automatically updated.*' : '*Analysis completed - please review the suggested changes.*'}
+
+Try running your project again!`
+      };
+      setChatMessages(prev => [...prev, successMessage]);
+      
+      // Reload project structure
+      setErrors([]);
+      setHasErrors(false);
+      initializeProject();
+      
+      // Auto-run the project after fixing
+      if (geminiResult.changes_applied) {
+        setTimeout(() => {
+          runProject();
+        }, 1000);
+      }
+    } else {
+      throw new Error(geminiResult.error || 'Gemini AI fix failed');
     }
   };
 
@@ -1006,6 +1392,33 @@ The changes have been applied and your preview has been updated.`
             >
               {isAutoFixing ? '🔧' : '🛠️'} 
               {isAutoFixing ? 'Fixing...' : 'Auto-Fix'}
+            </button>
+          )}
+          
+          {previewUrl && (
+            <button 
+              style={{
+                ...styles.btnEditorAction,
+                ...(pendingChanges ? { 
+                  backgroundColor: '#f59e0b', 
+                  color: 'white',
+                  boxShadow: '0 0 10px rgba(245, 158, 11, 0.5)'
+                } : { backgroundColor: '#28a745' })
+              }}
+              onClick={() => {
+                refreshPreview();
+                setPendingChanges(false);
+                if (changeTimeoutRef.current) {
+                  clearTimeout(changeTimeoutRef.current);
+                }
+                setChatMessages(prev => [...prev, {
+                  role: 'assistant',
+                  content: '🔄 **Preview Refreshed!**\n\nThe preview has been manually reloaded with the latest changes.'
+                }]);
+              }}
+              title={pendingChanges ? "File changes detected - Click to refresh now" : "Refresh Preview"}
+            >
+              {pendingChanges ? '🟠 Changes Detected' : '🔄 Refresh'}
             </button>
           )}
           

@@ -105,6 +105,14 @@ class FixRequest(BaseModel):
     issue: Dict[str, Any]
     branch_name: Optional[str] = None
 
+class ConsoleErrorRequest(BaseModel):
+    project_name: str
+    error_message: str
+    file_path: Optional[str] = None
+    line_number: Optional[int] = None
+    stack_trace: Optional[str] = None
+    error_type: Optional[str] = None
+
 from fastapi import Query, WebSocket, WebSocketDisconnect
 from fastapi.websockets import WebSocketState
 import asyncio
@@ -2245,6 +2253,121 @@ Include complete file content in new_content field. Make real, working changes."
         print(f"AI chat error: {e}")
         return {"success": False, "error": str(e)}
 
+# --- AI Customization Endpoint ---
+@app.post("/api/ai-customize-project")
+async def ai_customize_project(request: dict = Body(...)):
+    """Handle user customization requests like changing colors, text, layouts, etc."""
+    try:
+        project_name = request.get("project_name")
+        file_path = request.get("file_path")
+        customization_request = request.get("customization_request")
+        
+        if not project_name:
+            raise HTTPException(status_code=400, detail="project_name is required")
+        if not file_path:
+            raise HTTPException(status_code=400, detail="file_path is required")
+        if not customization_request:
+            raise HTTPException(status_code=400, detail="customization_request is required")
+        
+        # Resolve project path
+        project_slug = project_name.lower().replace(" ", "-")
+        projects_dir = Path("generated_projects")
+        project_path = projects_dir / project_slug
+        
+        if not project_path.exists():
+            return {"success": False, "error": "Project not found"}
+        
+        # Resolve full file path
+        full_file_path = project_path / file_path.lstrip("/")
+        
+        if not full_file_path.exists():
+            return {"success": False, "error": f"File not found: {file_path}"}
+        
+        # Read current file content
+        try:
+            with open(full_file_path, 'r', encoding='utf-8') as f:
+                current_content = f.read()
+        except Exception as e:
+            return {"success": False, "error": f"Failed to read file: {str(e)}"}
+        
+        # Prepare project context
+        project_context = {
+            "name": project_name,
+            "type": "Web Application",
+            "framework": "React"
+        }
+        
+        # Try to detect framework from file structure
+        if (project_path / "frontend" / "package.json").exists():
+            project_context["framework"] = "React"
+        elif (project_path / "backend" / "main.py").exists():
+            project_context["framework"] = "FastAPI + React"
+        
+        # Send status update
+        await manager.send_to_project(project_name, {
+            "type": "status",
+            "phase": "processing", 
+            "message": f"🎨 Customizing {file_path}..."
+        })
+        
+        # Use the AI assistant function to process the customization
+        from ai_assistant import get_user_customization_response
+        
+        result = get_user_customization_response(
+            file_content=current_content,
+            file_path=file_path,
+            user_request=customization_request,
+            project_context=project_context,
+            model_type='smart'
+        )
+        
+        if result["success"]:
+            # Apply the changes to the file
+            try:
+                with open(full_file_path, 'w', encoding='utf-8') as f:
+                    f.write(result["modified_content"])
+                
+                # Send success notification
+                await manager.send_to_project(project_name, {
+                    "type": "status",
+                    "phase": "complete",
+                    "message": f"✅ Successfully customized {file_path}",
+                    "details": {
+                        "changes_made": result["changes_made"],
+                        "explanation": result["explanation"]
+                    }
+                })
+                
+                return {
+                    "success": True,
+                    "message": "Customization applied successfully",
+                    "file_path": file_path,
+                    "changes_made": result["changes_made"],
+                    "explanation": result["explanation"],
+                    "file_type": result.get("file_type", "unknown")
+                }
+                
+            except Exception as e:
+                return {"success": False, "error": f"Failed to save changes: {str(e)}"}
+        else:
+            # Send error notification
+            await manager.send_to_project(project_name, {
+                "type": "error",
+                "message": f"❌ Failed to customize {file_path}: {result['error']}"
+            })
+            
+            return {
+                "success": False,
+                "error": result["error"],
+                "explanation": result.get("explanation", "")
+            }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"AI customization error: {e}")
+        return {"success": False, "error": str(e)}
+
 # --- AI Apply Changes Endpoint ---
 @app.post("/api/ai-apply-changes")
 async def ai_apply_changes(request: dict = Body(...)):
@@ -2912,6 +3035,140 @@ export default App'''
     except Exception as e:
         print(f"Auto-fix errors: {e}")
         return {"success": False, "error": str(e)}
+
+# --- Gemini-Powered Console Error Fix Endpoint ---
+@app.post("/api/gemini-fix-console-error")
+async def gemini_fix_console_error(request: ConsoleErrorRequest):
+    """
+    Use Gemini AI to analyze and fix console errors in generated projects.
+    This endpoint specifically handles JavaScript/React errors and provides intelligent fixes.
+    """
+    try:
+        # Import the new code fix function
+        from ai_assistant import get_code_fix_response
+        
+        project_slug = request.project_name.lower().replace(" ", "-")
+        projects_dir = Path("generated_projects")
+        project_path = projects_dir / project_slug
+        
+        if not project_path.exists():
+            return {"success": False, "error": "Project not found"}
+        
+        # Determine the file path if provided
+        target_file_path = None
+        file_content = None
+        
+        if request.file_path:
+            # Handle both absolute and relative paths
+            if request.file_path.startswith('/'):
+                # Relative path from project root
+                target_file_path = project_path / request.file_path.lstrip('/')
+            else:
+                # Try to find the file in common locations
+                possible_paths = [
+                    project_path / "frontend" / "src" / request.file_path,
+                    project_path / "frontend" / request.file_path,
+                    project_path / request.file_path,
+                    project_path / "src" / request.file_path
+                ]
+                
+                for path in possible_paths:
+                    if path.exists():
+                        target_file_path = path
+                        break
+        else:
+            # If no file path provided, try to infer from error message
+            # Default to App.jsx if it's a React error
+            if any(keyword in request.error_message.lower() for keyword in ['jsx', 'react', 'component', 'unexpected token']):
+                app_jsx_path = project_path / "frontend" / "src" / "App.jsx"
+                if app_jsx_path.exists():
+                    target_file_path = app_jsx_path
+        
+        # Read the current file content if we found a file
+        if target_file_path and target_file_path.exists():
+            try:
+                with open(target_file_path, 'r', encoding='utf-8') as f:
+                    file_content = f.read()
+            except Exception as e:
+                print(f"Error reading file {target_file_path}: {e}")
+        
+        # Build project context
+        project_context = f"""
+Project: {request.project_name}
+Type: React Frontend Application
+Framework: React + Vite
+Location: {project_path}
+"""
+        
+        # Add stack trace context if available
+        error_details = request.error_message
+        if request.stack_trace:
+            error_details += f"\n\nStack Trace:\n{request.stack_trace}"
+        if request.line_number:
+            error_details += f"\n\nLine Number: {request.line_number}"
+        
+        # Call the AI assistant to fix the error
+        fix_result = get_code_fix_response(
+            error_message=error_details,
+            file_content=file_content,
+            file_path=str(target_file_path) if target_file_path else request.file_path,
+            project_context=project_context,
+            model_type='fast'  # Use fast model for quick fixes
+        )
+        
+        if not fix_result["success"]:
+            return {
+                "success": False,
+                "error": fix_result.get("error", "Failed to generate fix"),
+                "explanation": fix_result.get("explanation", "")
+            }
+        
+        # Apply the fix if we have a target file and fixed content
+        if target_file_path and fix_result["fixed_content"] and fix_result["fixed_content"] != file_content:
+            try:
+                # Create backup of original file
+                backup_path = target_file_path.with_suffix(target_file_path.suffix + '.backup')
+                if target_file_path.exists():
+                    shutil.copy2(target_file_path, backup_path)
+                
+                # Write the fixed content
+                with open(target_file_path, 'w', encoding='utf-8') as f:
+                    f.write(fix_result["fixed_content"])
+                
+                return {
+                    "success": True,
+                    "message": "Error fixed successfully using Gemini AI",
+                    "file_path": str(target_file_path),
+                    "explanation": fix_result["explanation"],
+                    "suggestions": fix_result.get("suggestions", []),
+                    "backup_created": str(backup_path),
+                    "changes_applied": True
+                }
+                
+            except Exception as e:
+                return {
+                    "success": False,
+                    "error": f"Failed to apply fix to file: {str(e)}",
+                    "explanation": fix_result["explanation"],
+                    "suggested_fix": fix_result["fixed_content"]
+                }
+        else:
+            # Return the analysis without applying changes
+            return {
+                "success": True,
+                "message": "Analysis completed - no file changes applied",
+                "explanation": fix_result["explanation"],
+                "suggestions": fix_result.get("suggestions", []),
+                "suggested_fix": fix_result["fixed_content"] if fix_result["fixed_content"] != file_content else None,
+                "changes_applied": False
+            }
+            
+    except Exception as e:
+        print(f"Gemini console error fix failed: {e}")
+        return {
+            "success": False,
+            "error": f"Failed to process error fix: {str(e)}"
+        }
 
 # --- Stop Project Endpoint ---
 @app.post("/api/stop-project")
@@ -9341,10 +9598,65 @@ async def generate_react_frontend_with_ai(frontend_path: Path, idea: str, projec
             components_needed.extend(["Profile", "UserCard", "Feed", "Followers"])
             api_endpoints.extend(["/api/users", "/api/profile", "/api/feed"])
         
+        # Enhance component specifications based on authentication and features
+        if needs_auth:
+            components_needed.extend(['LoginModal', 'SignupModal', 'UserProfile', 'AuthContext', 'ProtectedRoute'])
+            api_endpoints.extend(['/auth/login', '/auth/register', '/auth/me', '/auth/refresh', '/auth/logout'])
+        
+        # Always add core UI components for professional applications
+        core_components = [
+            'Header', 'Footer', 'Navigation', 'LoadingSpinner', 'ErrorBoundary',
+            'NotificationToast', 'ConfirmModal', 'Breadcrumbs', 'SearchBar'
+        ]
+        components_needed.extend(core_components)
+        
+        # Enhanced e-commerce detection and components
+        if any(keyword in idea.lower() for keyword in ['shop', 'store', 'ecommerce', 'cart', 'product', 'buy', 'sell', 'market', 'order', 'checkout', 'payment']):
+            ecommerce_components = [
+                'ShoppingCartModal', 'CartItem', 'CheckoutForm', 'PaymentModal', 
+                'OrderSummary', 'ProductSearch', 'CategoryFilter', 'PriceFilter', 
+                'WishlistButton', 'ProductGallery', 'ReviewSection', 'RatingStars'
+            ]
+            components_needed.extend(ecommerce_components)
+            api_endpoints.extend([
+                '/products/search', '/cart/add', '/cart/remove', '/cart/update',
+                '/orders/create', '/payments/process', '/payments/stripe', '/categories',
+                '/reviews', '/wishlist', '/inventory'
+            ])
+            special_features.append('E-commerce with cart, payments, and product management')
+            
+        # Enhanced dashboard/admin detection
+        if any(keyword in idea.lower() for keyword in ['dashboard', 'admin', 'analytics', 'manage', 'control', 'metrics', 'stats']):
+            admin_components = [
+                'Sidebar', 'StatsCard', 'Chart', 'DataTable', 'AdminPanel', 
+                'UserManagement', 'MetricsGrid', 'ActivityFeed', 'SettingsPanel', 
+                'NotificationCenter', 'ReportsSection'
+            ]
+            components_needed.extend(admin_components)
+            api_endpoints.extend([
+                '/dashboard/stats', '/admin/users', '/analytics/data', '/metrics',
+                '/activities', '/settings', '/notifications', '/reports'
+            ])
+            special_features.append('Admin dashboard with analytics and management')
+            
+        # Enhanced social features detection
+        if any(keyword in idea.lower() for keyword in ['social', 'chat', 'message', 'friend', 'post', 'comment', 'feed', 'follow']):
+            social_components = [
+                'PostComposer', 'CommentSection', 'ChatWindow', 'UserCard', 
+                'FriendsList', 'MessageInput', 'LikeButton', 'ShareButton', 
+                'FollowButton', 'NotificationDropdown', 'OnlineIndicator'
+            ]
+            components_needed.extend(social_components)
+            api_endpoints.extend([
+                '/posts/create', '/posts/like', '/comments', '/messages', 
+                '/friends', '/follow', '/notifications', '/feed', '/chat/rooms'
+            ])
+            special_features.append('Social features with messaging and interactions')
+        
         # Default components if none detected
-        if not components_needed:
-            components_needed = ["MainContent", "ActionForm", "ItemList"]
-            api_endpoints = ["/api/data", "/api/create"]
+        if not components_needed or len(components_needed) <= len(core_components):
+            components_needed.extend(["MainContent", "ActionForm", "ItemList", "DataGrid"])
+            api_endpoints.extend(["/api/data", "/api/create", "/api/update"])
         
         # Use AI to generate unique code based on the idea
         prompt = f"""
@@ -9358,54 +9670,126 @@ SPECIFIC FEATURES DETECTED:
 - API endpoints to integrate: {', '.join(api_endpoints)}
 - Special features: {', '.join(special_features) if special_features else 'None'}
 
-CRITICAL REQUIREMENTS - NO MOCKS OR PLACEHOLDERS:
-- Generate COMPLETE, PRODUCTION-READY code that works immediately
-- Use React 18+ with functional components and modern hooks
-- Include TailwindCSS for beautiful, responsive styling
-- Create WORKING components with real state management and API calls
-- Add proper error handling, loading states, and user feedback
-- Include form validation and submission handling
-- Make components interactive with real click handlers and state updates
-- Use proper TypeScript types or PropTypes for type safety
-- Include proper routing if needed (React Router)
-- Add realistic sample data that looks professional
-- Implement CRUD operations that actually work with API endpoints
-- Include proper accessibility features (ARIA labels, keyboard navigation)
+MANDATORY FULL-STACK INTEGRATION FEATURES:
 
-COMPONENT IMPLEMENTATION RULES:
-- Every component MUST have complete implementations - no empty functions
-- All useState hooks must have proper initial states and update functions
-- All useEffect hooks must have complete dependency arrays and cleanup
-- Include real event handlers (onClick, onChange, onSubmit) with actual logic
-- Implement proper form submission with validation
-- Add loading spinners and error messages for API calls
-- Use proper conditional rendering for different states
-- Include proper component composition and reusability
+1. COMPLETE AUTHENTICATION SYSTEM (Always Include):
+   - Login modal with email/password form
+   - Signup modal with user registration
+   - JWT token storage in localStorage
+   - Protected routes and authentication state management
+   - User profile display and logout functionality
+   - Login/signup form validation and error handling
+   - Authentication context provider for global state
 
-STYLING REQUIREMENTS:
-- Use modern TailwindCSS utility classes for beautiful UI
-- Implement responsive design (mobile-first approach)
-- Add hover effects, transitions, and micro-interactions
-- Use proper color schemes and typography
-- Include proper spacing, shadows, and visual hierarchy
-- Add icons from Lucide React or Heroicons
-- Implement proper layout with flexbox/grid
+2. COMPREHENSIVE STATE MANAGEMENT:
+   - User authentication state (logged in/out, user data)
+   - Application data state (products, cart, orders, etc.)
+   - UI state (modals, loading, notifications)
+   - Error handling state with user-friendly messages
+   - Real-time updates and data synchronization
 
-API INTEGRATION:
-- Write real fetch() calls to the backend endpoints
-- Include proper error handling for network requests
-- Add loading states during API calls
-- Handle success and error responses appropriately
-- Use proper HTTP methods (GET, POST, PUT, DELETE)
-- Include authentication headers if needed
+3. WORKING API INTEGRATION:
+   - Real fetch() calls to backend API (http://localhost:8001/api/v1)
+   - Proper error handling for all network requests
+   - Loading states with spinners and feedback
+   - Success/error notifications with toast messages
+   - Authentication headers for protected routes
+   - Automatic token refresh and logout on expiry
+
+4. COMPLETE UI COMPONENT SYSTEM:
+   - Header with user info, navigation, and cart (if e-commerce)
+   - Login/Signup modals with form validation
+   - Main content areas with proper layouts
+   - Interactive buttons and forms that actually work
+   - Shopping cart modal (if e-commerce detected)
+   - Payment processing forms (if payment needed)
+   - Responsive navigation and mobile-friendly design
+
+5. ADVANCED FUNCTIONALITY:
+   - Shopping cart operations (add/remove/update quantities)
+   - Real-time cart count updates in header
+   - Product grid with add to cart functionality
+   - Search and filtering capabilities
+   - Pagination for large data sets
+   - Form validation with proper error messages
+
+CRITICAL IMPLEMENTATION REQUIREMENTS:
+
+AUTHENTICATION FLOW:
+- Create LoginModal and SignupModal components with full functionality
+- Implement proper form validation and submission
+- Handle API responses and display appropriate messages
+- Store JWT tokens and manage authentication state
+- Create protected routes and redirect logic
+- Add logout functionality with token cleanup
+
+E-COMMERCE FEATURES (If shopping/cart detected):
+- Product grid with real product data from API
+- Add to Cart buttons that actually work
+- Shopping cart modal with item management
+- Checkout process with payment integration
+- Order history and tracking
+- Inventory management and stock display
+
+API INTEGRATION PATTERNS:
+- Use consistent API base URL: http://localhost:8001/api/v1
+- Include Authorization headers: Bearer ${{token}}
+- Handle 401 errors with automatic logout
+- Display loading states during API calls
+- Show success/error notifications
+- Implement proper error boundaries
+
+STATE MANAGEMENT:
+- Use React Context for global state (auth, cart, notifications)
+- Local component state for UI interactions
+- Proper state updates with immutable patterns
+- Effect cleanup to prevent memory leaks
+- Optimistic updates for better UX
+
+COMPONENT ARCHITECTURE:
+- App.jsx: Main app with routing and global state
+- Header: Navigation, user info, cart count
+- Modals: Login, Signup, Cart, Payment
+- Forms: Proper validation and submission
+- Layouts: Responsive design with mobile support
 
 FILES TO GENERATE WITH COMPLETE IMPLEMENTATIONS:
-1. package.json - All necessary dependencies
-2. src/App.jsx - Main app with routing and layout
-3. src/main.jsx - React 18 setup with error boundaries
+1. package.json - React 18, TailwindCSS, React Router, Lucide icons
+2. src/App.jsx - Main app with authentication and routing
+3. src/main.jsx - React 18 setup with error boundaries  
 4. src/index.css - TailwindCSS + custom styles
-5. vite.config.js - Optimized Vite config
+5. vite.config.js - Optimized Vite config with proxy
 6. tailwind.config.js - Custom theme configuration
+
+PACKAGE.JSON MUST INCLUDE:
+{
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.8.0",
+    "lucide-react": "^0.300.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.0",
+    "vite": "^5.0.0",
+    "tailwindcss": "^3.4.0",
+    "autoprefixer": "^10.4.16",
+    "postcss": "^8.4.32"
+  }
+}
+
+VITE CONFIG MUST INCLUDE PROXY:
+export default defineConfig({{
+  plugins: [react()],
+  server: {{
+    proxy: {{
+      '/api': 'http://localhost:8001'
+    }}
+  }}
+}})
+
+Each component must be complete and production-ready with real functionality.
+No placeholders, TODOs, or incomplete implementations allowed.
 7. Component files in src/components/ - Fully functional components
 
 Each file must be complete and production-ready. Do not use placeholders like "TODO", "// implement later", or empty function bodies.
@@ -9521,68 +9905,134 @@ SPECIFIC FEATURES DETECTED:
 - Data Models needed: {', '.join(data_models)}
 - Special Dependencies: {', '.join(special_deps) if special_deps else 'None'}
 
+MANDATORY FULL-STACK INTEGRATION FEATURES:
+
+1. COMPLETE AUTHENTICATION SYSTEM (Always Include):
+   - JWT token-based authentication with proper validation
+   - User registration endpoint with password hashing
+   - Login endpoint with credential validation
+   - Protected routes with dependency injection
+   - User profile management endpoints
+   - Password reset functionality
+   - Session management and token refresh
+
+2. COMPREHENSIVE API ECOSYSTEM:
+   - Full CRUD operations for all entities
+   - Proper HTTP status codes and error handling
+   - Input validation with Pydantic models
+   - Search, filtering, and pagination
+   - Bulk operations and batch processing
+   - Real-time data updates with WebSockets (if needed)
+
+3. ADVANCED BUSINESS LOGIC:
+   - Cart functionality for e-commerce (add/remove/checkout)
+   - Payment processing integration (Stripe/PayPal mock)
+   - Order management and tracking
+   - Inventory management with stock tracking
+   - User preferences and settings
+   - Notification system
+   - Activity logging and audit trails
+
+4. SECURITY & PERFORMANCE:
+   - Rate limiting and DDoS protection
+   - CORS configuration for frontend integration
+   - Request/response validation and sanitization
+   - Proper error handling and logging
+   - Database connection pooling
+   - Caching mechanisms with Redis (if complex)
+
+5. REAL-TIME FEATURES:
+   - WebSocket support for live updates
+   - Server-sent events for notifications
+   - Background task processing with Celery
+   - Scheduled jobs and cron tasks
+
 CRITICAL REQUIREMENTS - NO MOCKS OR PLACEHOLDERS:
 - Generate COMPLETE, PRODUCTION-READY FastAPI code that works immediately
 - Use FastAPI with modern Python 3.9+ async/await patterns
-- Include proper CORS handling for React frontend (localhost:5173)
+- Include proper CORS handling for React frontend (localhost:5173 AND localhost:3000)
 - Create WORKING API endpoints with full business logic implementation
 - Add comprehensive error handling and validation with Pydantic models
 - Include proper HTTP status codes and response models
-- Implement REAL CRUD operations with in-memory storage or database
+- Implement REAL operations with in-memory storage (use dictionaries as databases)
 - Add proper request/response validation and error messages
-- Include authentication middleware if auth is required
+- Include authentication middleware and protected routes
 - Add proper logging and error tracking
-- Implement rate limiting and security best practices
 
-DATABASE IMPLEMENTATION:
-- If database needed: Use SQLAlchemy with async support and real database operations
-- Include proper database models with relationships
-- Add migration scripts and database initialization
-- Implement connection pooling and error handling
-- Use proper transaction management
+AUTHENTICATION IMPLEMENTATION (MANDATORY):
+- Use OAuth2PasswordBearer for token validation
+- Implement JWT token creation and validation with python-jose
+- Hash passwords with passlib and bcrypt
+- Create User, UserCreate, UserInDB, Token Pydantic models
+- Add login endpoint that accepts form data
+- Add registration endpoint that creates real users
+- Implement get_current_user dependency for protected routes
+- Include proper error handling for invalid credentials
+CART & E-COMMERCE FUNCTIONALITY (If shopping/cart detected):
+- Complete shopping cart system with add/remove/update operations
+- Cart persistence per user with session management
+- Product catalog with categories, search, and filtering
+- Inventory tracking with stock management
+- Order creation and management system
+- Payment processing endpoints (mock Stripe/PayPal integration)
+- Order history and tracking
+- Wishlist functionality
+- Coupon and discount system
 
-API ENDPOINT REQUIREMENTS:
-- Every endpoint MUST have complete implementation - no empty functions
-- Include proper path parameters, query parameters, and request bodies
-- Add comprehensive input validation using Pydantic models
-- Implement proper error handling for all edge cases
-- Include realistic business logic specific to "{idea}"
-- Add proper response models with example data
-- Include proper HTTP methods (GET, POST, PUT, DELETE, PATCH)
-- Implement pagination for list endpoints
-- Add search and filtering capabilities where appropriate
+PAYMENT SYSTEM IMPLEMENTATION:
+- Mock payment processing for demo purposes
+- Payment method management (Stripe, PayPal)
+- Order total calculation with taxes and fees
+- Payment validation and error handling
+- Receipt generation and email notifications
+- Refund and cancellation handling
 
-AUTHENTICATION & SECURITY:
-- If auth required: Implement JWT tokens with proper validation
-- Add password hashing with bcrypt
-- Include proper user registration and login flows
-- Add role-based access control (RBAC) if needed
-- Implement rate limiting and security headers
-- Add proper CORS configuration
+IN-MEMORY DATABASE STRUCTURE:
+- Use Python dictionaries as databases for immediate functionality
+- Implement proper data relationships and constraints
+- Add realistic sample data for testing
+- Include proper data validation and error handling
+- Implement data persistence simulation
 
-DATA MODELS:
-- Create comprehensive Pydantic models for all data structures
+DATA MODELS (COMPREHENSIVE):
+- Create detailed Pydantic models for all entities
 - Include proper field validation with regex, min/max values
 - Add realistic sample data and default values
 - Implement proper relationships between models
 - Include created_at/updated_at timestamps
 - Add proper serialization/deserialization
+- Include response models for API documentation
 
-FILES TO GENERATE WITH COMPLETE IMPLEMENTATIONS:
-1. requirements.txt - All necessary dependencies
-2. main.py - FastAPI app with middleware, routing, and startup/shutdown
-3. models.py - Complete Pydantic models with validation
-4. routes.py - Full API endpoints with business logic
-5. database.py - Database setup with SQLAlchemy (if needed)
-6. auth.py - Authentication system (if needed)
-7. config.py - Configuration management with environment variables
+BACKEND FILES TO GENERATE (ALL COMPLETE):
+1. requirements.txt - All dependencies (FastAPI, uvicorn, python-jose, passlib, etc.)
+2. main.py - FastAPI app with CORS, middleware, routing, startup logic
+3. routes.py - ALL API endpoints with complete business logic
+4. models.py - Comprehensive Pydantic models with validation
+5. auth.py - Complete authentication system with JWT
+6. config.py - Configuration and environment variables
 
-Each file must be complete and production-ready. Do not use placeholders like "TODO", "# implement later", or "pass" statements.
+REQUIREMENTS.TXT MUST INCLUDE:
+fastapi>=0.104.1
+uvicorn[standard]>=0.24.0
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+python-multipart>=0.0.6
+pydantic>=2.5.0
+python-dotenv>=1.0.0
+
+Each file must be complete and production-ready. No placeholders, TODOs, or incomplete functions.
+Every API endpoint must have full implementation with real business logic.
 
 Return each file content in this EXACT format:
 ===FILE: filename===
 file content here
 ===END===
+
+IMPORTANT: The main.py file MUST include:
+- CORS middleware configured for React frontend
+- Router inclusion with /api/v1 prefix
+- Startup logic to run on port 8001
+- Health check endpoint at root
 
 Start with requirements.txt:
 """
