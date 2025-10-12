@@ -1943,7 +1943,7 @@ Include complete file content in new_content field. Make real, working changes."
                             if isinstance(parsed, dict) and ('changes' in parsed or 'explanation' in parsed):
                                 return parsed
                         except json.JSONDecodeError as e:
-                            print(f"JSON parse error for match: {str(e)[:100]}")
+                            # Don't print JSON parse errors for now to reduce console spam
                             continue
                         except Exception as e:
                             print(f"General parse error: {str(e)[:100]}")
@@ -2079,6 +2079,73 @@ Include complete file content in new_content field. Make real, working changes."
                         valid_changes.append(change)
             
             if not valid_changes:
+                # Check if this might be a customization request that should use the direct customization system
+                customization_keywords = [
+                    'add', 'change', 'update', 'modify', 'replace', 'include', 'insert',
+                    'picture', 'image', 'photo', 'color', 'style', 'text', 'font',
+                    'background', 'layout', 'design', 'theme', 'look', 'appearance'
+                ]
+                
+                is_customization_request = any(keyword in user_message.lower() for keyword in customization_keywords)
+                
+                if is_customization_request:
+                    # Try to use the direct customization system as fallback
+                    try:
+                        from ai_assistant import get_user_customization_response
+                        
+                        # Find the main App.jsx file to customize
+                        app_file_path = None
+                        if (project_path / "frontend" / "src" / "App.jsx").exists():
+                            app_file_path = "frontend/src/App.jsx"
+                        elif (project_path / "src" / "App.jsx").exists():
+                            app_file_path = "src/App.jsx"
+                        
+                        if app_file_path:
+                            full_app_path = project_path / app_file_path.replace("/", os.sep)
+                            
+                            # Read current content
+                            with open(full_app_path, 'r', encoding='utf-8') as f:
+                                current_content = f.read()
+                            
+                            # Try customization
+                            customization_result = get_user_customization_response(
+                                file_content=current_content,
+                                file_path=app_file_path,
+                                user_request=user_message,
+                                project_context={
+                                    "name": project_name,
+                                    "type": "Web Application", 
+                                    "framework": "React"
+                                },
+                                model_type='smart'
+                            )
+                            
+                            if customization_result.get("success") and customization_result.get("content_changed"):
+                                # Apply the customization
+                                with open(full_app_path, 'w', encoding='utf-8') as f:
+                                    f.write(customization_result["modified_content"])
+                                
+                                await manager.send_to_project(project_name, {
+                                    "type": "status",
+                                    "phase": "complete",
+                                    "message": "✅ Customization applied successfully"
+                                })
+                                
+                                return {
+                                    "success": True,
+                                    "message": "Customization applied successfully",
+                                    "changes": [{
+                                        "file_path": app_file_path,
+                                        "content": customization_result["modified_content"],
+                                        "edit_type": "customization",
+                                        "reason": customization_result.get("explanation", "Applied user customization")
+                                    }],
+                                    "explanation": customization_result.get("explanation", "Applied customizations as requested"),
+                                    "changes_made": customization_result.get("changes_made", [])
+                                }
+                    except Exception as e:
+                        print(f"Customization fallback failed: {e}")
+                
                 # Enhanced error message with detected issues
                 error_msg = "AI couldn't determine what changes to make."
                 if project_analysis:
@@ -3059,10 +3126,14 @@ async def gemini_fix_console_error(request: ConsoleErrorRequest):
         file_content = None
         
         if request.file_path:
-            # Handle both absolute and relative paths
+            # Handle both absolute and relative paths - FIXED PATH RESOLUTION
             if request.file_path.startswith('/'):
-                # Relative path from project root
-                target_file_path = project_path / request.file_path.lstrip('/')
+                # Relative path from project root - try frontend first
+                relative_path = request.file_path.lstrip('/')
+                possible_paths = [
+                    project_path / "frontend" / relative_path,  # Most common: frontend/src/App.jsx
+                    project_path / relative_path               # Fallback: src/App.jsx
+                ]
             else:
                 # Try to find the file in common locations
                 possible_paths = [
@@ -3071,11 +3142,17 @@ async def gemini_fix_console_error(request: ConsoleErrorRequest):
                     project_path / request.file_path,
                     project_path / "src" / request.file_path
                 ]
-                
-                for path in possible_paths:
-                    if path.exists():
-                        target_file_path = path
-                        break
+            
+            # Find the actual file
+            for path in possible_paths:
+                print(f"🔍 Checking path: {path}")
+                if path.exists():
+                    target_file_path = path
+                    print(f"✅ Found file at: {target_file_path}")
+                    break
+            
+            if not target_file_path:
+                print(f"❌ File not found in any of these locations: {[str(p) for p in possible_paths]}")
         else:
             # If no file path provided, try to infer from error message
             # Default to App.jsx if it's a React error

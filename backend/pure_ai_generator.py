@@ -377,7 +377,7 @@ export default App;'''.replace('{project_name}', project_name)
 
 	def _create_supporting_files(self, frontend_path: Path, project_name: str):
 		"""Create supporting files with hardcoded content and React Bits components"""
-		# Enhanced package.json with React Bits dependencies
+		# Enhanced package.json with React Bits dependencies - PREVENTS MODULE ERRORS
 		package_json = {
 			"name": project_name.lower().replace(" ", "-"),
 			"version": "1.0.0",
@@ -396,55 +396,29 @@ export default App;'''.replace('{project_name}', project_name)
 				"axios": "^1.6.0",
 				"clsx": "^2.0.0",
 				"tailwind-merge": "^2.0.0",
-				"class-variance-authority": "^0.7.0"
+				"class-variance-authority": "^0.7.0",
+				"buffer": "^6.0.3"
 			},
 			"devDependencies": {
 				"@vitejs/plugin-react": "^4.0.0",
 				"vite": "^4.4.0",
 				"tailwindcss": "^3.3.5",
 				"postcss": "^8.4.31",
-				"autoprefixer": "^10.4.16"
+				"autoprefixer": "^10.4.16",
+				"@types/node": "^20.0.0"
 			}
 		}
 		
 		import json
 		(frontend_path / "package.json").write_text(json.dumps(package_json, indent=2), encoding="utf-8")
 		
-		# Enhanced index.html with custom Tailwind config
+		# Enhanced index.html - PRODUCTION READY without CDN warnings
 		html = f'''<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{project_name}</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-      tailwind.config = {{
-        theme: {{
-          extend: {{
-            animation: {{
-              'float': 'float 3s ease-in-out infinite',
-              'shimmer': 'shimmer 2s linear infinite',
-              'glow': 'glow 2s ease-in-out infinite alternate'
-            }},
-            keyframes: {{
-              float: {{
-                '0%, 100%': {{ transform: 'translateY(0px)' }},
-                '50%': {{ transform: 'translateY(-10px)' }}
-              }},
-              shimmer: {{
-                '0%': {{ backgroundPosition: '-200% 0' }},
-                '100%': {{ backgroundPosition: '200% 0' }}
-              }},
-              glow: {{
-                '0%': {{ boxShadow: '0 0 5px rgba(59, 130, 246, 0.4)' }},
-                '100%': {{ boxShadow: '0 0 20px rgba(59, 130, 246, 0.8)' }}
-              }}
-            }}
-          }}
-        }}
-      }}
-    </script>
   </head>
   <body class="bg-gradient-to-br from-slate-50 to-blue-50 min-h-screen">
     <div id="root"></div>
@@ -572,15 +546,32 @@ export default {
 }'''
 		(frontend_path / "postcss.config.js").write_text(postcss_config, encoding="utf-8")
 		
-		# Create Vite config
+		# Create Vite config - FIXES MODULE ISSUES
 		vite_config = '''import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react({
+    babel: {
+      parserOpts: {
+        plugins: ['jsx', 'typescript']
+      }
+    }
+  })],
   server: {
     port: 3000,
     host: true
+  },
+  define: {
+    global: 'globalThis',
+  },
+  resolve: {
+    alias: {
+      buffer: 'buffer',
+    }
+  },
+  optimizeDeps: {
+    include: ['react', 'react-dom']
   }
 })'''
 		(frontend_path / "vite.config.js").write_text(vite_config, encoding="utf-8")
@@ -1643,7 +1634,17 @@ export const FloatingTabs = ({ tabs, activeTab, onTabChange, className = '' }) =
 			if any('white' in df.lower() and ('text' in df.lower() or 'font' in df.lower()) for df in design_features):
 				design_instructions += "- Use white text color with text-white class\n"
 		
-		return f"""Create a COMPLETE, PRODUCTION-READY React App.jsx for {project_name} ({app_type}).
+		return f"""🚨 CRITICAL ERROR PREVENTION - MUST FOLLOW:
+- NEVER use 'exports', 'require', or 'module' in React components
+- ONLY use ES6 imports: import React, {{ useState }} from 'react'
+- NO CommonJS syntax - only ES modules
+- ALL components must be defined before use
+- NO undefined variables or functions
+- USE proper React patterns only
+- ALWAYS use React.createContext and React.useContext (NOT named imports)
+- CONSISTENT PATTERN: const AuthContext = React.createContext(null); const useAuth = () => React.useContext(AuthContext);
+
+Create a COMPLETE, PRODUCTION-READY React App.jsx for {project_name} ({app_type}).
 
 Description: {description}
 Functional Features: {', '.join(functional_features) if functional_features else 'Modern web app features'}

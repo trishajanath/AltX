@@ -1130,6 +1130,7 @@ Project Context:
 """
         
         prompt = f"""You are an expert frontend developer helping customize a {file_type} file based on user requests.
+You MUST make the requested changes - do not return the original content unchanged.
 
 {context_info}
 
@@ -1144,45 +1145,55 @@ CURRENT FILE CONTENT:
 USER CUSTOMIZATION REQUEST:
 "{user_request}"
 
-INSTRUCTIONS:
-1. Analyze the user's request and identify what changes need to be made
-2. Apply the requested customizations while maintaining code quality and functionality
-3. For styling changes (colors, fonts, sizes, layouts):
-   - Use modern CSS practices and Tailwind classes when applicable
-   - Ensure responsive design is maintained
-   - Use appropriate color schemes and accessibility standards
-4. For text changes:
-   - Maintain proper formatting and structure
-   - Keep the same tone unless specifically requested to change it
-5. For layout changes:
-   - Ensure proper spacing and alignment
-   - Maintain responsive behavior
-   - Use modern layout techniques (flexbox, grid)
-6. Preserve all existing functionality unless explicitly asked to change it
-7. Return the COMPLETE modified file content, not just the changes
+CRITICAL INSTRUCTIONS:
+1. You MUST analyze the user's request and make ALL requested changes
+2. Do NOT return the original content unchanged - always apply the requested modifications
+3. For text replacement requests (like changing names), replace ALL occurrences
+4. For image requests, update image URLs to reflect the requested content
+5. For styling requests, make comprehensive visual improvements
 
-SPECIFIC GUIDELINES BY FILE TYPE:
+SPECIFIC CHANGE REQUIREMENTS:
+- Name changes: Replace ALL instances of old names with new names throughout the file
+- Image additions: Add relevant image URLs using placeholder services with descriptive text
+- Color changes: Update all relevant color classes and CSS properties
+- Layout changes: Modify structure while maintaining functionality
+- Content updates: Update text, titles, descriptions as requested
+
+RESPONSE REQUIREMENTS:
+1. Return the COMPLETE modified file content with ALL changes applied
+2. Ensure proper syntax and formatting
+3. Maintain all existing functionality while applying customizations
+4. Use modern best practices for the file type
+
+IMPORTANT: You must make meaningful changes based on the request. Returning unchanged content is not acceptable.
 
 For React/JavaScript files:
 - Maintain proper JSX syntax and React patterns
 - Keep all imports and exports intact
 - Preserve component structure and state management
 - Use modern React hooks and patterns
+- Update image sources, text content, and styling as requested
 
 For CSS files:
 - Use consistent naming conventions
 - Maintain proper cascade and specificity
-- Ensure cross-browser compatibility
-- Use CSS custom properties for reusable values
+- Apply requested color, layout, and styling changes
 
 For HTML files:
 - Maintain semantic markup
 - Preserve accessibility attributes
-- Keep proper document structure
+- Update content and styling as requested
 
 RESPONSE FORMAT:
-Provide the complete modified file content with all requested changes applied.
+CRITICAL: Return ONLY the complete modified file content with all requested changes applied.
+Do NOT include any explanatory text, comments about what you changed, or descriptions.
+Do NOT wrap the code in markdown fences or add any prefacing text.
+Just return the raw, complete file content starting from the very first import statement.
 Make sure the code is properly formatted and syntactically correct.
+
+IMPORTANT: Your response should start directly with code (like 'import React...' or 'const Component...') 
+and should not contain any explanatory text like 'Here is the updated code' or similar phrases.
+Just return the pure, raw file content that can be directly saved to the file.
 """
 
         # Get AI response
@@ -1207,11 +1218,19 @@ Make sure the code is properly formatted and syntactically correct.
                 "changes_made": []
             }
         
-        # Clean up the response
+        # Clean up the response and extract only the code content
         modified_content = response.text.strip()
         
-        # Remove code fences if present
-        if modified_content.startswith('```'):
+        # Enhanced code extraction - handle multiple formats
+        import re
+        
+        # Method 1: Look for code blocks with language specifiers
+        code_blocks = re.findall(r'```(?:javascript|jsx|js|typescript|ts|css|html|json)?\s*(.*?)```', modified_content, re.DOTALL | re.IGNORECASE)
+        if code_blocks:
+            # Use the largest code block (most likely to be the complete file)
+            modified_content = max(code_blocks, key=len).strip()
+        elif modified_content.startswith('```'):
+            # Method 2: Simple code fence removal
             lines = modified_content.split('\n')
             # Remove first line (opening fence) and find closing fence
             lines = lines[1:]
@@ -1220,43 +1239,140 @@ Make sure the code is properly formatted and syntactically correct.
                     lines = lines[:i]
                     break
             modified_content = '\n'.join(lines)
+        else:
+            # Method 3: Try to extract code from mixed content
+            # Look for patterns that indicate code content vs explanation
+            lines = modified_content.split('\n')
+            code_lines = []
+            in_code_section = False
+            
+            for line in lines:
+                # Skip obvious explanation lines
+                if any(phrase in line.lower() for phrase in [
+                    'here is the', 'here\'s the', 'i have', 'i\'ve',
+                    'an expert', 'the updated', 'complete updated',
+                    'changes applied', 'modifications made'
+                ]):
+                    continue
+                
+                # Detect start of code (imports, function declarations, etc.)
+                if any(line.strip().startswith(pattern) for pattern in [
+                    'import ', 'export ', 'const ', 'let ', 'var ',
+                    'function ', 'class ', '// ', '/* ', '<', '{',
+                    'if (', 'for (', 'while (', 'switch ('
+                ]):
+                    in_code_section = True
+                
+                if in_code_section:
+                    code_lines.append(line)
+            
+            if code_lines:
+                modified_content = '\n'.join(code_lines).strip()
+        
+        # Final cleanup - remove any remaining explanatory text at the beginning
+        lines = modified_content.split('\n')
+        cleaned_lines = []
+        found_code = False
+        
+        for line in lines:
+            # Skip lines that are clearly explanatory text
+            if not found_code and any(phrase in line.lower() for phrase in [
+                'frontend developer', 'reviewed your request', 'applied the necessary',
+                'here is the complete', 'updated content for'
+            ]):
+                continue
+            
+            # Once we find actual code, keep everything
+            if line.strip().startswith(('import ', 'export ', 'const ', 'let ', 'var ', 'function ', '//', '/*', '<')):
+                found_code = True
+            
+            if found_code or line.strip():
+                cleaned_lines.append(line)
+        
+        if cleaned_lines:
+            modified_content = '\n'.join(cleaned_lines)
+        
+        # Check if actual changes were made by comparing content
+        content_changed = modified_content.strip() != file_content.strip()
         
         # Generate explanation of changes made
-        explanation_prompt = f"""Analyze the changes made to this file and provide a concise explanation.
+        if content_changed:
+            explanation_prompt = f"""Analyze the changes made to this file and provide a concise explanation.
 
-ORIGINAL CONTENT:
-{file_content[:500]}...
+ORIGINAL CONTENT (first 1000 chars):
+{file_content[:1000]}...
 
-MODIFIED CONTENT:
-{modified_content[:500]}...
+MODIFIED CONTENT (first 1000 chars):
+{modified_content[:1000]}...
 
 USER REQUEST: "{user_request}"
 
-Provide a brief, user-friendly explanation of what changes were made, focusing on the visual/functional improvements."""
+Compare the original and modified content and provide a brief, user-friendly explanation of what specific changes were made. Focus on the actual differences you can identify."""
+        else:
+            explanation_prompt = f"""The user requested: "{user_request}"
+            
+However, no changes appear to have been made to the file content. Analyze why this might have happened and suggest what the user should do next."""
 
         explanation_response = model.generate_content(explanation_prompt)
-        explanation = explanation_response.text.strip() if explanation_response and explanation_response.text else "Changes applied as requested"
+        explanation = explanation_response.text.strip() if explanation_response and explanation_response.text else ("Changes applied as requested" if content_changed else "No changes were made to the file")
         
-        # Identify key changes made
+        # Have the AI itself analyze what changes were made
         changes_made = []
-        if "color" in user_request.lower():
-            changes_made.append("Color scheme updated")
-        if "text" in user_request.lower() or "font" in user_request.lower():
-            changes_made.append("Typography modified")
-        if "layout" in user_request.lower() or "position" in user_request.lower():
-            changes_made.append("Layout structure adjusted")
-        if "size" in user_request.lower():
-            changes_made.append("Element sizing updated")
-        if "background" in user_request.lower():
-            changes_made.append("Background styling changed")
+        if content_changed:
+            # Ask AI to identify specific changes made
+            changes_analysis_prompt = f"""Analyze the differences between the original and modified content and list the specific changes made.
+
+ORIGINAL CONTENT (first 2000 chars):
+{file_content[:2000]}
+
+MODIFIED CONTENT (first 2000 chars):
+{modified_content[:2000]}
+
+USER REQUEST: "{user_request}"
+
+Please identify and list the specific changes that were made. Respond with a simple list of changes, one per line, starting with a dash (-). Be specific and focus on actual modifications made to the content.
+
+Example format:
+- Changed "Future University" to "PSG College of Technology" in title and footer
+- Updated background image URL to show PSG campus
+- Modified header navigation text
+- Added new images for campus facilities
+
+Only list actual changes you can identify between the original and modified content."""
+
+            try:
+                changes_response = model.generate_content(changes_analysis_prompt)
+                if changes_response and changes_response.text:
+                    changes_text = changes_response.text.strip()
+                    # Extract individual changes from the AI response
+                    import re
+                    change_lines = re.findall(r'^[-•*]\s*(.+)', changes_text, re.MULTILINE)
+                    if change_lines:
+                        changes_made = [change.strip() for change in change_lines if change.strip()]
+                    else:
+                        # Fallback: split by lines and clean up
+                        lines = [line.strip() for line in changes_text.split('\n') if line.strip()]
+                        changes_made = [line.lstrip('-•* ') for line in lines if line.lstrip('-•* ')]
+                        
+                if not changes_made:
+                    changes_made = ["Content successfully customized"]
+                    
+            except Exception as e:
+                print(f"Warning: Could not analyze changes with AI: {e}")
+                changes_made = ["Content modified as requested"]
+        else:
+            changes_made = ["No changes applied - content unchanged"]
         
         return {
-            "success": True,
+            "success": content_changed,  # Only report success if content actually changed
             "modified_content": modified_content,
             "explanation": explanation,
             "changes_made": changes_made,
             "file_type": file_type,
-            "request_processed": user_request
+            "request_processed": user_request,
+            "content_changed": content_changed,
+            "original_length": len(file_content),
+            "modified_length": len(modified_content)
         }
         
     except Exception as e:

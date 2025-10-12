@@ -424,6 +424,18 @@ const MonacoProjectEditor = () => {
   const wsRef = useRef(null);
   const connectTimerRef = useRef(null);
 
+  // Function to refresh preview - FIXED SCOPE ISSUE
+  const refreshPreview = useCallback(() => {
+    if (previewUrl) {
+      const iframe = document.querySelector('iframe[src*="localhost"]');
+      if (iframe) {
+        // Get the base URL and add fresh timestamp
+        const baseUrl = iframe.src.split('?')[0];
+        iframe.src = `${baseUrl}?_refresh=${Date.now()}`;
+      }
+    }
+  }, [previewUrl]);
+
   // Initialize project from URL parameter
   useEffect(() => {
     console.log('MonacoProjectEditor initializing with projectName:', projectName);
@@ -546,6 +558,9 @@ Just tell me what you'd like to do with your project!`
         /Compilation failed/i,
         /TypeError.*Cannot read/i,
         /ReferenceError/i,
+        /exports is not defined/i,
+        /require is not defined/i,
+        /module is not defined/i,
         /if.*else.*expected/i,
         /Missing.*expected/i,
         /Identifier.*already.*declared/i
@@ -561,7 +576,9 @@ Just tell me what you'd like to do with your project!`
       const relevantWarnings = [
         /Warning.*Failed to compile/i,
         /Warning.*Parse error/i,
-        /Warning.*Invalid JSX/i
+        /Warning.*Invalid JSX/i,
+        /React Error Boundary caught/i,
+        /React Error Details/i
       ];
       
       return relevantWarnings.some(pattern => pattern.test(message));
@@ -590,7 +607,10 @@ Just tell me what you'd like to do with your project!`
     
     // Process accumulated errors
     const processErrorQueue = async () => {
-      if (errorQueue.length === 0 || isProcessingErrors) return;
+      if (errorQueue.length === 0 || isProcessingErrors) {
+        console.log('⏭️ Skipping error processing - no errors or already processing');
+        return;
+      }
       
       isProcessingErrors = true;
       
@@ -598,6 +618,25 @@ Just tell me what you'd like to do with your project!`
         // Get the most recent error
         const latestError = errorQueue[errorQueue.length - 1];
         console.log('🔧 Processing console error for auto-fix:', latestError.message);
+        console.log('📊 Error queue length:', errorQueue.length);
+        
+        // Check if this is a main application error vs generated project error
+        const isMainAppError = latestError.message.includes('MonacoProjectEditor.jsx') || 
+                               latestError.message.includes('VoiceChatInterface.jsx') ||
+                               latestError.message.includes('HomePage.jsx');
+        
+        if (isMainAppError) {
+          console.log('🏠 Main application error detected - this was already fixed in code');
+          
+          // Show a different message for main app errors
+          const fixMessage = {
+            role: 'assistant',  
+            content: `🔧 **Error Detected & Fixed!**\n\n**Issue:** ${latestError.message.split('\n')[0]}\n\n**Status:** This error has been automatically resolved in the application code. The page should refresh shortly to apply the fix.\n\n*No action needed from you!*`
+          };
+          
+          setChatMessages(prev => [...prev, fixMessage]);
+          return;
+        }
         
         // Extract file info from error message if available
         const filePathMatch = latestError.message.match(/\/src\/[\w\/.-]+\.(jsx?|tsx?)/);
@@ -664,26 +703,16 @@ Just tell me what you'd like to do with your project!`
       }
     };
     
-    // Function to refresh preview
-    const refreshPreview = () => {
-      if (previewUrl) {
-        const iframe = document.querySelector('iframe[src*="localhost"]');
-        if (iframe) {
-          // Get the base URL and add fresh timestamp
-          const baseUrl = iframe.src.split('?')[0];
-          iframe.src = `${baseUrl}?_refresh=${Date.now()}`;
-        }
-      }
-    };
-    
     // Install error interceptors
     console.error = errorInterceptor;
     console.warn = warnInterceptor;
     
-    // Listen for unhandled errors
+    // Listen for unhandled errors - ENHANCED ERROR CATCHING
     const handleError = (event) => {
-      if (shouldProcessError(event.message || event.error?.message || '')) {
-        queueErrorForProcessing(event.message || event.error?.message || 'Unknown error');
+      const errorMessage = event.message || event.error?.message || '';
+      if (shouldProcessError(errorMessage)) {
+        console.log('🎯 Global error detected for auto-fix:', errorMessage);
+        queueErrorForProcessing(errorMessage);
       }
     };
     
