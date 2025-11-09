@@ -1,0 +1,1 @@
+import { defineConfig } from 'vite'\nimport react from '@vitejs/plugin-react'\n\nexport default defineConfig({\n  plugins: [react()],\n  server: {\n    port: 3000,\n    host: true\n  },\n  define: {\n    global: 'globalThis',\n  },\n  resolve: {\n    alias: {\n      buffer: 'buffer',\n    }\n  }\n})\n

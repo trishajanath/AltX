@@ -1,7 +1,15 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import MonacoEditor from '@monaco-editor/react';
 import PageWrapper from './PageWrapper';
+
+// --- NEW: Add Google Font 'Inter' for a professional UI ---
+const fontLink = document.createElement('link');
+fontLink.href = 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap';
+fontLink.rel = 'stylesheet';
+if (!document.head.querySelector('[href*="Inter"]')) {
+  document.head.appendChild(fontLink);
+}
 
 // Add CSS animations for live generation
 const styleSheet = document.createElement('style');
@@ -20,7 +28,27 @@ if (!document.head.querySelector('[data-monaco-animations]')) {
   document.head.appendChild(styleSheet);
 }
 
-// Inline styles - simplified for new layout
+// --- NEW: SVG Icons for a cleaner UI ---
+const SendIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+    <path d="M3.478 2.405A.75.75 0 002.25 3.126l18 9a.75.75 0 000 1.348l-18 9a.75.75 0 00-1.228-.721l4.588-6.076a1.68 1.68 0 000-2.31l-4.588-6.076z" />
+  </svg>
+);
+
+const BackIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+    <path fillRule="evenodd" d="M7.72 12.53a.75.75 0 010-1.06l7.5-7.5a.75.75 0 111.06 1.06L9.31 12l6.97 6.97a.75.75 0 11-1.06 1.06l-7.5-7.5z" clipRule="evenodd" />
+  </svg>
+);
+
+const FwdIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+    <path fillRule="evenodd" d="M16.28 11.47a.75.75 0 010 1.06l-7.5 7.5a.75.75 0 01-1.06-1.06L14.69 12 7.72 5.03a.75.75 0 011.06-1.06l7.5 7.5z" clipRule="evenodd" />
+  </svg>
+);
+
+
+// Inline styles - Refactored for a professional black & white theme
 const styles = {
   monacoProjectEditor: {
     position: 'fixed',
@@ -28,10 +56,11 @@ const styles = {
     left: 0,
     right: 0,
     bottom: 0,
-    background: '#0b0b0b',
+    background: '#000000',
     color: '#ffffff',
-    fontFamily: "'Consolas', 'Monaco', 'Courier New', monospace",
-  zIndex: 2000,
+    // --- UPDATED: Professional UI Font ---
+    fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
+    zIndex: 2000,
     display: 'flex',
     flexDirection: 'column',
     overflow: 'hidden'
@@ -39,39 +68,39 @@ const styles = {
   
   // Header styles
   editorHeader: {
-    background: '#111111',
-    borderBottom: '1px solid #222222',
+    background: '#0a0a0a',
+    borderBottom: '1px solid #333333',
     padding: '8px 16px',
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    height: '48px'
+    height: '48px',
+    flexShrink: 0,
   },
   editorTitle: {
     display: 'flex',
     alignItems: 'center',
-    gap: '8px',
+    gap: '12px',
     fontWeight: 600
-  },
-  projectIcon: {
-    fontSize: '18px'
   },
   projectName: {
     color: '#ffffff',
     fontSize: '16px'
   },
   projectType: {
-    color: '#ffffff',
+    color: '#aaaaaa',
     fontSize: '12px',
-    background: 'rgba(255, 255, 255, 0.08)',
+    background: 'rgba(255, 255, 255, 0.1)',
     padding: '2px 6px',
-    borderRadius: '4px'
+    borderRadius: '4px',
+    fontWeight: 400,
   },
   buildingIndicator: {
     color: '#ffffff',
     fontSize: '12px',
     marginLeft: '8px',
-    animation: 'pulse 2s infinite'
+    animation: 'pulse 2s infinite',
+    fontWeight: 500,
   },
   editorActions: {
     display: 'flex',
@@ -79,27 +108,16 @@ const styles = {
     alignItems: 'center'
   },
   btnEditorAction: {
-    background: '#1f1f23',
+    background: 'transparent',
     color: '#ffffff',
-    border: '1px solid #333333',
+    border: '1px solid #ffffff',
     padding: '6px 12px',
     borderRadius: '4px',
     cursor: 'pointer',
     fontSize: '12px',
     fontWeight: 500,
-    transition: 'background 0.2s'
-  },
-  btnEditorActionPreview: {
-    background: '#262626',
-    border: '1px solid #2f6f4f'
-  },
-  btnEditorActionStop: {
-    background: '#262626',
-    border: '1px solid #6f2f2f'
-  },
-  btnEditorActionClose: {
-    background: '#262626',
-    border: '1px solid #6f2f2f'
+    fontFamily: 'inherit', // Use Inter font
+    transition: 'background 0.2s, color 0.2s',
   },
   
   // Navigation styles
@@ -109,27 +127,29 @@ const styles = {
     alignItems: 'center',
     marginRight: '8px'
   },
+  // --- UPDATED: Cleaner nav buttons ---
   navButton: {
-    background: '#1f1f23',
-    color: '#ffffff',
-    border: 'none',
-    padding: '4px 8px',
-    borderRadius: '3px',
+    background: 'transparent',
+    color: '#aaaaaa',
+    border: '1px solid #333333',
+    padding: '4px',
+    borderRadius: '4px',
     cursor: 'pointer',
     fontSize: '11px',
-    transition: 'background 0.2s',
-    minWidth: '24px',
-    height: '24px',
+    transition: 'background 0.2s, color 0.2s',
+    minWidth: '28px',
+    height: '28px',
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'center'
+    justifyContent: 'center',
   },
   navButtonDisabled: {
-    opacity: 0.4,
+    opacity: 0.3,
     cursor: 'not-allowed'
   },
   navButtonHover: {
-    background: '#2a2a2f'
+    background: '#1a1a1a',
+    color: '#ffffff',
   },
   
   // New layout styles
@@ -146,8 +166,8 @@ const styles = {
     width: '400px',
     minWidth: '300px',
     maxWidth: '500px',
-    background: '#0f0f0f',
-    borderRight: '1px solid #222222',
+    background: '#0a0a0a',
+    borderRight: '1px solid #333333',
     display: 'flex',
     flexDirection: 'column',
     resize: 'horizontal',
@@ -161,18 +181,19 @@ const styles = {
     flex: 1,
     display: 'flex',
     flexDirection: 'column',
-    background: '#0b0b0b',
+    background: '#000000',
     minHeight: 0
   },
   
   rightPanelHeader: {
-    background: '#111111',
-    borderBottom: '1px solid #222222',
+    background: '#0a0a0a',
+    borderBottom: '1px solid #333333',
     padding: '8px 16px',
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    height: '40px'
+    height: '40px',
+    flexShrink: 0,
   },
   
   sidebarTabs: {
@@ -184,45 +205,50 @@ const styles = {
     background: 'transparent',
     color: '#ffffff',
     border: 'none',
-    padding: '6px 8px',
+    padding: '6px 10px',
     cursor: 'pointer',
     borderRadius: '4px',
-    fontSize: '11px',
+    fontSize: '12px',
+    fontWeight: 500,
+    fontFamily: 'inherit',
     transition: 'all 0.2s'
   },
   
   sidebarTabActive: {
-    background: '#1a1a1a',
-    color: '#ffffff',
-    border: '1px solid #333333'
+    background: '#ffffff',
+    color: '#000000',
   },
   
   viewToggleButtons: {
     display: 'flex',
-    gap: '4px'
+    gap: '4px',
+    border: '1px solid #333333',
+    borderRadius: '6px',
+    padding: '2px',
   },
   
   viewToggleButton: {
     background: 'transparent',
-    color: '#ffffff',
-    border: '1px solid #222222',
-    padding: '6px 12px',
+    color: '#aaaaaa',
+    border: 'none',
+    padding: '4px 10px',
     cursor: 'pointer',
     borderRadius: '4px',
     fontSize: '12px',
+    fontWeight: 500,
+    fontFamily: 'inherit',
     transition: 'all 0.2s'
   },
   
   viewToggleButtonActive: {
-    background: '#1a1a1a',
-    color: '#ffffff',
-    border: '1px solid #333333'
+    background: '#ffffff',
+    color: '#000000',
   },
   
   rightPanelContent: {
     flex: 1,
     overflow: 'hidden',
-    background: '#0b0b0b',
+    background: '#000000',
     minHeight: 0
   },
   
@@ -239,46 +265,56 @@ const styles = {
   chatMessages: {
     flex: 1,
     overflowY: 'auto',
-    padding: '16px',
-    paddingBottom: '16px',
-    gap: '16px',
+    padding: '20px 16px',
+    gap: '12px',
     display: 'flex',
     flexDirection: 'column',
     scrollbarWidth: 'thin',
     scrollBehavior: 'smooth',
-    maxHeight: '100%'
+    maxHeight: '100%',
+    scrollbarColor: '#333333 #111111'
   },
   
   chatMessage: {
-    maxWidth: '80%',
-    padding: '12px 16px',
-    borderRadius: '12px',
+    maxWidth: '85%',
+    padding: '16px 20px',
+    margin: '8px 0',
+    borderRadius: '16px',
     fontSize: '14px',
-    lineHeight: 1.4,
-    whiteSpace: 'pre-wrap'
+    lineHeight: 1.6,
+    whiteSpace: 'pre-wrap',
+    fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    fontWeight: '400',
+    wordBreak: 'break-word',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+    position: 'relative',
   },
   
+  // --- UPDATED: Enhanced professional chat bubbles ---
   chatMessageUser: {
-    background: '#1f1f23',
-    color: '#ffffff',
+    background: '#ffffff',
+    color: '#1a1a1a',
     alignSelf: 'flex-end',
-    marginLeft: 'auto'
+    marginLeft: 'auto',
+    border: '1px solid #e5e7eb',
+    fontWeight: '500',
   },
   
   chatMessageAssistant: {
-    background: '#1a1a1a',
-    color: '#ffffff',
-    alignSelf: 'flex-start'
+    background: '#111111',
+    border: '1px solid #333333',
+    color: '#f9fafb',
+    alignSelf: 'flex-start',
+    fontWeight: '400',
   },
   
   chatInputContainer: {
-    padding: '16px',
-    borderTop: '1px solid #222222',
+    padding: '20px 16px',
+    borderTop: '1px solid #333333',
     display: 'flex',
-    gap: '8px',
-    background: '#0f0f0f',
-    height: '56px',
-    alignItems: 'center',
+    gap: '12px',
+    background: '#0a0a0a',
+    alignItems: 'flex-end',
     boxShadow: '0 -1px 0 rgba(255,255,255,0.06)'
   },
   
@@ -287,22 +323,35 @@ const styles = {
     background: '#111111',
     color: '#ffffff',
     border: '1px solid #333333',
-    borderRadius: '4px',
-    padding: '8px 12px',
+    borderRadius: '12px',
+    padding: '14px 18px',
     fontSize: '14px',
+    fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
     outline: 'none',
     resize: 'none',
-    lineHeight: 1.4
+    minHeight: '22px',
+    maxHeight: '120px',
+    lineHeight: 1.5,
   },
   
+  // --- UPDATED: Send button styles for icon ---
   chatSendButton: {
-    background: '#0e639c',
-    color: '#ffffff',
+    background: '#ffffff',
+    color: '#000000',
     border: 'none',
-    borderRadius: '4px',
-    padding: '8px 12px',
+    borderRadius: '12px',
+    padding: '12px',
     cursor: 'pointer',
-    fontSize: '14px'
+    fontSize: '14px',
+    fontWeight: 600,
+    width: '48px',
+    height: '48px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transition: 'all 0.2s ease',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+    marginBottom: '2px',
   },
   
   // File tree styles
@@ -317,12 +366,13 @@ const styles = {
   fileTreeItem: {
     display: 'flex',
     alignItems: 'center',
-    padding: '4px 8px',
+    padding: '6px 8px',
     cursor: 'pointer',
     borderRadius: '4px',
     marginBottom: '2px',
-    gap: '6px',
-    color: '#ffffff'
+    gap: '8px',
+    color: '#ffffff',
+    fontFamily: "'Inter', sans-serif",
   },
   
   fileTreeItemHover: {
@@ -330,9 +380,18 @@ const styles = {
   },
   
   fileTreeItemSelected: {
-    background: '#1f1f23',
-    color: '#ffffff',
-    border: '1px solid #333333'
+    background: '#ffffff',
+    color: '#000000',
+  },
+
+  // --- NEW: Style for file type identifier ---
+  fileTypeIcon: {
+    color: '#888888',
+    width: '20px',
+    fontSize: '12px',
+    display: 'inline-block',
+    textAlign: 'center',
+    fontFamily: "'Consolas', 'Monaco', 'Courier New', monospace",
   },
 
   // New: Code area row layout
@@ -347,9 +406,9 @@ const styles = {
     width: '260px',
     minWidth: '220px',
     maxWidth: '360px',
-    borderRight: '1px solid #222222',
+    borderRight: '1px solid #333333',
     overflow: 'auto',
-    background: '#0b0b0b'
+    background: '#000000'
   },
   codeEditorPane: {
     flex: 1,
@@ -369,25 +428,32 @@ const styles = {
     textAlign: 'center',
     maxWidth: '600px',
     margin: '0 auto',
-    padding: '40px'
+    padding: '40px',
+    color: '#ffffff',
   },
   
   welcomeScreenH2: {
     color: '#ffffff',
     marginBottom: '16px',
-    fontSize: '24px'
+    fontSize: '24px',
+    fontWeight: 600,
   },
   
   welcomeScreenP: {
-    color: '#ffffff',
+    color: '#aaaaaa',
     marginBottom: '12px',
-    lineHeight: 1.5
+    lineHeight: 1.6,
+    fontSize: '14px',
   }
 };
 
 const MonacoProjectEditor = () => {
-  const { projectName } = useParams();
+  const params = useParams();
+  const location = useLocation();
   const navigate = useNavigate();
+  
+  // Extract full project path from wildcard route
+  const projectName = params['*'] || location.pathname.replace('/project/', '');
   
   // Handle close action - navigate back to home
   const handleClose = () => {
@@ -469,16 +535,17 @@ const MonacoProjectEditor = () => {
       // Initialize chat with welcome message
       const welcomeMessage = {
         role: 'assistant',
-        content: `👋 Welcome to your AI coding assistant! I'm here to help you build amazing apps.
+        // --- UPDATED: Welcome message formatting ---
+        content: `Welcome to your AI coding assistant!
+I'm here to help you build, debug, and improve your project.
 
-I can help you:
-• Add new features to your app
-• Fix bugs and errors
-• Improve styling and design
-• Optimize performance
-• Explain code functionality
+You can ask me to:
+•  Add new features
+•  Fix bugs and errors
+•  Improve styling
+•  Explain complex code
 
-Just tell me what you'd like to do with your project!`
+Just tell me what you'd like to do.`
       };
       setChatMessages([welcomeMessage]);
       // Cleanup WebSocket when project changes or component unmounts
@@ -608,7 +675,7 @@ Just tell me what you'd like to do with your project!`
     // Process accumulated errors
     const processErrorQueue = async () => {
       if (errorQueue.length === 0 || isProcessingErrors) {
-        console.log('⏭️ Skipping error processing - no errors or already processing');
+        console.log('Skipping error processing - no errors or already processing');
         return;
       }
       
@@ -617,8 +684,8 @@ Just tell me what you'd like to do with your project!`
       try {
         // Get the most recent error
         const latestError = errorQueue[errorQueue.length - 1];
-        console.log('🔧 Processing console error for auto-fix:', latestError.message);
-        console.log('📊 Error queue length:', errorQueue.length);
+        console.log('Processing console error for auto-fix:', latestError.message);
+        console.log('Error queue length:', errorQueue.length);
         
         // Check if this is a main application error vs generated project error
         const isMainAppError = latestError.message.includes('MonacoProjectEditor.jsx') || 
@@ -626,12 +693,12 @@ Just tell me what you'd like to do with your project!`
                                latestError.message.includes('HomePage.jsx');
         
         if (isMainAppError) {
-          console.log('🏠 Main application error detected - this was already fixed in code');
+          console.log('Main application error detected - this was already fixed in code');
           
           // Show a different message for main app errors
           const fixMessage = {
             role: 'assistant',  
-            content: `🔧 **Error Detected & Fixed!**\n\n**Issue:** ${latestError.message.split('\n')[0]}\n\n**Status:** This error has been automatically resolved in the application code. The page should refresh shortly to apply the fix.\n\n*No action needed from you!*`
+            content: `**Error Detected & Fixed!**\n\n**Issue:** ${latestError.message.split('\n')[0]}\n\n**Status:** This error has been automatically resolved in the application code. The page should refresh shortly to apply the fix.\n\n*No action needed from you!*`
           };
           
           setChatMessages(prev => [...prev, fixMessage]);
@@ -662,12 +729,12 @@ Just tell me what you'd like to do with your project!`
         const result = await response.json();
         
         if (result.success) {
-          console.log('✅ Auto-fix applied successfully:', result.explanation);
+          console.log('Auto-fix applied successfully:', result.explanation);
           
           // Show success message in chat
           const successMessage = {
             role: 'assistant',
-            content: `🔧 **Auto-Fix Applied!**\n\n**Issue Fixed:** ${result.explanation}\n\n${result.suggestions?.length > 0 ? `**Additional Suggestions:**\n${result.suggestions.map(s => `• ${s}`).join('\n')}` : ''}\n\n*The error has been automatically resolved using Gemini AI.*`
+            content: `**Auto-Fix Applied!**\n\n**Issue Fixed:** ${result.explanation}\n\n${result.suggestions?.length > 0 ? `**Additional Suggestions:**\n${result.suggestions.map(s => `• ${s}`).join('\n')}` : ''}\n\n*The error has been automatically resolved using Gemini AI.*`
           };
           
           setChatMessages(prev => [...prev, successMessage]);
@@ -679,12 +746,12 @@ Just tell me what you'd like to do with your project!`
             }, 1000);
           }
         } else {
-          console.log('❌ Auto-fix failed:', result.error);
+          console.log('Auto-fix failed:', result.error);
           
           // Show error message in chat
           const errorMessage = {
             role: 'assistant',
-            content: `⚠️ **Auto-Fix Issue**\n\nI detected an error but couldn't fix it automatically:\n\n**Error:** ${result.error}\n\n${result.explanation ? `**Analysis:** ${result.explanation}\n\n` : ''}Please check the console for more details or ask me for help manually.`
+            content: `**Auto-Fix Issue**\n\nI detected an error but couldn't fix it automatically:\n\n**Error:** ${result.error}\n\n${result.explanation ? `**Analysis:** ${result.explanation}\n\n` : ''}Please check the console for more details or ask me for help manually.`
           };
           
           setChatMessages(prev => [...prev, errorMessage]);
@@ -711,7 +778,7 @@ Just tell me what you'd like to do with your project!`
     const handleError = (event) => {
       const errorMessage = event.message || event.error?.message || '';
       if (shouldProcessError(errorMessage)) {
-        console.log('🎯 Global error detected for auto-fix:', errorMessage);
+        console.log('Global error detected for auto-fix:', errorMessage);
         queueErrorForProcessing(errorMessage);
       }
     };
@@ -751,7 +818,7 @@ Just tell me what you'd like to do with your project!`
       const baseUrl = iframe.src.split('?')[0];
       const timestamp = Date.now();
       iframe.src = `${baseUrl}?_v=${timestamp}`;
-      console.log('🔄 Preview reloaded due to file changes');
+      console.log('Preview reloaded due to file changes');
     }
   }, [previewUrl, isBuilding]);
 
@@ -794,7 +861,7 @@ Just tell me what you'd like to do with your project!`
         
         // Only reload if files have actually changed
         if (currentHash !== lastFileHash && currentHash !== '') {
-          console.log('� File content changes detected');
+          console.log('File content changes detected');
           lastFileHash = currentHash;
           
           // Show pending changes indicator
@@ -831,11 +898,12 @@ Just tell me what you'd like to do with your project!`
     if (hasErrors && errors.length > 0) {
       const errorMessage = {
         role: 'assistant',
-        content: `⚠️ I detected ${errors.length} error(s) in your project:
+        // --- UPDATED: Error message formatting ---
+        content: `**Warning: ${errors.length} error(s) detected.**
 
 ${errors.slice(-3).map(err => `• ${err.message}`).join('\n')}
 
-💡 I can automatically fix common issues! Click the "Auto-Fix" button in the toolbar above, or just ask me to "fix the errors" and I'll take care of it for you.`
+Click the "Fix Errors" button or ask me to "fix the errors" and I'll try to resolve them automatically.`
       };
       
       // Only add if we don't already have a recent error message
@@ -908,14 +976,25 @@ ${errors.slice(-3).map(err => `• ${err.message}`).join('\n')}
       };
 
       ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
+      let data;
+      try {
+        // Safely parse the WebSocket data
+        if (!event.data || event.data === 'undefined' || event.data === 'null') {
+          console.warn('Received invalid WebSocket data:', event.data);
+          return;
+        }
+        data = JSON.parse(event.data);
+      } catch (error) {
+        console.error('Failed to parse WebSocket message:', event.data, error);
+        return;
+      }
       
       switch (data.type) {
         case 'preview_ready':
           setPreviewUrl(data.url);
           setIsBuilding(false);
           setIsRunning(true);
-          setTerminalOutput(prev => [...prev, `🌐 Live preview ready!`]);
+          setTerminalOutput(prev => [...prev, `Live preview ready!`]);
           // Clear errors on successful preview
           setHasErrors(false);
           setErrors([]);
@@ -929,18 +1008,18 @@ ${errors.slice(-3).map(err => `• ${err.message}`).join('\n')}
             }
           } else if (data.phase === 'generate') {
             // Show AI generation progress
-            setTerminalOutput(prev => [...prev, `🤖 ${data.message}`]);
+            setTerminalOutput(prev => [...prev, `AI: ${data.message}`]);
           } else if (data.phase === 'frontend') {
-            setTerminalOutput(prev => [...prev, `🎨 ${data.message}`]);
+            setTerminalOutput(prev => [...prev, `Frontend: ${data.message}`]);
           } else if (data.phase === 'backend') {
-            setTerminalOutput(prev => [...prev, `⚡ ${data.message}`]);
+            setTerminalOutput(prev => [...prev, `Backend: ${data.message}`]);
           } else if (data.phase === 'config') {
-            setTerminalOutput(prev => [...prev, `📄 ${data.message}`]);
+            setTerminalOutput(prev => [...prev, `Config: ${data.message}`]);
           }
           break;
         case 'file_created':
           // Show live file creation
-          setTerminalOutput(prev => [...prev, `📄 Created ${data.file_path}`]);
+          setTerminalOutput(prev => [...prev, `Created ${data.file_path}`]);
           // Refresh file tree to show new file
           if (fileTree.length > 0) {
             initializeProject();
@@ -948,13 +1027,13 @@ ${errors.slice(-3).map(err => `• ${err.message}`).join('\n')}
           break;
         case 'file_content_update':
           // Show live typing effect for file content
-          setTerminalOutput(prev => [...prev, `✍️ Writing ${data.file_path}...`]);
+          setTerminalOutput(prev => [...prev, `Writing ${data.file_path}...`]);
           break;
         case 'file_creation_start':
-          setTerminalOutput(prev => [...prev, `🚀 ${data.message}`]);
+          setTerminalOutput(prev => [...prev, `${data.message}`]);
           break;
         case 'file_creation_complete':
-          setTerminalOutput(prev => [...prev, `✅ ${data.message}`]);
+          setTerminalOutput(prev => [...prev, `Success: ${data.message}`]);
           // Refresh file tree after completion
           setTimeout(() => {
             initializeProject();
@@ -989,15 +1068,16 @@ ${errors.slice(-3).map(err => `• ${err.message}`).join('\n')}
             severity: 'error',
             timestamp: new Date().toISOString()
           }]);
-          setTerminalOutput(prev => [...prev, `❌ ${data.message}`]);
+          setTerminalOutput(prev => [...prev, `Error: ${data.message}`]);
           break;
-      }
+        }
       };
     }, 50);
   };
 
   const runProject = async () => {
     setIsBuilding(true);
+    setTerminalOutput([]); // Clear terminal on new run
     try {
       const response = await fetch('http://localhost:8000/api/run-project', {
         method: 'POST',
@@ -1050,12 +1130,11 @@ ${errors.slice(-3).map(err => `• ${err.message}`).join('\n')}
         // Add success message to chat
         const successMessage = {
           role: 'assistant',
-          content: `🔧 Auto-fix completed! ${result.message}
+          content: `**Auto-Fix Completed!**
+${result.message}
+${result.fixes_applied && result.fixes_applied.length > 0 ? `\n**Fixes Applied:**\n${result.fixes_applied.map(fix => `• ${fix}`).join('\n')}` : ''}
 
-${result.fixes_applied && result.fixes_applied.length > 0 ? `Fixes applied:
-${result.fixes_applied.map(fix => `• ${fix}`).join('\n')}` : ''}
-
-Your project has been automatically repaired. Try running it again!`
+Your project has been repaired. Trying to run it again...`
         };
         setChatMessages(prev => [...prev, successMessage]);
         
@@ -1082,12 +1161,12 @@ Your project has been automatically repaired. Try running it again!`
         } catch (geminiError) {
           const errorMessage = {
             role: 'assistant',
-            content: `❌ Both auto-fix methods failed:
-            
-**Traditional Fix Error:** ${error.message}
-**Gemini AI Fix Error:** ${geminiError.message}
+            content: `**Error: Auto-fix failed.**
+           
+**Initial Fix Error:** ${error.message}
+**AI Fix Error:** ${geminiError.message}
 
-Please try manually describing the issue in the chat for personalized assistance.`
+Please try describing the issue manually.`
           };
           setChatMessages(prev => [...prev, errorMessage]);
         }
@@ -1096,7 +1175,7 @@ Please try manually describing the issue in the chat for personalized assistance
       if (!fixAttempted) {
         const errorMessage = {
           role: 'assistant',
-          content: `❌ Failed to auto-fix errors: ${error.message}`
+          content: `Error: Failed to auto-fix errors: ${error.message}`
         };
         setChatMessages(prev => [...prev, errorMessage]);
       }
@@ -1134,16 +1213,14 @@ Please try manually describing the issue in the chat for personalized assistance
     if (geminiResult.success) {
       const successMessage = {
         role: 'assistant',
-        content: `🤖 **Gemini AI Auto-Fix Applied!**
+        content: `**Gemini AI Auto-Fix Applied!**
 
 **Analysis:** ${geminiResult.explanation}
+${geminiResult.suggestions?.length > 0 ? `\n**Improvements Made:**\n${geminiResult.suggestions.map(s => `• ${s}`).join('\n')}` : ''}
 
-${geminiResult.suggestions?.length > 0 ? `**Improvements Made:**
-${geminiResult.suggestions.map(s => `• ${s}`).join('\n')}` : ''}
+${geminiResult.changes_applied ? '*Files have been automatically updated.*' : '*Analysis complete. Please review the suggestions.*'}
 
-${geminiResult.changes_applied ? '*Files have been automatically updated.*' : '*Analysis completed - please review the suggested changes.*'}
-
-Try running your project again!`
+Trying to run the project again...`
       };
       setChatMessages(prev => [...prev, successMessage]);
       
@@ -1241,7 +1318,7 @@ Try running your project again!`
       setIsAiThinking(false);
       const fixMessage = {
         role: 'assistant',
-        content: `🔧 I'll help you fix those errors! Let me run the auto-fix tool for you.`
+        content: `Understood. I'll run the auto-fix tool for you now.`
       };
       setChatMessages(prev => [...prev, fixMessage]);
       
@@ -1269,13 +1346,11 @@ Try running your project again!`
       if (result.success) {
         const assistantMessage = {
           role: 'assistant',
-          content: `✅ ${result.explanation || "I've made the requested changes to your project!"}
+          content: `**Success:** ${result.explanation || "I've made the requested changes!"}
+${result.files_modified && result.files_modified.length > 0 ? `\n**Modified files:** ${result.files_modified.join(', ')}` : ''}
+${result.errors && result.errors.length > 0 ? `\n**Warning:** ${result.errors.length} issue(s) detected.` : ''}
 
-${result.files_modified && result.files_modified.length > 0 ? `Modified files: ${result.files_modified.join(', ')}` : ''}
-
-${result.errors && result.errors.length > 0 ? `\n⚠️ Note: ${result.errors.length} issue(s) detected that may need attention.` : ''}
-
-The changes have been applied and your preview has been updated.`
+The changes have been applied and the preview has been updated.`
         };
         setChatMessages(prev => [...prev, assistantMessage]);
         
@@ -1287,14 +1362,14 @@ The changes have been applied and your preview has been updated.`
       } else {
         const errorMessage = {
           role: 'assistant',
-          content: `❌ Sorry, I couldn't make those changes: ${result.error || 'Unknown error'}`
+          content: `**Error:** ${result.error || 'I encountered an issue and could not make those changes.'}`
         };
         setChatMessages(prev => [...prev, errorMessage]);
       }
     } catch (error) {
       const errorMessage = {
         role: 'assistant',
-        content: `❌ Sorry, there was an error processing your request: ${error.message}`
+        content: `**Error:** Sorry, there was an error processing your request: ${error.message}`
       };
       setChatMessages(prev => [...prev, errorMessage]);
     } finally {
@@ -1302,6 +1377,7 @@ The changes have been applied and your preview has been updated.`
     }
   };
 
+  // --- UPDATED: renderFileTree to use cleaner icons ---
   const renderFileTree = (items, level = 0) => {
     return items.map((item, index) => (
       <div key={index}>
@@ -1318,7 +1394,9 @@ The changes have been applied and your preview has been updated.`
             }
           }}
         >
-          <span>{item.type === 'dir' ? '📁' : '📄'}</span>
+          <span style={{...styles.fileTypeIcon, color: selectedFile === item.path ? '#000000' : '#888888'}}>
+            {item.type === 'dir' ? '[D]' : '[F]'}
+          </span>
           <span>{item.name}</span>
         </div>
         {item.children && renderFileTree(item.children, level + 1)}
@@ -1348,19 +1426,12 @@ The changes have been applied and your preview has been updated.`
       <div style={styles.monacoProjectEditor}>
         <div style={styles.editorHeader}>
           <div style={styles.editorTitle}>
-            <span style={styles.projectIcon}>⏳</span>
-            <span style={styles.projectName}>Loading project...</span>
+            <span style={styles.projectName}>Loading Project...</span>
           </div>
         </div>
-        <div style={{ 
-          display: 'flex', 
-          alignItems: 'center', 
-          justifyContent: 'center', 
-          flex: 1,
-          fontSize: '18px',
-          color: '#666'
-        }}>
-          🚀 Initializing {projectName}...
+        <div style={styles.welcomeScreen}>
+          {/* --- UPDATED: Loading text --- */}
+          <h2 style={styles.welcomeScreenH2}>Loading Project: {projectName}...</h2>
         </div>
       </div>
     );
@@ -1374,24 +1445,21 @@ The changes have been applied and your preview has been updated.`
         <div style={styles.editorTitle}>
           <button 
             style={{
-              background: 'none',
-              border: 'none',
-              color: '#ffffff',
-              fontSize: '18px',
-              cursor: 'pointer',
+              ...styles.btnEditorAction,
+              background: 'transparent',
+              border: '1px solid #555555',
+              color: '#aaaaaa',
               marginRight: '12px',
-              padding: '4px',
-              borderRadius: '4px',
             }}
             onClick={handleClose}
-            title="Back to Home"
+            // --- UPDATED: Text ---
+            title="Return to Dashboard"
           >
-            ≡
+            Exit Editor
           </button>
-          <span style={styles.projectIcon}>🚀</span>
           <span style={styles.projectName}>{project.name}</span>
           <span style={styles.projectType}>({project.tech_stack?.join(', ') || 'Mixed'})</span>
-          {isBuilding && <span style={styles.buildingIndicator}>⚡ Building...</span>}
+          {isBuilding && <span style={styles.buildingIndicator}>Building...</span>}
         </div>
         
         <div style={styles.editorActions}>
@@ -1404,23 +1472,25 @@ The changes have been applied and your preview has been updated.`
             disabled={isRunning || isBuilding}
             title="Run Project (F5)"
           >
-            {isBuilding ? '⚡' : isRunning ? '⏳' : '▶️'} 
-            {isBuilding ? 'Building' : 'Run'}
+            {/* --- UPDATED: Text --- */}
+            {isBuilding ? 'Building...' : isRunning ? 'Running...' : 'Run'}
           </button>
           
           {hasErrors && (
             <button 
               style={{
                 ...styles.btnEditorAction,
-                backgroundColor: '#ff6b35',
+                color: '#000000', // Black text
+                background: '#ffffff', // White background for error
+                border: '1px solid #ffffff',
                 ...(isAutoFixing ? { opacity: 0.5 } : {})
               }}
               onClick={autoFixErrors}
               disabled={isAutoFixing}
               title="Auto-fix detected errors"
             >
-              {isAutoFixing ? '🔧' : '🛠️'} 
-              {isAutoFixing ? 'Fixing...' : 'Auto-Fix'}
+              {/* --- UPDATED: Text --- */}
+              {isAutoFixing ? 'Fixing...' : 'Fix Errors'}
             </button>
           )}
           
@@ -1429,10 +1499,10 @@ The changes have been applied and your preview has been updated.`
               style={{
                 ...styles.btnEditorAction,
                 ...(pendingChanges ? { 
-                  backgroundColor: '#f59e0b', 
-                  color: 'white',
-                  boxShadow: '0 0 10px rgba(245, 158, 11, 0.5)'
-                } : { backgroundColor: '#28a745' })
+                  background: '#ffffff', 
+                  color: '#000000',
+                  boxShadow: '0 0 10px rgba(255, 255, 255, 0.5)'
+                } : {})
               }}
               onClick={() => {
                 refreshPreview();
@@ -1442,31 +1512,34 @@ The changes have been applied and your preview has been updated.`
                 }
                 setChatMessages(prev => [...prev, {
                   role: 'assistant',
-                  content: '🔄 **Preview Refreshed!**\n\nThe preview has been manually reloaded with the latest changes.'
+                  content: 'Info: **Preview Refreshed!**\n\nThe preview has been manually reloaded.'
                 }]);
               }}
-              title={pendingChanges ? "File changes detected - Click to refresh now" : "Refresh Preview"}
+              title={pendingChanges ? "File changes detected - Click to refresh" : "Refresh Preview"}
             >
-              {pendingChanges ? '🟠 Changes Detected' : '🔄 Refresh'}
+              {/* --- UPDATED: Text --- */}
+              {pendingChanges ? 'Refresh (Changes)' : 'Refresh Preview'}
             </button>
           )}
           
           {previewUrl && (
             <button 
-              style={{...styles.btnEditorAction, ...styles.btnEditorActionPreview}}
+              style={{...styles.btnEditorAction}}
               onClick={() => window.open(previewUrl, '_blank')}
               title="Open in New Tab"
             >
-              🔗 Open
+              {/* --- UPDATED: Text --- */}
+              Open Tab
             </button>
           )}
           
           <button 
-            style={{...styles.btnEditorAction, ...styles.btnEditorActionClose}}
+            style={{...styles.btnEditorAction, border: '1px solid #555555', color: '#aaaaaa'}}
             onClick={handleClose}
-            title="Close Editor"
+            title="Exit Editor"
           >
-            ✕
+            {/* --- UPDATED: Text --- */}
+            Exit
           </button>
         </div>
       </div>
@@ -1478,7 +1551,8 @@ The changes have been applied and your preview has been updated.`
           <div style={styles.rightPanelHeader}>
             <div style={styles.sidebarTabs}>
               <button style={{...styles.sidebarTab, ...styles.sidebarTabActive}}>
-                🤖 AI Assistant
+                {/* --- UPDATED: Text --- */}
+                AI Chat
               </button>
             </div>
           </div>
@@ -1493,12 +1567,45 @@ The changes have been applied and your preview has been updated.`
                     ...(message.role === 'user' ? styles.chatMessageUser : styles.chatMessageAssistant)
                   }}
                 >
-                  {message.content}
+                  <div style={{
+                    fontSize: '11px',
+                    fontWeight: '600',
+                    opacity: 0.7,
+                    marginBottom: '4px',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.5px'
+                  }}>
+                    {message.role === 'user' ? 'You' : 'AI Assistant'}
+                  </div>
+                  <div style={{
+                    fontSize: '14px',
+                    lineHeight: 1.6,
+                    fontWeight: message.role === 'user' ? '500' : '400'
+                  }}>
+                    {message.content}
+                  </div>
                 </div>
               ))}
               {isAiThinking && (
-                <div style={{...styles.chatMessage, ...styles.chatMessageAssistant}}>
-                  🤔 Thinking...
+                <div style={{...styles.chatMessage, ...styles.chatMessageAssistant, animation: 'pulse 2s infinite'}}>
+                  <div style={{
+                    fontSize: '11px',
+                    fontWeight: '600',
+                    opacity: 0.7,
+                    marginBottom: '4px',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.5px'
+                  }}>
+                    AI Assistant
+                  </div>
+                  <div style={{
+                    fontSize: '14px',
+                    lineHeight: 1.6,
+                    fontWeight: '400',
+                    fontStyle: 'italic'
+                  }}>
+                    Thinking...
+                  </div>
                 </div>
               )}
               <div ref={chatEndRef} style={{ height: '1px' }} />
@@ -1507,7 +1614,7 @@ The changes have been applied and your preview has been updated.`
             <div style={styles.chatInputContainer}>
               <textarea
                 style={styles.chatInput}
-                placeholder="Ask AI to modify your code..."
+                placeholder="Type your message to AI assistant..."
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
                 onKeyDown={(e) => {
@@ -1520,11 +1627,16 @@ The changes have been applied and your preview has been updated.`
                 rows={1}
               />
               <button 
-                style={styles.chatSendButton}
+                style={{
+                  ...styles.chatSendButton,
+                  opacity: (isAiThinking || !chatInput.trim()) ? 0.5 : 1,
+                  cursor: (isAiThinking || !chatInput.trim()) ? 'not-allowed' : 'pointer',
+                }}
                 onClick={sendChatMessage}
                 disabled={isAiThinking || !chatInput.trim()}
               >
-                {isAiThinking ? '⏳' : '↗️'}
+                {/* --- UPDATED: Replaced text with SVG icon --- */}
+                {isAiThinking ? '...' : <SendIcon />}
               </button>
             </div>
           </div>
@@ -1541,7 +1653,7 @@ The changes have been applied and your preview has been updated.`
                 }}
                 onClick={() => setActiveTab('files')}
               >
-                📁 Files
+                Files
               </button>
               <button 
                 style={{
@@ -1550,7 +1662,7 @@ The changes have been applied and your preview has been updated.`
                 }}
                 onClick={() => setActiveTab('errors')}
               >
-                ⚠️ Problems ({errors.length})
+                Problems ({errors.length})
               </button>
             </div>
             
@@ -1563,7 +1675,7 @@ The changes have been applied and your preview has been updated.`
                 onClick={() => setLayoutMode('preview')}
                 title="Live Preview"
               >
-                🌐 Preview
+                Preview
               </button>
               <button 
                 style={{
@@ -1573,7 +1685,7 @@ The changes have been applied and your preview has been updated.`
                 onClick={() => setLayoutMode('code')}
                 title="Code Editor"
               >
-                📝 Code
+                Code
               </button>
             </div>
           </div>
@@ -1586,7 +1698,7 @@ The changes have been applied and your preview has been updated.`
                   width: '100%',
                   height: '100%',
                   border: 'none',
-                  background: '#000000',
+                  background: '#ffffff', // Set to white for contrast
                   overflow: 'auto'
                 }}
                 title="Live Preview"
@@ -1597,25 +1709,25 @@ The changes have been applied and your preview has been updated.`
             ) : layoutMode === 'preview' && isBuilding ? (
               /* Live Generation Progress */
               <div style={styles.welcomeScreen}>
-                <h2 style={styles.welcomeScreenH2}>🤖 AI Generating Your App</h2>
+                <h2 style={styles.welcomeScreenH2}>AI Generating Your App...</h2>
                 <p style={styles.welcomeScreenP}>
-                  Watch your React + FastAPI application being created in real-time
+                  Watch your application being created in real-time.
                 </p>
                 <div style={{
-                  background: '#1e1e1e',
-                  border: '1px solid #3e3e42',
+                  background: '#1a1a1a',
+                  border: '1px solid #333333',
                   borderRadius: '8px',
                   padding: '16px',
                   marginTop: '20px',
                   maxHeight: '400px',
                   overflow: 'auto',
-                  fontFamily: 'Consolas, Monaco, monospace',
+                  fontFamily: "'Consolas', 'Monaco', 'Courier New', monospace",
                   fontSize: '14px',
                   color: '#d4d4d4',
                   textAlign: 'left'
                 }}>
                   {terminalOutput.length === 0 ? (
-                    <div style={{ color: '#ffcc02' }}>⚡ Initializing AI generation...</div>
+                    <div style={{ color: '#aaaaaa' }}>Initializing AI generation...</div>
                   ) : (
                     terminalOutput.map((line, index) => (
                       <div key={index} style={{ 
@@ -1628,18 +1740,19 @@ The changes have been applied and your preview has been updated.`
                   )}
                   <div style={{ 
                     marginTop: '8px',
-                    color: '#007acc',
+                    color: '#ffffff',
                     animation: 'pulse 1.5s infinite'
                   }}>
-                    ▊
+                    ...
                   </div>
                 </div>
               </div>
             ) : layoutMode === 'preview' && !previewUrl ? (
               <div style={styles.welcomeScreen}>
-                <h2 style={styles.welcomeScreenH2}>No Preview Available</h2>
+                {/* --- UPDATED: Text --- */}
+                <h2 style={styles.welcomeScreenH2}>Preview Unavailable</h2>
                 <p style={styles.welcomeScreenP}>
-                  Click "Run" to start your project and see the live preview.
+                  Click "Run" to build your project and start the live preview.
                 </p>
               </div>
             ) : (
@@ -1656,14 +1769,14 @@ The changes have been applied and your preview has been updated.`
                   ) : (
                     <div style={styles.fileTree}>
                       {errors.length === 0 ? (
-                        <div style={styles.welcomeScreenP}>✅ No problems detected</div>
+                        <div style={styles.welcomeScreenP}>No problems detected.</div>
                       ) : (
                         errors.map((error, index) => (
-                          <div key={index} style={styles.fileTreeItem}>
-                            <span>{error.severity === 'error' ? '❌' : '⚠️'}</span>
+                          <div key={index} style={{...styles.fileTreeItem, alignItems: 'flex-start'}}>
+                            <span style={{...styles.fileTypeIcon, color: '#ffffff', fontWeight: 600}}>{error.severity === 'error' ? '[E]' : '[W]'}</span>
                             <div>
                               <div style={{ color: '#ffffff' }}>{error.message}</div>
-                              <div style={{ fontSize: '11px', color: '#bbbbbb' }}>{error.file}:{error.line}</div>
+                              <div style={{ fontSize: '11px', color: '#bbbbbb', paddingTop: '4px' }}>{error.file}:{error.line}</div>
                             </div>
                           </div>
                         ))
@@ -1678,19 +1791,17 @@ The changes have been applied and your preview has been updated.`
                     <>
                       <div style={{ 
                         padding: '8px 16px', 
-                        background: '#2d2d30', 
-                        borderBottom: '1px solid #3e3e42',
-                        fontSize: '12px',
+                        background: '#1a1a1a', 
+                        borderBottom: '1px solid #333333',
+                        fontSize: '13px',
                         color: '#ffffff',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'space-between',
-                        position: 'sticky',
-                        top: 0,
-                        zIndex: 2
+                        flexShrink: 0,
                       }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          📄 {selectedFile}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontFamily: "'Consolas', 'Monaco', 'Courier New', monospace" }}>
+                          {selectedFile}
                         </div>
                         <div style={styles.navigationControls}>
                           <button
@@ -1704,13 +1815,16 @@ The changes have been applied and your preview has been updated.`
                             onMouseEnter={(e) => {
                               if (canGoBack) {
                                 e.target.style.background = styles.navButtonHover.background;
+                                e.target.style.color = styles.navButtonHover.color;
                               }
                             }}
                             onMouseLeave={(e) => {
                               e.target.style.background = styles.navButton.background;
+                              e.target.style.color = styles.navButton.color;
                             }}
                           >
-                            ←
+                            {/* --- UPDATED: Replaced text with SVG icon --- */}
+                            <BackIcon />
                           </button>
                           <button
                             style={{
@@ -1723,15 +1837,18 @@ The changes have been applied and your preview has been updated.`
                             onMouseEnter={(e) => {
                               if (canGoForward) {
                                 e.target.style.background = styles.navButtonHover.background;
+                                e.target.style.color = styles.navButtonHover.color;
                               }
                             }}
                             onMouseLeave={(e) => {
                               e.target.style.background = styles.navButton.background;
+                              e.target.style.color = styles.navButton.color;
                             }}
                           >
-                            →
+                            {/* --- UPDATED: Replaced text with SVG icon --- */}
+                            <FwdIcon />
                           </button>
-                          <span style={{ color: '#888', fontSize: '10px', marginLeft: '4px' }}>
+                          <span style={{ color: '#888', fontSize: '11px', marginLeft: '4px', fontFamily: "'Consolas', 'Monaco', 'Courier New', monospace" }}>
                             {currentViewIndex + 1}/{viewHistory.length}
                           </span>
                         </div>
@@ -1750,16 +1867,14 @@ The changes have been applied and your preview has been updated.`
                             lineNumbers: 'on',
                             scrollBeyondLastLine: false,
                             renderWhitespace: 'selection',
-                            readOnly: true,
+                            readOnly: true, // Set to true as AI is modifying it
+                            fontFamily: "'Consolas', 'Monaco', 'Courier New', monospace",
                             scrollbar: {
                               vertical: 'visible',
                               horizontal: 'visible',
                               useShadows: false,
-                              verticalHasArrows: true,
-                              horizontalHasArrows: true,
-                              arrowSize: 11,
-                              verticalScrollbarSize: 14,
-                              horizontalScrollbarSize: 14
+                              verticalScrollbarSize: 10,
+                              horizontalScrollbarSize: 10
                             },
                             mouseWheelZoom: true,
                             smoothScrolling: true
@@ -1769,9 +1884,10 @@ The changes have been applied and your preview has been updated.`
                     </>
                   ) : (
                     <div style={styles.welcomeScreen}>
-                      <h2 style={styles.welcomeScreenH2}>Select a file to view</h2>
+                      {/* --- UPDATED: Text --- */}
+                      <h2 style={styles.welcomeScreenH2}>Code Editor</h2>
                       <p style={styles.welcomeScreenP}>
-                        Choose a file from the file tree to view its contents.
+                        Select a file from the explorer on the left to view its contents.
                       </p>
                     </div>
                   )}

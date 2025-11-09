@@ -43,7 +43,7 @@ function App() {
                 <div className="page"><VoiceChatInterface onProjectGenerated={(projectName) => window.location.href = `/project/${projectName}`} /></div>
               </ProtectedRoute>
             } />
-            <Route path="/project/:projectName" element={
+            <Route path="/project/*" element={
               <ProtectedRoute>
                 <div className="page"><MonacoProjectEditor /></div>
               </ProtectedRoute>

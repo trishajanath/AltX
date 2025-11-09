@@ -1152,6 +1152,20 @@ CRITICAL INSTRUCTIONS:
 4. For image requests, update image URLs to reflect the requested content
 5. For styling requests, make comprehensive visual improvements
 
+ERROR PREVENTION REQUIREMENTS:
+- NEVER use twMerge directly without importing it from './lib/utils'
+- ALWAYS import utilities as: import {{ cn, twMerge }} from './lib/utils'
+- If twMerge is needed globally, add: window.twMerge = twMerge;
+- Use cn() function for className merging instead of direct twMerge calls
+- Ensure all utility functions are properly imported before use
+
+DEFENSIVE PROGRAMMING REQUIREMENTS:
+- ALWAYS use (array || []).filter() instead of array.filter() to prevent undefined errors
+- Add loading state checks before rendering components that depend on async data
+- Use defensive checks like (notifications || []).map() for array operations
+- Wrap array operations in null/undefined checks: (products || []).filter(...)
+- Add proper error boundaries and loading states for better user experience
+
 SPECIFIC CHANGE REQUIREMENTS:
 - Name changes: Replace ALL instances of old names with new names throughout the file
 - Image additions: Add relevant image URLs using placeholder services with descriptive text
@@ -1359,6 +1373,7 @@ Only list actual changes you can identify between the original and modified cont
                     
             except Exception as e:
                 print(f"Warning: Could not analyze changes with AI: {e}")
+                changes_made = ["Content modified as requested"]
                 changes_made = ["Content modified as requested"]
         else:
             changes_made = ["No changes applied - content unchanged"]

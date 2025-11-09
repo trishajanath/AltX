@@ -152,19 +152,19 @@ const SignupPage = () => {
     };
 
     return (
-        <PageWrapper>
             <div className="signup-container">
                 <style>{`
-                    @import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600;700&family=Inter:wght@400;500&display=swap');
+                    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap');
                     
                     .signup-container {
-                        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-                        background: transparent;
+                        font-family: 'Inter', sans-serif;
+                        background: #000000;
                         color: #ffffff;
                         min-height: 100vh;
                         display: flex;
                         flex-direction: column;
                         position: relative;
+                        overflow: hidden;
                     }
 
                     .header {
@@ -173,70 +173,41 @@ const SignupPage = () => {
                         left: 0;
                         right: 0;
                         z-index: 50;
-                        background: rgba(10, 10, 10, 0.5);
-                        backdrop-filter: blur(15px);
+                        padding: 1rem 0;
+                        background: rgba(0, 0, 0, 0.8);
+                        backdrop-filter: blur(10px);
                         border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-                        height: 70px;
-                        min-height: 70px;
                     }
 
                     .header-content {
-                        max-width: 1200px;
-                        margin: 0 auto;
-                        padding: 1rem 2rem;
                         display: flex;
                         justify-content: space-between;
                         align-items: center;
-                        height: 100%;
-                        box-sizing: border-box;
+                        max-width: 1400px;
+                        margin: 0 auto;
+                        padding: 0 2rem;
                     }
 
                     .logo {
-                        font-family: 'Chakra Petch', sans-serif !important;
-                        font-size: 1.8rem !important;
+                        font-family: 'Inter', sans-serif !important;
+                        font-size: 1.5rem !important;
                         font-weight: 700 !important;
-                        letter-spacing: 2px !important;
+                        letter-spacing: 1px !important;
+                        cursor: pointer !important;
                         color: #ffffff !important;
-                        text-shadow: none !important;
-                        filter: none !important;
+                        transition: color 0.3s ease !important;
+                        text-decoration: none !important;
+                        background: transparent !important;
+                        background-image: none !important;
+                        background-clip: initial !important;
+                        -webkit-background-clip: initial !important;
                         -webkit-text-fill-color: #ffffff !important;
                         -webkit-text-stroke: none !important;
-                        background: none !important;
-                        background-color: transparent !important;
-                        cursor: pointer;
+                        text-shadow: none !important;
+                        filter: none !important;
                     }
 
-                    .header-buttons {
-                        display: flex;
-                        gap: 1rem;
-                        align-items: center;
-                    }
 
-                    .btn {
-                        padding: 0.7rem 1.5rem;
-                        border-radius: 0.5rem;
-                        font-weight: 600;
-                        cursor: pointer;
-                        transition: all 0.3s ease;
-                        border: 2px solid transparent;
-                        font-size: 0.9rem;
-                        display: flex;
-                        align-items: center;
-                        gap: 0.5rem;
-                        text-decoration: none;
-                    }
-
-                    .btn-ghost {
-                        background: transparent;
-                        color: #a3a3a3;
-                        border-color: rgba(255, 255, 255, 0.2);
-                    }
-
-                    .btn-ghost:hover {
-                        color: #ffffff;
-                        border-color: #ffffff;
-                        background: rgba(255, 255, 255, 0.1);
-                    }
 
                     .main-content {
                         flex-grow: 1;
@@ -246,72 +217,74 @@ const SignupPage = () => {
                         text-align: center;
                         position: relative;
                         z-index: 2;
-                        padding: 90px 2rem 2rem 2rem;
+                        padding: 5rem 2rem 2rem;
                         min-height: 100vh;
                         box-sizing: border-box;
                     }
 
                     .signup-card {
-                        background: rgba(16, 16, 16, 0.8);
-                        border: 1px solid rgba(255, 255, 255, 0.15);
-                        border-radius: 1.5rem;
-                        padding: 2.5rem;
-                        max-width: 500px;
+                        background: rgba(16, 16, 16, 0.6);
+                        border: 1px solid rgba(255, 255, 255, 0.1);
+                        border-radius: 1rem;
+                        padding: 2rem;
+                        max-width: 440px;
                         width: 100%;
                         backdrop-filter: blur(20px);
                         -webkit-backdrop-filter: blur(20px);
-                        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-                        margin: 0 auto;
+                        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+                        margin: auto;
                     }
 
                     .signup-header {
                         text-align: center;
-                        margin-bottom: 2rem;
+                        margin-bottom: 1.5rem;
                     }
 
                     .signup-title {
-                        font-family: 'Chakra Petch', sans-serif;
-                        font-size: 2.5rem;
+                        font-family: 'Inter', sans-serif;
+                        font-size: 2rem;
                         font-weight: 700;
-                        color: #ffffff !important;
+                        color: #ffffff;
                         margin-bottom: 0.5rem;
                         letter-spacing: -1px;
                     }
 
                     .signup-subtitle {
                         color: #a3a3a3;
-                        font-size: 1.1rem;
+                        font-size: 0.95rem;
                         font-weight: 400;
+                        font-family: 'Inter', sans-serif;
                     }
                     .form-group {
-                        margin-bottom: 1.5rem;
+                        margin-bottom: 1.2rem;
                         text-align: left;
                     }
 
                     .form-label {
                         display: block;
-                        margin-bottom: 0.75rem;
-                        font-weight: 600;
+                        margin-bottom: 0.4rem;
+                        font-weight: 500;
                         color: #ffffff;
-                        font-size: 0.95rem;
+                        font-size: 0.85rem;
+                        font-family: 'Inter', sans-serif;
                     }
 
                     .form-input {
                         width: 100%;
-                        padding: 1rem 1.25rem;
+                        padding: 0.85rem 1rem;
                         background: rgba(0, 0, 0, 0.4);
                         border: 1px solid rgba(255, 255, 255, 0.2);
                         border-radius: 0.75rem;
                         color: #ffffff;
-                        font-size: 1rem;
+                        font-size: 0.95rem;
                         transition: all 0.3s ease;
                         box-sizing: border-box;
-                        font-family: inherit;
+                        font-family: 'Inter', sans-serif;
                     }
 
                     .form-input:focus {
                         outline: none;
-                        border-color: #ffffff;
+                        border-color: rgba(255, 255, 255, 0.5);
                         background: rgba(255, 255, 255, 0.05);
                         box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1);
                     }
@@ -333,7 +306,7 @@ const SignupPage = () => {
                         font-size: 0.9rem;
                         text-decoration: underline;
                         transition: color 0.3s ease;
-                        font-family: inherit;
+                        font-family: 'Inter', sans-serif;
                     }
 
                     .forgot-link:hover {
@@ -348,30 +321,30 @@ const SignupPage = () => {
 
 
                     .form-input.valid {
-                        border-color: #22c55e;
-                        background: rgba(34, 197, 94, 0.1);
+                        border-color: rgba(255, 255, 255, 0.5);
+                        background: rgba(255, 255, 255, 0.05);
                     }
 
                     .form-input.invalid {
-                        border-color: #ef4444;
-                        background: rgba(239, 68, 68, 0.1);
+                        border-color: rgba(255, 255, 255, 0.3);
+                        background: rgba(255, 255, 255, 0.02);
                     }
 
                     .form-input:focus {
                         outline: none;
-                        border-color: #ffffff;
+                        border-color: rgba(255, 255, 255, 0.5);
                         background: rgba(255, 255, 255, 0.05);
                         box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1);
                     }
 
                     .form-input.valid:focus {
-                        border-color: #22c55e;
-                        box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.2);
+                        border-color: rgba(255, 255, 255, 0.7);
+                        box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.2);
                     }
 
                     .form-input.invalid:focus {
-                        border-color: #ef4444;
-                        box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2);
+                        border-color: rgba(255, 255, 255, 0.3);
+                        box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1);
                     }
 
                     .validation-icon {
@@ -414,14 +387,15 @@ const SignupPage = () => {
                         margin-top: 0.5rem;
                         min-height: 1.2rem;
                         transition: all 0.3s ease;
+                        font-family: 'Inter', sans-serif;
                     }
 
                     .validation-message.valid {
-                        color: #22c55e;
+                        color: #ffffff;
                     }
 
                     .validation-message.invalid {
-                        color: #ef4444;
+                        color: #a3a3a3;
                     }
 
                     .password-strength-meter {
@@ -441,41 +415,42 @@ const SignupPage = () => {
 
                     .strength-bar.weak {
                         width: 40%;
-                        background: #ef4444;
+                        background: #666666;
                     }
 
                     .strength-bar.medium {
                         width: 70%;
-                        background: #f59e0b;
+                        background: #a3a3a3;
                     }
 
                     .strength-bar.strong {
                         width: 100%;
-                        background: #22c55e;
+                        background: #ffffff;
                     }
 
                     .login-button {
                         width: 100%;
-                        padding: 1.125rem 2rem;
-                        background: #ffffff;
-                        color: #000000;
-                        border: 2px solid #ffffff;
+                        padding: 0.9rem 1.5rem;
+                        background: transparent;
+                        color: #a3a3a3;
+                        border: 1px solid rgba(255, 255, 255, 0.2);
                         border-radius: 0.75rem;
-                        font-size: 1.1rem;
-                        font-weight: 700;
+                        font-size: 1rem;
+                        font-weight: 500;
                         cursor: pointer;
                         transition: all 0.3s ease;
-                        margin-bottom: 2rem;
+                        margin-bottom: 1.5rem;
                         text-transform: uppercase;
                         letter-spacing: 1px;
-                        font-family: inherit;
+                        font-family: 'Inter', sans-serif;
                     }
 
                     .login-button:hover {
                         transform: translateY(-2px);
-                        box-shadow: 0 10px 30px rgba(255, 255, 255, 0.2);
-                        background: #ffffff;
-                        color: #000000;
+                        box-shadow: 0 10px 30px rgba(255, 255, 255, 0.1);
+                        background: rgba(255, 255, 255, 0.05);
+                        color: #ffffff;
+                        border-color: rgba(255, 255, 255, 0.5);
                     }
 
                     .login-button:disabled {
@@ -487,7 +462,7 @@ const SignupPage = () => {
                     .name-row {
                         display: grid;
                         grid-template-columns: 1fr 1fr;
-                        gap: 1.5rem;
+                        gap: 1.2rem;
                     }
 
 
@@ -495,7 +470,7 @@ const SignupPage = () => {
                     .divider {
                         display: flex;
                         align-items: center;
-                        margin: 2rem 0;
+                        margin: 1.5rem 0;
                     }
 
                     .divider-line {
@@ -507,11 +482,12 @@ const SignupPage = () => {
                     .divider-text {
                         padding: 0 1rem;
                         color: #a3a3a3;
-                        font-size: 0.9rem;
+                        font-size: 0.85rem;
+                        font-family: 'Inter', sans-serif;
                     }
 
                     .social-login {
-                        margin-bottom: 2rem;
+                        margin-bottom: 1.5rem;
                     }
 
                     .social-icon {
@@ -522,10 +498,11 @@ const SignupPage = () => {
 
                     .policy-links {
                         text-align: center;
-                        margin: 1.5rem 0;
-                        font-size: 0.85rem;
+                        margin: 1rem 0;
+                        font-size: 0.8rem;
                         color: #a3a3a3;
                         line-height: 1.4;
+                        font-family: 'Inter', sans-serif;
                     }
 
                     .policy-link {
@@ -533,6 +510,7 @@ const SignupPage = () => {
                         text-decoration: underline;
                         cursor: pointer;
                         transition: all 0.3s ease;
+                        font-family: 'Inter', sans-serif;
                     }
 
                     .policy-link:hover {
@@ -542,9 +520,10 @@ const SignupPage = () => {
 
                     .login-link {
                         text-align: center;
-                        margin-bottom: 1.5rem;
+                        margin-bottom: 1rem;
                         color: #a3a3a3;
-                        font-size: 0.9rem;
+                        font-size: 0.85rem;
+                        font-family: 'Inter', sans-serif;
                     }
 
                     .login-link button {
@@ -554,7 +533,7 @@ const SignupPage = () => {
                         cursor: pointer;
                         text-decoration: underline;
                         font-size: inherit;
-                        font-family: inherit;
+                        font-family: 'Inter', sans-serif;
                         font-weight: 500;
                         transition: color 0.3s ease;
                     }
@@ -573,9 +552,9 @@ const SignupPage = () => {
                         color: #a3a3a3;
                         border: none;
                         cursor: pointer;
-                        font-size: 0.9rem;
+                        font-size: 0.85rem;
                         transition: color 0.3s ease;
-                        font-family: inherit;
+                        font-family: 'Inter', sans-serif;
                     }
 
                     .back-button:hover {
@@ -583,16 +562,16 @@ const SignupPage = () => {
                     }
                     .social-button {
                         width: 100%;
-                        padding: 1rem 1.25rem;
+                        padding: 0.85rem 1rem;
                         background: rgba(0, 0, 0, 0.4);
                         border: 1px solid rgba(255, 255, 255, 0.2);
                         border-radius: 0.75rem;
                         color: #ffffff;
-                        font-size: 0.95rem;
+                        font-size: 0.9rem;
                         cursor: pointer;
                         transition: all 0.3s ease;
-                        margin-bottom: 1rem;
-                        font-family: inherit;
+                        margin-bottom: 0.8rem;
+                        font-family: 'Inter', sans-serif;
                         font-weight: 500;
                         display: flex;
                         align-items: center;
@@ -601,39 +580,40 @@ const SignupPage = () => {
                     }
 
                     .social-button.primary {
-                        background: #ffffff;
-                        color: #000000;
-                        border: 2px solid #ffffff;
-                        font-weight: 700;
+                        background: transparent;
+                        color: #a3a3a3;
+                        border: 1px solid rgba(255, 255, 255, 0.2);
+                        font-weight: 500;
                         text-transform: uppercase;
                         letter-spacing: 1px;
-                        font-size: 1.1rem;
-                        padding: 1rem 2rem;
+                        font-size: 1rem;
+                        padding: 0.9rem 1.5rem;
                     }
 
                     .social-button:hover {
-                        border-color: #ffffff;
-                        background: rgba(255, 255, 255, 0.1);
+                        border-color: rgba(255, 255, 255, 0.5);
+                        background: rgba(255, 255, 255, 0.05);
                         transform: translateY(-1px);
+                        color: #ffffff;
                     }
 
                     .social-button.primary:hover {
                         transform: translateY(-2px);
-                        box-shadow: 0 10px 30px rgba(255, 255, 255, 0.2);
-                        background: #ffffff;
-                        color: #000000;
+                        box-shadow: 0 10px 30px rgba(255, 255, 255, 0.1);
+                        background: rgba(255, 255, 255, 0.05);
+                        color: #ffffff;
+                        border-color: rgba(255, 255, 255, 0.5);
                     }
 
                     @media (max-width: 768px) {
-                        .header { height: 70px; min-height: 70px; }
-                        .header-content { padding: 1rem; }
+                        .header-content { padding: 0 1rem; }
                         .main-content { 
-                            padding: 90px 1rem 2rem 1rem;
+                            padding: 5rem 1rem 2rem;
                             min-height: 100vh;
                         }
                         .signup-card { 
                             padding: 2rem; 
-                            margin: 0;
+                            margin: auto;
                             max-width: none;
                             border-radius: 1rem;
                             width: 100%;
@@ -916,7 +896,6 @@ const SignupPage = () => {
                     </div>
                 </main>
             </div>
-        </PageWrapper>
     );
 };
 

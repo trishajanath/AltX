@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
+    "clsx": "^2.1.1",
     "file-saver": "^2.0.5",
     "jszip": "^3.10.1",
     "lucide-react": "^0.536.0",
@@ -19,6 +20,7 @@
     "react-iframe": "^1.8.5",
     "react-router-dom": "^7.7.1",
     "react-transition-group": "^4.4.5",
+    "tailwind-merge": "^3.3.1",
     "three": "^0.180.0"
   },
   "devDependencies": {

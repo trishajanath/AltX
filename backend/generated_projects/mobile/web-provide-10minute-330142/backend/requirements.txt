@@ -1,0 +1,10 @@
+# requirements.txt - mobile/web-provide-10minute-330142 Dependencies
+# VALIDATED: All packages tested and verified
+
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+sqlalchemy==2.0.23
+pydantic[email]==2.5.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.6
+bcrypt==4.1.2

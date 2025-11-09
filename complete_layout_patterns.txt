@@ -1,0 +1,270 @@
+
+            # 1. Magazine Editorial Layout (Inspired by Vogue, Kinfolk)
+            LayoutPattern(
+                name="editorial_magazine",
+                type="Magazine Editorial",
+                grid_system="asymmetric_editorial",
+                navigation="minimal_top_nav",
+                hero_style="full_bleed_typography",
+                content_flow="editorial_columns",
+                visual_hierarchy="typographic_scale",
+                color_approach="high_contrast_minimal",
+                typography_scale="editorial_large",
+                spacing_system="generous_whitespace",
+                interactive_elements=["smooth_scroll", "parallax_text", "hover_reveals"],
+                animation_style="subtle_fade_transitions",
+                responsive_strategy="content_first",
+                css_classes=[
+                    "grid grid-cols-12 gap-8",
+                    "col-span-8 text-6xl font-light leading-tight",
+                    "col-span-4 text-lg leading-loose opacity-70",
+                    "py-24 px-12",
+                    "border-l border-gray-200 pl-8"
+                ],
+                design_inspiration="Kinfolk Magazine, Vogue Digital, Editorial Layouts",
+                visual_effects=["Typography Focus", "Whitespace Mastery", "Elegant Simplicity"],
+                design_principles=["Content First", "Readable Typography", "Generous Whitespace"]
+            ),
+            
+            # 2. Brutalist Architecture (Inspired by Gumroad, Linear)
+            LayoutPattern(
+                name="brutalist_geometric",
+                type="Brutalist Geometric",
+                grid_system="strict_geometric",
+                navigation="bold_geometric_nav",
+                hero_style="geometric_blocks",
+                content_flow="card_grid_system",
+                visual_hierarchy="size_weight_contrast",
+                color_approach="monochrome_accent",
+                typography_scale="bold_condensed",
+                spacing_system="tight_geometric",
+                interactive_elements=["sharp_hover_effects", "geometric_transitions", "bold_animations"],
+                animation_style="sharp_geometric_motion",
+                responsive_strategy="block_stacking",
+                css_classes=[
+                    "grid grid-cols-4 gap-0",
+                    "bg-black text-white p-8",
+                    "border-2 border-white",
+                    "hover:bg-white hover:text-black transition-all duration-300",
+                    "font-mono font-bold uppercase tracking-wider"
+                ],
+                design_inspiration="Linear.app, Gumroad, Swiss Design Principles",
+                visual_effects=["Sharp Contrasts", "Geometric Shapes", "Bold Typography"],
+                design_principles=["Function Over Form", "Honest Materials", "Bold Simplicity"]
+            ),
+            
+            # 3. Organic Flowing Layout (Inspired by Apple, Airbnb)
+            LayoutPattern(
+                name="organic_flowing",
+                type="Organic Flowing",
+                grid_system="organic_flow",
+                navigation="floating_navigation",
+                hero_style="curved_sections",
+                content_flow="flowing_content",
+                visual_hierarchy="natural_progression",
+                color_approach="gradient_harmony",
+                typography_scale="natural_rhythm",
+                spacing_system="organic_breathing",
+                interactive_elements=["smooth_curves", "organic_hover", "flowing_animations"],
+                animation_style="natural_easing",
+                responsive_strategy="fluid_adaptation",
+                css_classes=[
+                    "rounded-[3rem] bg-gradient-to-br from-blue-50 to-purple-50",
+                    "backdrop-blur-md bg-white/60",
+                    "shadow-2xl shadow-blue-500/10",
+                    "hover:shadow-3xl hover:shadow-blue-500/20 transition-all duration-500",
+                    "border border-white/20"
+                ],
+                design_inspiration="Apple.com, Airbnb, Organic Interface Design",
+                visual_effects=["Smooth Curves", "Natural Gradients", "Organic Shapes"],
+                design_principles=["Natural Flow", "Intuitive Navigation", "Harmonious Colors"]
+            ),
+            
+            # 4. Split Screen Diagonal (Inspired by Stripe, Figma)
+            LayoutPattern(
+                name="diagonal_split",
+                type="Diagonal Split Screen",
+                grid_system="diagonal_division",
+                navigation="integrated_diagonal",
+                hero_style="diagonal_hero",
+                content_flow="alternating_diagonals",
+                visual_hierarchy="diagonal_emphasis",
+                color_approach="dual_tone_contrast",
+                typography_scale="contrast_pairing",
+                spacing_system="angular_rhythm",
+                interactive_elements=["diagonal_reveals", "split_interactions", "angular_hover"],
+                animation_style="diagonal_motion",
+                responsive_strategy="mobile_stacking",
+                css_classes=[
+                    "clip-path-diagonal bg-gradient-to-br from-indigo-600 to-purple-700",
+                    "transform skew-y-3 origin-top-left",
+                    "-skew-y-3 p-16",
+                    "relative z-10 overflow-hidden",
+                    "before:absolute before:inset-0 before:bg-white/10 before:backdrop-blur"
+                ],
+                design_inspiration="Stripe.com, Figma, Angular Design Systems",
+                visual_effects=["Diagonal Cuts", "Split Compositions", "Dynamic Angles"],
+                design_principles=["Dynamic Tension", "Split Focus", "Angular Rhythm"]
+            ),
+            
+            # 5. Card Masonry Layout (Inspired by Pinterest, Behance)
+            LayoutPattern(
+                name="masonry_cards",
+                type="Dynamic Masonry",
+                grid_system="masonry_flow",
+                navigation="sticky_minimal",
+                hero_style="masonry_hero",
+                content_flow="dynamic_cards",
+                visual_hierarchy="card_importance",
+                color_approach="varied_card_colors",
+                typography_scale="card_typography",
+                spacing_system="dynamic_gaps",
+                interactive_elements=["card_hover_lift", "masonry_rearrange", "infinite_scroll"],
+                animation_style="staggered_reveals",
+                responsive_strategy="responsive_columns",
+                css_classes=[
+                    "columns-1 md:columns-2 lg:columns-3 xl:columns-4 gap-6",
+                    "break-inside-avoid mb-6",
+                    "bg-white rounded-2xl shadow-lg overflow-hidden",
+                    "hover:shadow-2xl hover:-translate-y-2 transition-all duration-300",
+                    "p-6 backdrop-blur-sm bg-white/90"
+                ],
+                design_inspiration="Pinterest, Behance, Masonry Layouts",
+                visual_effects=["Dynamic Grids", "Card Animations", "Staggered Reveals"],
+                design_principles=["Content Flexibility", "Visual Hierarchy", "Responsive Flow"]
+            ),
+            
+            # 6. Full-Screen Immersive (Inspired by Awwwards winners)
+            LayoutPattern(
+                name="immersive_fullscreen",
+                type="Immersive Full-Screen",
+                grid_system="viewport_sections",
+                navigation="overlay_navigation",
+                hero_style="immersive_viewport",
+                content_flow="fullscreen_sections",
+                visual_hierarchy="immersive_focus",
+                color_approach="immersive_gradients",
+                typography_scale="hero_typography",
+                spacing_system="viewport_rhythm",
+                interactive_elements=["scroll_snap", "parallax_layers", "immersive_transitions"],
+                animation_style="cinematic_motion",
+                responsive_strategy="adaptive_fullscreen",
+                css_classes=[
+                    "min-h-screen flex items-center justify-center",
+                    "bg-gradient-to-br from-gray-900 via-purple-900 to-violet-800",
+                    "relative overflow-hidden",
+                    "before:absolute before:inset-0 before:bg-[radial-gradient(circle_at_30%_40%,rgba(120,119,198,0.3),transparent_50%)]",
+                    "text-white text-center"
+                ],
+                design_inspiration="Awwwards Winners, Immersive Web Experiences",
+                visual_effects=["Parallax Scrolling", "Immersive Backgrounds", "Cinematic Motion"],
+                design_principles=["Immersive Experience", "Full Viewport Usage", "Dramatic Impact"]
+            ),
+            
+            # 7. Minimalist Grid (Inspired by Muji, Less is More)
+            LayoutPattern(
+                name="minimalist_grid",
+                type="Minimalist Grid System",
+                grid_system="minimal_grid",
+                navigation="minimal_dots",
+                hero_style="minimal_statement",
+                content_flow="grid_perfection",
+                visual_hierarchy="minimal_contrast",
+                color_approach="minimal_palette",
+                typography_scale="minimal_type",
+                spacing_system="minimal_precision",
+                interactive_elements=["subtle_hover", "minimal_feedback", "grid_highlights"],
+                animation_style="minimal_motion",
+                responsive_strategy="grid_collapse",
+                css_classes=[
+                    "grid grid-cols-12 gap-px bg-gray-100",
+                    "bg-white p-12 hover:bg-gray-50 transition-colors duration-200",
+                    "border-none outline-none",
+                    "text-gray-900 font-light",
+                    "leading-relaxed tracking-wide"
+                ],
+                design_inspiration="Muji Design, Minimal Interface Principles",
+                visual_effects=["Subtle Interactions", "Clean Lines", "Perfect Grid"],
+                design_principles=["Less is More", "Perfect Proportions", "Functional Beauty"]
+            ),
+            
+            # 8. Neumorphism 3D (Inspired by iOS, Material Design Evolution)
+            LayoutPattern(
+                name="neumorphic_3d",
+                type="Neumorphic 3D Interface",
+                grid_system="soft_grid",
+                navigation="floating_neumorphic",
+                hero_style="elevated_hero",
+                content_flow="soft_cards",
+                visual_hierarchy="depth_layers",
+                color_approach="soft_monochrome",
+                typography_scale="soft_typography",
+                spacing_system="comfortable_padding",
+                interactive_elements=["press_feedback", "soft_shadows", "depth_hover"],
+                animation_style="soft_motion",
+                responsive_strategy="adaptive_softness",
+                css_classes=[
+                    "bg-gray-100 rounded-3xl p-8",
+                    "shadow-[inset_-12px_-8px_40px_#46464620]",
+                    "shadow-[inset_12px_8px_40px_#ffffff70]",
+                    "hover:shadow-[inset_-2px_-2px_8px_#46464620] transition-all duration-300",
+                    "border border-white/50"
+                ],
+                design_inspiration="iOS Design, Neumorphism Trend, Soft UI",
+                visual_effects=["Soft Shadows", "Depth Perception", "Tactile Feedback"],
+                design_principles=["Soft UI", "Natural Depth", "Comfortable Touch"]
+            ),
+            
+            # 9. Geometric Bauhaus (Inspired by Bauhaus, Mondrian)
+            LayoutPattern(
+                name="bauhaus_geometric",
+                type="Bauhaus Geometric",
+                grid_system="bauhaus_grid",
+                navigation="geometric_nav",
+                hero_style="primary_shapes",
+                content_flow="geometric_blocks",
+                visual_hierarchy="color_geometry",
+                color_approach="primary_colors",
+                typography_scale="bauhaus_type",
+                spacing_system="mathematical_rhythm",
+                interactive_elements=["shape_transforms", "color_changes", "geometric_hover"],
+                animation_style="mechanical_precision",
+                responsive_strategy="proportional_scaling",
+                css_classes=[
+                    "grid grid-cols-6 grid-rows-4 gap-2 h-screen",
+                    "bg-red-500 col-span-2 row-span-2",
+                    "bg-blue-600 col-span-3 row-span-1",
+                    "bg-yellow-400 col-span-1 row-span-3",
+                    "bg-black text-white font-bold uppercase"
+                ],
+                design_inspiration="Bauhaus Movement, Mondrian Compositions, Geometric Design",
+                visual_effects=["Primary Colors", "Geometric Shapes", "Mathematical Precision"],
+                design_principles=["Form Follows Function", "Primary Elements", "Mathematical Order"]
+            ),
+            
+            # 10. Glassmorphism Layers (Inspired by Windows 11, iOS 15)
+            LayoutPattern(
+                name="glassmorphism_layers",
+                type="Glassmorphism Layered",
+                grid_system="floating_grid",
+                navigation="glass_navigation",
+                hero_style="glass_hero",
+                content_flow="layered_glass",
+                visual_hierarchy="transparency_depth",
+                color_approach="translucent_colors",
+                typography_scale="glass_typography",
+                spacing_system="floating_rhythm",
+                interactive_elements=["glass_hover", "blur_changes", "transparency_shifts"],
+                animation_style="glass_motion",
+                responsive_strategy="adaptive_transparency",
+                css_classes=[
+                    "backdrop-blur-xl bg-white/10",
+                    "border border-white/20 rounded-2xl",
+                    "shadow-2xl shadow-black/10",
+                    "hover:bg-white/20 hover:backdrop-blur-2xl transition-all duration-300",
+                    "relative z-10"
+                ],
+                design_inspiration="Windows 11 Design, iOS 15, Glassmorphism Trend",
+                visual_effects=["Glass Effects", "Backdrop Blur", "Layered Transparency"],
+                design_principles=["Transparent Layers", "Depth Through Blur", "Modern Aesthetics"]
+            )

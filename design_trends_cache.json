@@ -1,0 +1,102 @@
+{
+  "updated_at": "2025-11-09 02:19:24",
+  "trends_count": 3,
+  "trends": [
+    {
+      "site_name": "2025 Trend: AI-Generated Gradients",
+      "layout_type": "AI-Responsive Layout",
+      "color_scheme": "Dynamic Gradient System",
+      "typography_style": "Variable Font Typography",
+      "navigation_pattern": "Context-Aware Navigation",
+      "grid_system": "Adaptive CSS Grid",
+      "animation_style": "Physics-Based Animations",
+      "visual_effects": [
+        "AI Gradients",
+        "Morphing Shapes",
+        "Particle Systems"
+      ],
+      "responsive_approach": "Container Query Design",
+      "interaction_patterns": [
+        "Voice Interface",
+        "Gesture Control",
+        "Eye Tracking"
+      ],
+      "css_techniques": [
+        "CSS @layer",
+        "CSS Cascade Layers",
+        "CSS Nesting"
+      ],
+      "design_principles": [
+        "Inclusive Design",
+        "Sustainable UX",
+        "Emotional Intelligence"
+      ],
+      "inspiration_url": "https://trends.awwwards.com/2025",
+      "extracted_at": "2025-11-09 02:19:24"
+    },
+    {
+      "site_name": "2025 Trend: Brutalist Revival",
+      "layout_type": "Neo-Brutalist Grid",
+      "color_scheme": "High Contrast Monochrome",
+      "typography_style": "Bold Industrial Typography",
+      "navigation_pattern": "Unconventional Navigation",
+      "grid_system": "Broken Grid System",
+      "animation_style": "Sharp Mechanical Motion",
+      "visual_effects": [
+        "Raw Aesthetics",
+        "Intentional Imperfection",
+        "Bold Asymmetry"
+      ],
+      "responsive_approach": "Brutalist Responsive",
+      "interaction_patterns": [
+        "Harsh Feedback",
+        "Industrial Sounds",
+        "Sharp Transitions"
+      ],
+      "css_techniques": [
+        "CSS Subgrid",
+        "CSS :has() Selector",
+        "CSS Layers"
+      ],
+      "design_principles": [
+        "Raw Honesty",
+        "Function Over Form",
+        "Digital Materiality"
+      ],
+      "inspiration_url": "https://brutalistwebsites.com/",
+      "extracted_at": "2025-11-09 02:19:24"
+    },
+    {
+      "site_name": "2025 Trend: Organic Interfaces",
+      "layout_type": "Biomimetic Layout",
+      "color_scheme": "Natural Color Harmonies",
+      "typography_style": "Organic Typography",
+      "navigation_pattern": "Natural Flow Navigation",
+      "grid_system": "Organic Grid Flow",
+      "animation_style": "Natural Motion Curves",
+      "visual_effects": [
+        "Organic Shapes",
+        "Natural Textures",
+        "Flowing Transitions"
+      ],
+      "responsive_approach": "Fluid Organic Design",
+      "interaction_patterns": [
+        "Natural Gestures",
+        "Organic Feedback",
+        "Breathing Animations"
+      ],
+      "css_techniques": [
+        "CSS Path Animations",
+        "Organic Clip Paths",
+        "Natural Easing"
+      ],
+      "design_principles": [
+        "Biophilic Design",
+        "Natural Rhythms",
+        "Organic Harmony"
+      ],
+      "inspiration_url": "https://organic-ui.com/",
+      "extracted_at": "2025-11-09 02:19:24"
+    }
+  ]
+}

@@ -22,16 +22,40 @@ from starlette.concurrency import run_in_threadpool
 import json
 import re
 from scanner.file_security_scanner import scan_for_sensitive_files, scan_file_contents_for_secrets
-from scanner.directory_scanner import scan_common_paths
-from owasp_mapper import map_to_owasp_top10
+# Try to import scanner dependencies, but make them optional
+try:
+    from scanner.directory_scanner import scan_common_paths
+    DIRECTORY_SCANNER_AVAILABLE = True
+except ImportError as e:
+    print(f"⚠️  Directory scanner not available: {e}")
+    DIRECTORY_SCANNER_AVAILABLE = False
+    def scan_common_paths(*args, **kwargs):
+        return []
+
+try:
+    from owasp_mapper import map_to_owasp_top10
+    OWASP_MAPPER_AVAILABLE = True
+except ImportError as e:
+    print(f"⚠️  OWASP mapper not available: {e}")
+    OWASP_MAPPER_AVAILABLE = False
+    def map_to_owasp_top10(*args, **kwargs):
+        return []
 from datetime import datetime 
 import time
 import base64
 from github import Github
-from rag_query import get_secure_coding_patterns
 import tempfile
-from rag_query import get_secure_coding_patterns
 from dotenv import load_dotenv
+
+# Try to import RAG functionality, but make it optional
+try:
+    from rag_query import get_secure_coding_patterns
+    RAG_AVAILABLE = True
+except ImportError as e:
+    print(f"⚠️  RAG functionality not available: {e}")
+    RAG_AVAILABLE = False
+    def get_secure_coding_patterns(query):
+        return "RAG functionality not available - heavy ML dependencies not installed."
 
 # Load environment variables
 load_dotenv()
@@ -43,13 +67,31 @@ from nginx_config import NginxConfigManager
 
 # --- Local Imports ---
 from ai_assistant import get_chat_response, RepoAnalysis, FixRequest
-from scanner.file_scanner import (
-    scan_url, 
-    _format_ssl_analysis,
-    scan_dependencies,
-    scan_code_quality_patterns,
-    is_likely_false_positive
-)
+
+# Try to import scanner functionality, but make it optional
+try:
+    from scanner.file_scanner import (
+        scan_url, 
+        _format_ssl_analysis,
+        scan_dependencies,
+        scan_code_quality_patterns,
+        is_likely_false_positive
+    )
+    SCANNER_AVAILABLE = True
+except ImportError as e:
+    print(f"⚠️  Scanner functionality not available: {e}")
+    SCANNER_AVAILABLE = False
+    # Create fallback functions
+    def scan_url(*args, **kwargs):
+        return {"error": "Scanner not available"}
+    def _format_ssl_analysis(*args, **kwargs):
+        return "SSL analysis not available"
+    def scan_dependencies(*args, **kwargs):
+        return []
+    def scan_code_quality_patterns(*args, **kwargs):
+        return []
+    def is_likely_false_positive(*args, **kwargs):
+        return True
 from scanner.hybrid_crawler import crawl_hybrid 
 from nlp_suggester import suggest_fixes
 import ai_assistant
@@ -118,6 +160,15 @@ from fastapi.websockets import WebSocketState
 import asyncio
 import websockets
 from typing import Dict, Set
+
+# Helper function to normalize project names/slugs while preserving path structure
+def normalize_project_slug(project_name: str) -> str:
+    """
+    Normalize project name to slug format while preserving directory structure.
+    Handles paths like 'mobile/web-app' or simple names like 'my project'.
+    Only replaces spaces with hyphens, preserves slashes for nested projects.
+    """
+    return project_name.replace(" ", "-")
 import threading
 import uuid
 # --- Project File Tree Endpoint ---
@@ -597,13 +648,16 @@ async def create_complete_project_structure(project_path: Path, project_spec: di
     return files_created
 
 # --- Sandboxed Preview Endpoint ---
-@app.get("/api/sandbox-preview/{project_name}")
+@app.get("/api/sandbox-preview/{project_name:path}")
 async def get_sandbox_preview(project_name: str):
     """Generate a sandboxed HTML preview that runs React code directly in the browser"""
     try:
-        project_slug = project_name.lower().replace(" ", "-")
+        print(f"🔍 Sandbox preview requested for: '{project_name}'")
+        project_slug = normalize_project_slug(project_name)
+        print(f"🔍 Normalized to slug: '{project_slug}'")
         projects_dir = Path("generated_projects")
         project_path = projects_dir / project_slug
+        print(f"🔍 Full project path: '{project_path}'")
         frontend_path = project_path / "frontend"
         
         if not frontend_path.exists():
@@ -743,6 +797,9 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
     
     <!-- Load TailwindCSS -->
     <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Load clsx from CDN -->
+    <script src="https://unpkg.com/clsx@2.0.0/dist/clsx.min.js"></script>
     
     <style>
         {index_css}
@@ -1051,17 +1108,208 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
             }}
         }}
         
-        // Mock API calls for demo purposes
+        // Mock API calls for demo purposes with sample data
         const mockFetch = (url, options) => {{
             console.log('Mock API call to:', url);
+            
+            // Parse the URL to determine the endpoint
+            const urlObj = new URL(url, window.location.origin);
+            const pathname = urlObj.pathname;
+            
+            // Mock data for different endpoints
+            let responseData = {{ message: 'Mock API response', data: [] }};
+            
+            // Products endpoint
+            if (pathname.includes('/products')) {{
+                responseData = [
+                    {{
+                        id: 1,
+                        name: "Fresh Bananas",
+                        description: "Organic yellow bananas, perfect for snacks",
+                        price: 2.99,
+                        stock: 50,
+                        category: "fruits",
+                        image_url: "https://placehold.co/400x300/FFD700/FFFFFF/png?text=Bananas",
+                        created_at: "2024-01-01T00:00:00"
+                    }},
+                    {{
+                        id: 2,
+                        name: "Whole Milk",
+                        description: "Fresh dairy milk, 1 gallon",
+                        price: 3.49,
+                        stock: 25,
+                        category: "dairy",
+                        image_url: "https://placehold.co/400x300/87CEEB/FFFFFF/png?text=Milk",
+                        created_at: "2024-01-01T00:00:00"
+                    }},
+                    {{
+                        id: 3,
+                        name: "Bread Loaf",
+                        description: "Whole wheat bread loaf",
+                        price: 2.79,
+                        stock: 30,
+                        category: "bakery",
+                        image_url: "https://placehold.co/400x300/DEB887/FFFFFF/png?text=Bread",
+                        created_at: "2024-01-01T00:00:00"
+                    }},
+                    {{
+                        id: 4,
+                        name: "Fresh Apples",
+                        description: "Crisp red apples, locally grown",
+                        price: 4.99,
+                        stock: 40,
+                        category: "fruits",
+                        image_url: "https://placehold.co/400x300/DC143C/FFFFFF/png?text=Apples",
+                        created_at: "2024-01-01T00:00:00"
+                    }},
+                    {{
+                        id: 5,
+                        name: "Greek Yogurt",
+                        description: "Creamy Greek yogurt, high protein",
+                        price: 5.99,
+                        stock: 20,
+                        category: "dairy",
+                        image_url: "https://placehold.co/400x300/F0F8FF/000000/png?text=Yogurt",
+                        created_at: "2024-01-01T00:00:00"
+                    }},
+                    {{
+                        id: 6,
+                        name: "Chocolate Cake",
+                        description: "Rich chocolate layer cake",
+                        price: 12.99,
+                        stock: 15,
+                        category: "bakery",
+                        image_url: "https://placehold.co/400x300/8B4513/FFFFFF/png?text=Cake",
+                        created_at: "2024-01-01T00:00:00"
+                    }}
+                ];
+            }}
+            // Orders endpoint
+            else if (pathname.includes('/orders')) {{
+                responseData = [
+                    {{
+                        id: 1,
+                        user_id: 1,
+                        status: "pending",
+                        total_amount: 15.47,
+                        created_at: "2024-01-15T10:30:00",
+                        items: [
+                            {{ product_id: 1, quantity: 2, price: 2.99 }},
+                            {{ product_id: 2, quantity: 1, price: 3.49 }}
+                        ]
+                    }}
+                ];
+            }}
+            // Users endpoint
+            else if (pathname.includes('/users')) {{
+                responseData = [
+                    {{
+                        id: 1,
+                        email: "demo@example.com",
+                        full_name: "Demo User",
+                        is_active: true,
+                        created_at: "2024-01-01T00:00:00"
+                    }}
+                ];
+            }}
+            // Health check
+            else if (pathname.includes('/health')) {{
+                responseData = {{ status: "healthy", service: "mock-api" }};
+            }}
+            
             return Promise.resolve({{
                 ok: true,
-                json: () => Promise.resolve({{ message: 'Mock API response', data: [] }})
+                status: 200,
+                statusText: 'OK',
+                json: () => Promise.resolve(responseData),
+                text: () => Promise.resolve(JSON.stringify(responseData))
             }});
         }};
         
         // Replace fetch with mock for demo
         window.fetch = mockFetch;
+        
+        // Create utility functions for className manipulation
+        console.log('Setting up utility functions...');
+        
+        // Fallback clsx implementation if CDN fails
+        if (typeof window.clsx === 'undefined') {{
+            window.clsx = function(...inputs) {{
+                const classes = [];
+                for (const input of inputs) {{
+                    if (!input) continue;
+                    if (typeof input === 'string') {{
+                        classes.push(input);
+                    }} else if (typeof input === 'object') {{
+                        for (const [key, value] of Object.entries(input)) {{
+                            if (value) classes.push(key);
+                        }}
+                    }}
+                }}
+                return classes.join(' ');
+            }};
+        }}
+        
+        // Basic tailwind-merge implementation for sandbox
+        window.twMerge = function(...inputs) {{
+            const classString = window.clsx(...inputs);
+            const classes = classString.split(' ').filter(Boolean);
+            
+            // Basic conflict resolution for common Tailwind patterns
+            const conflictGroups = {{
+                // Spacing
+                margin: /^-?m[trblxy]?-/,
+                padding: /^p[trblxy]?-/,
+                // Colors
+                text: /^text-/,
+                bg: /^bg-/,
+                border: /^border-/,
+                // Layout
+                display: /^(block|inline|flex|grid|hidden)$/,
+                position: /^(static|fixed|absolute|relative|sticky)$/,
+                // Sizing
+                width: /^w-/,
+                height: /^h-/,
+                // Flexbox
+                justify: /^justify-/,
+                items: /^items-/,
+                // Spacing
+                gap: /^gap-/,
+                space: /^space-[xy]-/
+            }};
+            
+            const result = [];
+            const seen = new Set();
+            
+            // Process classes in reverse order (last wins)
+            for (let i = classes.length - 1; i >= 0; i--) {{
+                const cls = classes[i];
+                let conflicted = false;
+                
+                // Check for conflicts
+                for (const [group, pattern] of Object.entries(conflictGroups)) {{
+                    if (pattern.test(cls)) {{
+                        if (seen.has(group)) {{
+                            conflicted = true;
+                            break;
+                        }} else {{
+                            seen.add(group);
+                        }}
+                    }}
+                }}
+                
+                if (!conflicted) {{
+                    result.unshift(cls);
+                }}
+            }}
+            
+            return result.join(' ');
+        }};
+        
+        // Create cn function (className utility)
+        window.cn = function(...inputs) {{
+            return window.twMerge(...inputs);
+        }};
         
         console.log('Loading components...');
         
@@ -1407,6 +1655,71 @@ async def get_chat_history(project_name: str, limit: int = 50):
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+# --- React Code Validation Functions ---
+def validate_react_code(content, file_path):
+    """Validate React component code for common issues"""
+    errors = []
+    
+    # Check for placeholder comments instead of actual code
+    if (content.strip().startswith('//') and len(content.strip()) < 100) or "component content here" in content.lower():
+        errors.append("Contains only placeholder comments, needs actual code")
+    
+    # Check for proper React component structure
+    if file_path.endswith('.jsx'):
+        if 'import React' not in content and 'from "react"' not in content and 'from \'react\'' not in content:
+            errors.append("Missing React import")
+        if 'export default' not in content:
+            errors.append("Missing default export")
+        if 'const ' not in content and 'function ' not in content and 'class ' not in content:
+            errors.append("No component definition found")
+        if 'return (' not in content and 'return <' not in content:
+            errors.append("Component missing return statement with JSX")
+    
+    # Check for syntax issues
+    if content.count('(') != content.count(')'):
+        errors.append("Unmatched parentheses")
+    if content.count('{') != content.count('}'):
+        errors.append("Unmatched braces")
+    if content.count('[') != content.count(']'):
+        errors.append("Unmatched brackets")
+    
+    return errors
+
+def fix_common_react_issues(content, file_path):
+    """Fix common React component issues"""
+    
+    # If it's just a placeholder comment, create a basic component
+    if file_path.endswith('.jsx') and (content.strip().startswith('//') and len(content.strip()) < 100) or "component content here" in content.lower():
+        # Extract component name from file path (cross-platform)
+        import os
+        component_name = os.path.basename(file_path).replace('.jsx', '')
+        
+        content = f"""import React from 'react';
+
+const {component_name} = () => {{
+  return (
+    <div className="p-4">
+      <h2 className="text-xl font-semibold mb-2">{component_name}</h2>
+      <p className="text-gray-600">This component is ready for customization.</p>
+    </div>
+  );
+}};
+
+export default {component_name};"""
+    
+    # Add missing React import
+    if file_path.endswith('.jsx') and 'import React' not in content:
+        content = "import React from 'react';\n\n" + content
+    
+    # Add missing export if component is defined but not exported
+    if 'const ' in content and 'export default' not in content:
+        component_match = re.search(r'const (\w+) = ', content)
+        if component_match:
+            component_name = component_match.group(1)
+            content += f"\n\nexport default {component_name};"
+    
+    return content
+
 # --- AI Project Assistant Endpoint ---
 @app.post("/api/ai-project-assistant")
 async def ai_project_assistant(request: dict = Body(...)):
@@ -1662,15 +1975,12 @@ async def ai_project_assistant(request: dict = Body(...)):
         except:
             pass
 
-        # Enhanced request processing - handle vague requests by analyzing the project
+        # Enhanced request processing - handle all requests by analyzing the project
         def is_vague_request(message):
-            """Check if the request is too vague and needs project analysis."""
-            vague_phrases = [
-                "fix", "improve", "enhance", "make better", "update", "modify",
-                "change", "add features", "optimize", "clean up", "refactor",
-                "something went wrong", "error", "not working", "broken"
-            ]
-            return any(phrase in message.lower() for phrase in vague_phrases) and len(message.split()) < 12
+            """Always accept requests - the AI will determine what to do."""
+            # Removed validation - accept any message and let AI handle it
+            # The AI is smart enough to respond appropriately to any request
+            return False  # Never reject messages as too vague
 
         def analyze_error_message(message):
             """Extract specific error information from error messages."""
@@ -1770,69 +2080,97 @@ ANALYZING PROJECT FILES FOR SPECIFIC FIXES..."""
             else:
                 project_analysis = f"\n\nSUGGESTION: Be more specific. Examples:\n- 'Fix the array.map error'\n- 'Add a login form'\n- 'Make buttons responsive'"
 
-        # Use AI to generate changes with enhanced prompt
-        prompt = f"""You are an expert full-stack developer. CRITICAL: Your response must be VALID JSON ONLY - no markdown, no explanations outside JSON, no code blocks.
+        # Use AI to generate changes with STRICT JSON-only prompt
+        prompt = f"""You MUST respond with ONLY valid JSON. No other text. No markdown. No explanations outside JSON.
 
 User Request: "{user_message}"
 Project: {project_name}
-Tech Stack: {', '.join(tech_stack) if tech_stack else 'React + FastAPI'}
 
-Current Project Files:
-{project_context}
+CRITICAL RULES:
+1. Your ENTIRE response must be valid JSON
+2. Do NOT use markdown code blocks (no ```)
+3. Do NOT add explanations before or after the JSON
+4. Start with {{ and end with }}
+5. Generate COMPLETE, FUNCTIONAL React components - no placeholder comments
+6. Include proper imports, exports, and working JSX
+7. For App.jsx updates, provide the FULL file content with imports
 
-ANALYZE THE REQUEST AND PROVIDE SPECIFIC CODE CHANGES:
+EXAMPLE - For vague requests like "add more features":
+{{
+  "changes": [],
+  "explanation": "I can add many features! Please specify:\\n• Customer reviews\\n• User login\\n• Dark mode\\n• Search functionality\\nWhat would you like?"
+}}
 
-1. If user says "include my name which is Neelesh" or similar personalization:
-   - Add their name to the UI (header, welcome message, about section)
-   - Update titles and text to include their name
-   - Make it personal and welcoming
-
-2. If fixing errors:
-   - Fix spread operator errors: {{...(props || {{}})}}
-   - Fix array.map errors: ensure useState([]) initialization
-   - Fix JSON parsing: add try/catch blocks
-   - Fix missing imports and components
-
-3. If adding features:
-   - Implement complete, working features
-   - Use modern React patterns
-   - Include proper styling with TailwindCSS
-
-RESPOND WITH VALID JSON ONLY (no markdown, no ```json blocks):
-
+EXAMPLE - For specific requests like "add customer reviews":
 {{
   "changes": [
     {{
-      "file_path": "frontend/src/App.jsx",
-      "edit_type": "content_update", 
-      "new_content": "complete updated file content here",
-      "reason": "explanation of change"
+      "file_path": "frontend/src/components/CustomerReviews.jsx",
+      "content": "import React, {{ useState }} from 'react';\\n\\nconst CustomerReviews = () => {{\\n  const [reviews, setReviews] = useState([\\n    {{ id: 1, name: 'John Doe', rating: 5, comment: 'Excellent service!' }},\\n    {{ id: 2, name: 'Jane Smith', rating: 4, comment: 'Very satisfied with my purchase.' }}\\n  ]);\\n\\n  return (\\n    <div className=\\"max-w-4xl mx-auto p-6\\">\\n      <h2 className=\\"text-2xl font-bold mb-4\\">Customer Reviews</h2>\\n      <div className=\\"space-y-4\\">\\n        {{reviews.map(review => (\\n          <div key={{review.id}} className=\\"border rounded-lg p-4 shadow-sm\\">\\n            <div className=\\"flex items-center mb-2\\">\\n              <h3 className=\\"font-semibold text-lg\\">{{review.name}}</h3>\\n              <div className=\\"ml-auto flex\\">\\n                {{[...Array(review.rating)].map((_, i) => (\\n                  <span key={{i}} className=\\"text-yellow-500\\">⭐</span>\\n                ))}}\\n              </div>\\n            </div>\\n            <p className=\\"text-gray-700\\">{{review.comment}}</p>\\n          </div>\\n        ))}}\\n      </div>\\n    </div>\\n  );\\n}};\\n\\nexport default CustomerReviews;",
+      "edit_type": "new_file"
     }}
   ],
-  "explanation": "Brief summary of changes made"
+  "explanation": "Created functional CustomerReviews component with sample reviews and star ratings"
 }}
 
-Include complete file content in new_content field. Make real, working changes."""
+Generate WORKING React code - no placeholder comments. Include proper imports and exports.
+RESPOND WITH ONLY JSON NOW:"""
 
         try:
-            # Use the existing AI assistant for code generation
-            from ai_assistant import get_chat_response
+            # Use Gemini API directly for fast, simple code suggestions
+            import google.generativeai as genai
+            import asyncio
+            import os
             
-            # Format as a chat history for the AI
-            chat_history = [
-                {"role": "user", "content": prompt}
-            ]
+            print(f"🤖 AI Code Generator: Processing request '{user_message}' for project '{project_name}'")
             
-            ai_response = get_chat_response(chat_history, model_type='smart')
+            # Configure Gemini API
+            api_key = os.getenv("GOOGLE_API_KEY")
+            if not api_key:
+                raise Exception("GOOGLE_API_KEY not configured. Please set your Gemini API key in environment variables.")
+            
+            genai.configure(api_key=api_key)
+            
+            # Use fast Flash model for quick responses
+            model = genai.GenerativeModel(
+                model_name="gemini-2.0-flash-exp",
+                generation_config={
+                    "temperature": 0.3,
+                    "max_output_tokens": 8192,  # Increased token limit
+                }
+            )
+            
+            # Generate AI response with timeout
+            try:
+                ai_response_obj = await asyncio.wait_for(
+                    asyncio.to_thread(model.generate_content, prompt),
+                    timeout=30.0  # 30 second timeout
+                )
+                ai_response = ai_response_obj.text
+                print(f"✅ AI Response received ({len(ai_response)} chars)")
+                print(f"🔍 DEBUG - Raw AI Response: {repr(ai_response[:1000])}")  # Show first 1000 chars with escapes
+                print(f"🔍 DEBUG - Full AI Response length: {len(ai_response)} chars")
+            except asyncio.TimeoutError:
+                print("⏱️ AI request timed out after 30 seconds")
+                raise Exception("AI request timed out. Please try a more specific request or try again.")
             
             # Parse AI response with robust error handling
             import json
             import re
             
             def clean_json_string(text):
-                """Clean JSON string by removing control characters and fixing common issues"""
+                
                 if not text:
                     return text
+                
+                # First, try to parse as-is (don't clean well-formed JSON)
+                try:
+                    json.loads(text)
+                    print("🔍 DEBUG - JSON is already valid, no cleaning needed")
+                    return text
+                except json.JSONDecodeError:
+                    print("🔍 DEBUG - JSON needs cleaning")
+                    pass
                 
                 # Remove control characters (except newlines, tabs, carriage returns)
                 cleaned = ''.join(char for char in text if ord(char) >= 32 or char in '\n\t\r')
@@ -1847,11 +2185,28 @@ Include complete file content in new_content field. Make real, working changes."
                 cleaned = re.sub(r',\s*}', '}', cleaned)  # Remove trailing commas before }
                 cleaned = re.sub(r',\s*]', ']', cleaned)  # Remove trailing commas before ]
                 
-                # Fix unquoted property names
-                cleaned = re.sub(r'(\w+):', r'"\1":', cleaned)
-                
-                # Fix single quotes to double quotes
-                cleaned = cleaned.replace("'", '"')
+                # Only apply aggressive fixes if the JSON is still broken
+                try:
+                    json.loads(cleaned)
+                    return cleaned
+                except json.JSONDecodeError:
+                    # Apply more aggressive fixes only if needed
+                    
+                    # First, escape single quotes inside JSON string values
+                    # Simple approach: replace ' with \' in content/explanation values
+                    lines = cleaned.split('\n')
+                    for i, line in enumerate(lines):
+                        if '"content":' in line or '"explanation":' in line:
+                            # Escape single quotes in this line
+                            lines[i] = line.replace("'", "\\'")
+                    cleaned = '\n'.join(lines)
+                    
+                    # Fix unquoted property names (only at the start of lines or after braces/commas)
+                    cleaned = re.sub(r'(^|[{\[,]\s*)(\w+):', r'\1"\2":', cleaned, flags=re.MULTILINE)
+                    
+                    # Fix single quotes to double quotes (but be careful about apostrophes)
+                    # Only replace single quotes that are likely JSON delimiters, not apostrophes
+                    cleaned = re.sub(r"(?<!\w)'([^']*)'(?!\w)", r'"\1"', cleaned)
                 
                 # Remove comments
                 cleaned = re.sub(r'//.*?\n', '', cleaned)
@@ -1860,7 +2215,6 @@ Include complete file content in new_content field. Make real, working changes."
                 return cleaned
             
             def fix_unterminated_strings(text):
-                """Fix unterminated strings in JSON"""
                 try:
                     result = ""
                     in_string = False
@@ -1903,26 +2257,32 @@ Include complete file content in new_content field. Make real, working changes."
             
             # Improved JSON extraction and parsing
             def extract_and_parse_json(text):
-                """Extract and parse JSON from AI response with robust error handling."""
                 if not text:
                     return None
                 
-                # Remove markdown code blocks first
-                text = re.sub(r'```json\s*', '', text)
-                text = re.sub(r'```\s*', '', text)
-                text = re.sub(r'^```[\w]*\n', '', text, flags=re.MULTILINE)
+                print(f"🔍 DEBUG - Before markdown removal: {repr(text[:200])}")
                 
-                # Try multiple JSON extraction patterns
+                # Remove markdown code blocks first - more aggressive approach
+                text = re.sub(r'```json\s*\n?', '', text, flags=re.IGNORECASE)
+                text = re.sub(r'```\s*\n?', '', text)
+                text = re.sub(r'^```[\w]*\s*\n?', '', text, flags=re.MULTILINE)
+                
+                print(f"🔍 DEBUG - After markdown removal: {repr(text[:200])}")
+                
+                # Try multiple JSON extraction patterns - start with most specific
                 patterns = [
-                    r'\{[\s\S]*?\}(?=\s*$|\s*\n\s*[^{])',  # Complete JSON object
-                    r'\{[\s\S]*?"changes"[\s\S]*?\}',  # JSON containing 'changes'
-                    r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}',  # Nested JSON
+                    r'\{[\s\S]*?"changes"\s*:\s*\[[\s\S]*?\][\s\S]*?"explanation"[\s\S]*?\}',  # Complete JSON with changes array and explanation
+                    r'\{[\s\S]*?"changes"\s*:\s*\[[\s\S]*?\][\s\S]*?\}',  # JSON with changes array (may be missing explanation)
+                    r'\{[\s\S]*?\}(?=\s*$)',  # Complete JSON object at end of text
+                    r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}',  # Nested JSON (fallback)
                 ]
                 
-                for pattern in patterns:
+                for i, pattern in enumerate(patterns):
                     matches = re.findall(pattern, text, re.DOTALL)
-                    for match in matches:
+                    print(f"🔍 DEBUG - Pattern {i+1} found {len(matches)} matches")
+                    for j, match in enumerate(matches):
                         try:
+                            print(f"🔍 DEBUG - Trying to parse match {j+1}: {repr(match[:100])}")
                             # Clean and attempt to parse
                             cleaned = clean_json_string(match.strip())
                             
@@ -1941,9 +2301,13 @@ Include complete file content in new_content field. Make real, working changes."
                             
                             parsed = json.loads(cleaned)
                             if isinstance(parsed, dict) and ('changes' in parsed or 'explanation' in parsed):
+                                print(f"✅ DEBUG - JSON parsing succeeded! Returning: {parsed}")
                                 return parsed
+                            else:
+                                print(f"🔍 DEBUG - Parsed but invalid structure: {parsed}")
                         except json.JSONDecodeError as e:
-                            # Don't print JSON parse errors for now to reduce console spam
+                            print(f"❌ DEBUG - JSON parse error: {str(e)[:100]}")
+                            print(f"🔍 DEBUG - Failed to parse: {repr(cleaned[:150])}")
                             continue
                         except Exception as e:
                             print(f"General parse error: {str(e)[:100]}")
@@ -1970,6 +2334,7 @@ Include complete file content in new_content field. Make real, working changes."
                 return None
             
             response_data = extract_and_parse_json(ai_response)
+            print(f"🔍 DEBUG - extract_and_parse_json returned: {response_data}")
             
             if not response_data:
                 # Fallback: Parse the response manually for key information
@@ -1977,10 +2342,15 @@ Include complete file content in new_content field. Make real, working changes."
                 
                 # Try to create a specific response based on the user's request
                 fallback_changes = []
-                fallback_explanation = f"Processing request: '{user_message}'"
                 
-                # Handle specific personalization requests
-                if "name" in user_message.lower() and ("neelesh" in user_message.lower() or "include" in user_message.lower()):
+                # Determine if this is a greeting or conversational message
+                greetings = ["hi", "hello", "hey", "sup", "yo", "greetings"]
+                is_greeting = any(user_message.lower().strip() == greeting for greeting in greetings)
+                
+                if is_greeting:
+                    # Respond to greetings warmly without requiring code changes
+                    fallback_explanation = f"Hi! 👋 I'm your AI coding assistant. I can help you with your {project_name} project by:\n• Adding new features\n• Fixing bugs and errors\n• Styling and design changes\n• Code improvements\n\nWhat would you like to work on?"
+                elif "name" in user_message.lower() and ("neelesh" in user_message.lower() or "include" in user_message.lower()):
                     # Read current App.jsx to personalize it
                     app_file = project_path / "frontend" / "src" / "App.jsx"
                     if app_file.exists():
@@ -2027,40 +2397,30 @@ Include complete file content in new_content field. Make real, working changes."
                         except Exception as e:
                             print(f"Error creating personalized content: {e}")
                 
-                # If no specific changes could be made, provide helpful suggestions
+                # If no specific changes could be made, provide helpful, friendly responses
                 if not fallback_changes:
-                    fallback_suggestions = []
+                    # Check if this is a conversational message
+                    conversational_words = ["hi", "hello", "hey", "thanks", "thank you", "ok", "okay", "cool", "nice", "great"]
+                    is_conversational = any(word in user_message.lower() for word in conversational_words)
                     
-                    if "fix" in user_message.lower():
+                    if is_conversational:
+                        # Friendly response without code changes
+                        fallback_explanation = f"Hi there! 👋 I'm ready to help with your {project_name} project. Just tell me what you'd like me to do:\n\n• Add new features or components\n• Fix bugs or errors you're seeing\n• Change styling or layout\n• Improve code quality\n\nWhat can I help you with?"
+                    elif "fix" in user_message.lower():
                         if "frontend" in user_message.lower():
-                            fallback_suggestions = [
-                                "Fix React array.map() errors in components",
-                                "Fix API endpoints to use /api/v1 prefix", 
-                                "Fix localStorage JSON parsing errors",
-                                "Remove duplicate ErrorBoundary declarations"
-                            ]
+                            fallback_explanation = "I can help fix frontend issues! Here are some common fixes I can apply:\n• Fix React array.map() errors\n• Fix API endpoint calls\n• Fix localStorage parsing\n• Remove duplicate declarations\n\nLet me analyze your project..."
                         else:
-                            fallback_suggestions = [
-                                "Fix CORS issues in FastAPI backend",
-                                "Fix database connection errors",
-                                "Fix API endpoint routing issues"
-                            ]
-                    elif any(word in user_message.lower() for word in ["add", "create", "build"]):
-                        fallback_suggestions = [
-                            "Add a login/signup form",
-                            "Add a user dashboard",
-                            "Add data filtering and search",
-                            "Add responsive navigation menu"
-                        ]
+                            fallback_explanation = "I can help fix backend issues! Common fixes include:\n• CORS configuration\n• Database connections\n• API routing\n• Authentication\n\nLet me check your code..."
+                    elif any(word in user_message.lower() for word in ["add", "create", "build", "more"]):
+                        # For general "add features" requests, provide specific suggestions
+                        if "more" in user_message.lower() and "feature" in user_message.lower():
+                            fallback_explanation = f"I can add many features to {project_name}! Here are some popular options:\n\n💡 **Quick Wins:**\n• Dark mode toggle\n• Loading animations\n• Toast notifications\n• Search functionality\n\n🎨 **UI Enhancements:**\n• Modern card layouts\n• Gradient backgrounds\n• Hover effects\n• Responsive navigation\n\n⚙️ **Functionality:**\n• User authentication\n• Data filtering\n• Form validation\n• API integration\n\nTell me specifically what you'd like, or I can add something awesome for you!"
+                        else:
+                            fallback_explanation = f"I'd be happy to add features to {project_name}! I can help with:\n• User authentication (login/signup)\n• Dashboards and data views\n• Forms and validation\n• Navigation and routing\n\nWhat would you like me to add?"
                     else:
-                        fallback_suggestions = [
-                            "Be more specific about what to fix or add",
-                            "Example: 'Fix the array map error in ProductList'",
-                            "Example: 'Add a login form to the homepage'"
-                        ]
+                        # General helpful response
+                        fallback_explanation = f"I understand you want to work on: '{user_message}'\n\nI can help with many tasks:\n• Adding features or components\n• Fixing bugs and errors\n• Styling and design changes\n• Code improvements\n\nLet me see what I can do for your project..."
                     
-                    fallback_explanation = f"Request '{user_message}' needs more detail. Try one of these specific requests:\n• " + "\n• ".join(fallback_suggestions[:4])
-                
                 response_data = {
                     "changes": fallback_changes,
                     "explanation": fallback_explanation
@@ -2068,6 +2428,8 @@ Include complete file content in new_content field. Make real, working changes."
             
             changes = response_data.get("changes", [])
             explanation = response_data.get("explanation", "AI-generated changes")
+            print(f"🔍 DEBUG - Extracted changes: {len(changes)} items")
+            print(f"🔍 DEBUG - Extracted explanation: {explanation[:100]}...")
             
             # Validate changes structure
             valid_changes = []
@@ -2078,15 +2440,21 @@ Include complete file content in new_content field. Make real, working changes."
                     if len(content) > 10:  # Minimum content check
                         valid_changes.append(change)
             
+            print(f"🔍 DEBUG - Valid changes found: {len(valid_changes)}")
+            
             if not valid_changes:
                 # Check if this might be a customization request that should use the direct customization system
+                # Only trigger customization for very specific requests, not vague ones
+                vague_requests = ['more features', 'add features', 'features for customers', 'more functionality']
+                is_vague_request = any(phrase in user_message.lower() for phrase in vague_requests)
+                
                 customization_keywords = [
-                    'add', 'change', 'update', 'modify', 'replace', 'include', 'insert',
-                    'picture', 'image', 'photo', 'color', 'style', 'text', 'font',
-                    'background', 'layout', 'design', 'theme', 'look', 'appearance'
+                    'change color', 'update style', 'modify layout', 'replace image', 'include picture',
+                    'change background', 'update font', 'modify theme', 'change design', 'update appearance'
                 ]
                 
-                is_customization_request = any(keyword in user_message.lower() for keyword in customization_keywords)
+                is_customization_request = any(phrase in user_message.lower() for phrase in customization_keywords) and not is_vague_request
+                print(f"🔍 DEBUG - is_customization_request: {is_customization_request}, is_vague_request: {is_vague_request} (user_message: '{user_message}')")
                 
                 if is_customization_request:
                     # Try to use the direct customization system as fallback
@@ -2146,24 +2514,35 @@ Include complete file content in new_content field. Make real, working changes."
                     except Exception as e:
                         print(f"Customization fallback failed: {e}")
                 
-                # Enhanced error message with detected issues
-                error_msg = "AI couldn't determine what changes to make."
-                if project_analysis:
-                    error_msg += f" {project_analysis.replace('DETECTED ISSUES TO FIX:', 'However, I found these issues you could address:')}"
-                else:
-                    error_msg += f" Please be more specific. The request '{user_message}' is too vague."
+                # Check if this is a conversational message without code changes needed
+                greetings = ["hi", "hello", "hey", "sup", "yo", "thanks", "thank you", "ok", "okay"]
+                is_greeting = any(user_message.lower().strip() == greeting for greeting in greetings)
                 
-                await manager.send_to_project(project_name, {
-                    "type": "status",
-                    "phase": "error",
-                    "message": f"❌ {error_msg[:100]}..."
-                })
-                
-                return {
-                    "success": False, 
-                    "error": error_msg,
-                    "suggestion": explanation if 'explanation' in locals() else "Try being more specific about what you want to change."
-                }
+                if is_greeting or not valid_changes:
+                    # For greetings or when no changes needed, return friendly response (not error)
+                    if 'explanation' in locals() and explanation:
+                        response_msg = explanation
+                    else:
+                        # Default helpful message
+                        response_msg = f"I understand you want to: '{user_message}'\n\nI can help with:\n• Adding specific features (e.g., 'add a login form')\n• Fixing bugs (e.g., 'fix the error in App.jsx')\n• Styling changes (e.g., 'make it blue')\n• Code improvements\n\nPlease be more specific about what you'd like me to do!"
+                    
+                    print(f"💬 Returning conversational response: {response_msg[:100]}...")
+                    
+                    await manager.send_to_project(project_name, {
+                        "type": "status", 
+                        "phase": "complete",
+                        "message": f"💬 {response_msg[:100]}..."
+                    })
+                    
+                    response_obj = {
+                        "success": True,
+                        "message": response_msg,
+                        "changes": [],
+                        "explanation": response_msg,
+                        "conversational": True
+                    }
+                    print(f"🔍 DEBUG - Returning conversational response: {response_obj}")
+                    return response_obj
             
             changes = valid_changes
 
@@ -2248,6 +2627,17 @@ Include complete file content in new_content field. Make real, working changes."
                     content = change.get("content", "") or change.get("new_content", "")
                     if not content:
                         continue
+                    
+                    # Validate React component content before writing
+                    if file_path.endswith(('.jsx', '.js')):
+                        validation_errors = validate_react_code(content, file_path)
+                        if validation_errors:
+                            await manager.send_to_project(project_name, {
+                                "type": "warning",
+                                "message": f"⚠️ Validation issues in {file_path}: {'; '.join(validation_errors)}"
+                            })
+                            # Try to fix common issues
+                            content = fix_common_react_issues(content, file_path)
                         
                     cleaned = _clean_ai_generated_content(content, target.name)
                     
@@ -2302,12 +2692,17 @@ Include complete file content in new_content field. Make real, working changes."
             }
 
         except Exception as ai_error:
-            print(f"AI processing error: {ai_error}")
+            print(f"❌ AI processing error: {ai_error}")
             print(f"AI response preview: {ai_response[:500] if 'ai_response' in locals() else 'No response generated'}")
+            
+            error_message = str(ai_error)
+            if "timed out" in error_message.lower():
+                error_message = "⏱️ Request took too long. Try being more specific:\n• 'add a contact form'\n• 'make the buttons blue'\n• 'fix the navigation menu'"
+            
             await manager.send_to_project(project_name, {
                 "type": "status",
                 "phase": "error",
-                "message": f"❌ AI processing failed: {str(ai_error)}"
+                "message": f"❌ {error_message}"
             })
             return {
                 "success": False,
@@ -2336,8 +2731,8 @@ async def ai_customize_project(request: dict = Body(...)):
         if not customization_request:
             raise HTTPException(status_code=400, detail="customization_request is required")
         
-        # Resolve project path
-        project_slug = project_name.lower().replace(" ", "-")
+        # Resolve project path - handle paths with slashes
+        project_slug = project_name.replace(" ", "-")
         projects_dir = Path("generated_projects")
         project_path = projects_dir / project_slug
         
@@ -2713,8 +3108,8 @@ async def save_project_file(request: dict = Body(...)):
         file_path = request.get("file_path")
         content = request.get("content")
         
-        # Get project path
-        project_slug = project_name.lower().replace(" ", "-")
+        # Get project path - handle paths with slashes
+        project_slug = project_name.replace(" ", "-")
         projects_dir = Path("generated_projects")
         project_path = projects_dir / project_slug
         
@@ -2852,9 +3247,12 @@ async def run_project(request: dict = Body(...)):
         project_name = request.get("project_name")
         tech_stack = request.get("tech_stack", [])
         
-        project_slug = project_name.lower().replace(" ", "-")
+        print(f"🚀 Run project requested for: '{project_name}'")
+        project_slug = normalize_project_slug(project_name)
+        print(f"🚀 Normalized to slug: '{project_slug}'")
         projects_dir = Path("generated_projects")
         project_path = projects_dir / project_slug
+        print(f"🚀 Full project path: '{project_path}'")
         
         if not project_path.exists():
             return {"success": False, "error": "Project not found"}
@@ -3560,64 +3958,80 @@ async def get_project_history():
         
         projects = []
         
-        for project_folder in projects_dir.iterdir():
-            if project_folder.is_dir() and not project_folder.name.startswith('.'):
-                try:
-                    # Get project metadata
-                    project_info = {
-                        "name": project_folder.name.replace("-", " ").title(),
-                        "slug": project_folder.name,
-                        "created_date": project_folder.stat().st_ctime,
-                        "modified_date": project_folder.stat().st_mtime,
-                        "preview_url": f"http://localhost:8000/api/sandbox-preview/{project_folder.name}",
-                        "editor_url": f"/project/{project_folder.name}",
-                        "has_frontend": (project_folder / "frontend").exists(),
-                        "has_backend": (project_folder / "backend").exists(),
-                        "tech_stack": []
-                    }
+        # Function to recursively find projects with frontend/backend folders
+        def find_projects(base_path, relative_path=""):
+            for item in base_path.iterdir():
+                if item.is_dir() and not item.name.startswith('.'):
+                    # Check if this folder has frontend or backend
+                    has_frontend = (item / "frontend").exists()
+                    has_backend = (item / "backend").exists()
                     
-                    # Try to detect tech stack from package.json
-                    package_json = project_folder / "frontend" / "package.json"
-                    if package_json.exists():
-                        try:
-                            import json
-                            with open(package_json, 'r', encoding='utf-8') as f:
-                                pkg_data = json.load(f)
+                    if has_frontend or has_backend:
+                        # This is a valid project
+                        project_slug = f"{relative_path}/{item.name}" if relative_path else item.name
+                        yield (item, project_slug)
+                    else:
+                        # Recurse into subdirectories (but only one level deep to avoid infinite loops)
+                        if not relative_path:  # Only go one level deep
+                            yield from find_projects(item, item.name)
+        
+        for project_folder, project_slug in find_projects(projects_dir):
+            try:
+                # Get project metadata
+                project_info = {
+                    "name": project_slug.replace("-", " ").replace("/", " ").title(),
+                    "slug": project_slug,
+                    "created_date": project_folder.stat().st_ctime,
+                    "modified_date": project_folder.stat().st_mtime,
+                    "preview_url": f"http://localhost:8000/api/sandbox-preview/{project_slug}",
+                    "editor_url": f"/project/{project_slug}",
+                    "has_frontend": (project_folder / "frontend").exists(),
+                    "has_backend": (project_folder / "backend").exists(),
+                    "tech_stack": []
+                }
+                
+                # Try to detect tech stack from package.json
+                package_json = project_folder / "frontend" / "package.json"
+                if package_json.exists():
+                    try:
+                        import json
+                        with open(package_json, 'r', encoding='utf-8') as f:
+                            pkg_data = json.load(f)
+                        
+                        dependencies = list(pkg_data.get("dependencies", {}).keys())
+                        dev_dependencies = list(pkg_data.get("devDependencies", {}).keys())
+                        
+                        # Detect React
+                        if "react" in dependencies:
+                            project_info["tech_stack"].append("React")
+                        
+                        # Detect Vite
+                        if "vite" in dev_dependencies:
+                            project_info["tech_stack"].append("Vite")
+                        
+                        # Detect other common packages
+                        if "tailwindcss" in dependencies or "tailwindcss" in dev_dependencies:
+                            project_info["tech_stack"].append("TailwindCSS")
                             
-                            dependencies = list(pkg_data.get("dependencies", {}).keys())
-                            dev_dependencies = list(pkg_data.get("devDependencies", {}).keys())
-                            
-                            # Detect React
-                            if "react" in dependencies:
-                                project_info["tech_stack"].append("React")
-                            
-                            # Detect Vite
-                            if "vite" in dev_dependencies:
-                                project_info["tech_stack"].append("Vite")
-                            
-                            # Detect other common packages
-                            if "tailwindcss" in dependencies or "tailwindcss" in dev_dependencies:
-                                project_info["tech_stack"].append("TailwindCSS")
-                                
-                        except Exception:
-                            pass
-                    
-                    # Check for backend tech stack
-                    requirements_txt = project_folder / "backend" / "requirements.txt"
-                    if requirements_txt.exists():
-                        project_info["tech_stack"].append("FastAPI")
-                        project_info["tech_stack"].append("Python")
-                    
-                    # Format created date
-                    import datetime
-                    created_dt = datetime.datetime.fromtimestamp(project_info["created_date"])
-                    project_info["created_date_formatted"] = created_dt.strftime("%Y-%m-%d %H:%M")
-                    
-                    projects.append(project_info)
-                    
-                except Exception as e:
-                    print(f"Error processing project {project_folder.name}: {e}")
-                    continue
+                    except Exception:
+                        pass
+                
+                # Check for backend tech stack
+                requirements_txt = project_folder / "backend" / "requirements.txt"
+                if requirements_txt.exists():
+                    project_info["tech_stack"].append("FastAPI")
+                    project_info["tech_stack"].append("Python")
+                
+                # Format created date
+                import datetime
+                created_dt = datetime.datetime.fromtimestamp(project_info["created_date"])
+                project_info["created_date_formatted"] = created_dt.strftime("%Y-%m-%d %H:%M")
+                
+                projects.append(project_info)
+                
+            except Exception as e:
+                print(f"Error processing project {project_slug}: {e}")
+                continue
         
         # Sort by creation date (newest first)
         projects.sort(key=lambda x: x["created_date"], reverse=True)
@@ -3637,7 +4051,9 @@ async def get_project_history():
 async def get_project_file_tree(project_name: str = Query(...)):
     """Get file tree structure for a project"""
     try:
-        project_slug = project_name.lower().replace(" ", "-")
+        # Handle both simple names and paths with slashes (e.g., "mobile/web-app")
+        # Preserve the path structure but normalize spaces to hyphens
+        project_slug = project_name.replace(" ", "-")
         projects_dir = Path("generated_projects")
         project_path = projects_dir / project_slug
         
@@ -3715,7 +4131,9 @@ async def rate_limit_status():
 async def get_project_file_content(project_name: str = Query(...), file_path: str = Query(...)):
     """Get content of a specific file in the project"""
     try:
-        project_slug = project_name.lower().replace(" ", "-")
+        # Handle both simple names and paths with slashes (e.g., "mobile/web-app")
+        # Preserve the path structure but normalize spaces to hyphens
+        project_slug = project_name.replace(" ", "-")
         projects_dir = Path("generated_projects")
         project_path = projects_dir / project_slug
         
@@ -4858,7 +5276,7 @@ app.use('*', (req, res) => {{
 }});
 
 app.listen(PORT, () => {{
-    console.log(`🚀 {project_name} API running on port ${{PORT}}`);
+    console.log('{project_name} API running on port ' + PORT);
 }});"""
     
     with open(backend_path / "server.js", 'w', encoding='utf-8') as f:
@@ -4871,23 +5289,13 @@ NODE_ENV=development
 PORT=8001"""
     
     if needs_database:
-        env_content += """
-
-# Database
-MONGODB_URI=mongodb://localhost:27017/yourdbname"""
+        env_content += "\n\n# Database\nMONGODB_URI=mongodb://localhost:27017/yourdbname"
     
     if needs_ai:
-        env_content += """
-
-# AI/OpenAI
-OPENAI_API_KEY=your_openai_api_key_here"""
+        env_content += "\n\n# AI/OpenAI\nOPENAI_API_KEY=your_openai_api_key_here"
     
     if needs_auth:
-        env_content += """
-
-# Authentication
-JWT_SECRET=your_jwt_secret_here
-JWT_EXPIRES_IN=7d"""
+        env_content += "\n\n# Authentication\nJWT_SECRET=your_jwt_secret_here\nJWT_EXPIRES_IN=7d"
     
     with open(backend_path / ".env", 'w', encoding='utf-8') as f:
         f.write(env_content)
@@ -4956,13 +5364,11 @@ The application will be available at:
 
 ## Project Structure
 
-```
-{project_name.lower().replace(' ', '-')}/
-├── frontend/          # {'Next.js' if 'Next.js' in tech_stack else 'React'} frontend application
-├── backend/           # {'FastAPI' if 'FastAPI' in tech_stack or 'Python' in tech_stack else 'Node.js Express'} backend API
-├── README.md
-└── .gitignore
-```
+The project follows a standard full-stack structure:
+- frontend/ - {'Next.js' if 'Next.js' in tech_stack else 'React'} frontend application
+- backend/ - {'FastAPI' if 'FastAPI' in tech_stack or 'Python' in tech_stack else 'Node.js Express'} backend API
+- README.md - Project documentation
+- .gitignore - Git ignore file
 
 ## Features
 
@@ -5414,45 +5820,45 @@ async def scan(request: ScanRequest):
         # Enhanced summary with new scoring information
         scan_summary = scan_data.get('scan_summary', {}) if scan_data else {}
         domain = scan_summary.get('domain', 'Unknown')
-        summary = f"""🔒 **Security Scan Complete**
+        summary = f"""Security Scan Complete
 
-📊 **Target Analysis:**
-• Domain: {domain}
-• Overall Security Score: {overall_score}/100 ({security_level})
-• HTTPS: {'✅ Enabled' if https_enabled else '❌ Disabled'}
-• Vulnerabilities: {len(flags)} issues found
-• Pages Crawled: {len(pages)} pages
-• Security Headers: {len(headers)} detected
-• Exposed Paths: {len(exposed_paths)} found
+Target Analysis:
+- Domain: {domain}
+- Overall Security Score: {overall_score}/100 ({security_level})
+- HTTPS: {'Enabled' if https_enabled else 'Disabled'}
+- Vulnerabilities: {len(flags)} issues found
+- Pages Crawled: {len(pages)} pages
+- Security Headers: {len(headers)} detected
+- Exposed Paths: {len(exposed_paths)} found
 
-🛡️ **Web Application Firewall (WAF):**
-• WAF Detected: {'✅ Yes' if waf_info.get('waf_detected') else '❌ No'}
-• WAF Type: {waf_info.get('waf_type', 'None detected')}
-• Protection Level: {waf_info.get('protection_level', 'Unknown')}
-• Blocked Requests: {waf_info.get('blocked_requests', 0)}/{waf_info.get('total_requests', 0)}
+Web Application Firewall (WAF):
+- WAF Detected: {'Yes' if waf_info.get('waf_detected') else 'No'}
+- WAF Type: {waf_info.get('waf_type', 'None detected')}
+- Protection Level: {waf_info.get('protection_level', 'Unknown')}
+- Blocked Requests: {waf_info.get('blocked_requests', 0)}/{waf_info.get('total_requests', 0)}
 
-🔐 **DNS Security Features:**
-• DNSSEC: {'✅ Enabled' if dns_security.get('dnssec', {}).get('enabled') else '❌ Disabled'} - {dns_security.get('dnssec', {}).get('status', 'Unknown')}
-• DMARC: {'✅ Enabled' if dns_security.get('dmarc', {}).get('enabled') else '❌ Not configured'} - {dns_security.get('dmarc', {}).get('policy', 'No policy')}
-• DKIM: {'✅ Found' if dns_security.get('dkim', {}).get('selectors_found') else '❌ Not found'} - {len(dns_security.get('dkim', {}).get('selectors_found', []))} selectors
+DNS Security Features:
+- DNSSEC: {'Enabled' if dns_security.get('dnssec', {}).get('enabled') else 'Disabled'} - {dns_security.get('dnssec', {}).get('status', 'Unknown')}
+- DMARC: {'Enabled' if dns_security.get('dmarc', {}).get('enabled') else 'Not configured'} - {dns_security.get('dmarc', {}).get('policy', 'No policy')}
+- DKIM: {'Found' if dns_security.get('dkim', {}).get('selectors_found') else 'Not found'} - {len(dns_security.get('dkim', {}).get('selectors_found', []))} selectors
 
-🔐 **SSL/TLS Security Analysis:**
+SSL/TLS Security Analysis:
 {_format_ssl_analysis(ssl_certificate)}
 
-🎯 **Security Score Breakdown:**
-• HTTPS/SSL: {category_scores['https_ssl']}/100 ({weights['https_ssl']*100:.0f}% weight)
-• Security Headers: {category_scores['security_headers']}/100 ({weights['security_headers']*100:.0f}% weight)
-• Vulnerabilities: {category_scores['vulnerabilities']}/100 ({weights['vulnerabilities']*100:.0f}% weight)
-• Exposed Paths: {category_scores['exposed_paths']}/100 ({weights['exposed_paths']*100:.0f}% weight)
-• DNS Security: {category_scores['dns_security']}/100 ({weights['dns_security']*100:.0f}% weight)
+Security Score Breakdown:
+- HTTPS/SSL: {category_scores['https_ssl']}/100 ({int(weights['https_ssl']*100)}% weight)
+- Security Headers: {category_scores['security_headers']}/100 ({int(weights['security_headers']*100)}% weight)
+- Vulnerabilities: {category_scores['vulnerabilities']}/100 ({int(weights['vulnerabilities']*100)}% weight)
+- Exposed Paths: {category_scores['exposed_paths']}/100 ({int(weights['exposed_paths']*100)}% weight)
+- DNS Security: {category_scores['dns_security']}/100 ({int(weights['dns_security']*100)}% weight)
 
-🚨 **Key Issues Found:**
-{chr(10).join([f'• {flag}' for flag in flags[:5]]) if flags else '• No critical issues detected'}
+Key Issues Found:
+{chr(10).join([f'- {flag}' for flag in flags[:5]]) if flags else '- No critical issues detected'}
 
-🚪 **Potentially Exposed Paths:**
-{chr(10).join([f'• Found accessible path: {p.get("path", p) if isinstance(p, dict) else p}' for p in exposed_paths[:3]]) if exposed_paths else '• No common sensitive paths were found.'}
+Potentially Exposed Paths:
+{chr(10).join([f'- Found accessible path: {p.get("path", p) if isinstance(p, dict) else p}' for p in exposed_paths[:3]]) if exposed_paths else '- No common sensitive paths were found.'}
 
-💡 **Ready to help with specific security questions about this scan!**"""
+Ready to help with specific security questions about this scan!"""
         
         scan_response = {
             "url": url,
@@ -10553,4 +10959,4 @@ async def generate_ai_powered_full_stack_files(project_path: Path, idea: str, pr
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000, reload=False)

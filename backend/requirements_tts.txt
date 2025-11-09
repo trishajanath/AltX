@@ -1,0 +1,19 @@
+# Enhanced TTS Requirements for AltX
+# Add these to your requirements.txt for Chatterbox TTS support
+
+# Core Chatterbox TTS (if available)
+# chatterbox-tts>=1.0.0
+
+# PyTorch for model support
+torch>=2.0.0
+torchaudio>=2.0.0
+
+# Audio processing
+librosa>=0.10.0
+soundfile>=0.12.0
+
+# Perth watermarking (if available)
+# perth>=1.0.0
+
+# Fallback audio processing
+pydub>=0.25.1

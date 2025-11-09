@@ -4,6 +4,8 @@ Voice Chat API endpoints for the frontend integration
 import os
 import json
 import tempfile
+import asyncio
+import time
 from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse, Response
@@ -18,6 +20,15 @@ try:
 except ImportError:
     GOOGLE_CLOUD_AVAILABLE = False
     print("⚠️  Google Cloud services not available - using fallback")
+
+# Import Chatterbox TTS integration
+try:
+    from chatterbox_tts import tts_manager, detect_watermark
+    CHATTERBOX_AVAILABLE = True
+    print("✅ Chatterbox TTS integration available")
+except ImportError:
+    CHATTERBOX_AVAILABLE = False
+    print("⚠️  Chatterbox TTS not available - install with: pip install chatterbox-tts")
 
 router = APIRouter(prefix="/api", tags=["voice-chat"])
 
@@ -278,7 +289,37 @@ async def chat_with_ai(chat_data: ChatMessage):
         # Add current message
         conversation_context += f"User: {chat_data.message}\n"
         
+        # Check if we have enough info for a summary
+        has_project_type = any(keyword in conversation_context.lower() for keyword in ['grocery', 'app', 'website', 'mobile', 'web app', 'application'])
+        has_tech_stack = any(keyword in conversation_context.lower() for keyword in ['react', 'fastapi', 'javascript', 'python', 'node'])
+        has_design_prefs = any(keyword in conversation_context.lower() for keyword in ['black', 'white', 'color', 'theme', 'style', 'design'])
+        user_said_nope = 'nope' in chat_data.message.lower() or 'no' in chat_data.message.lower()
+        
+        should_create_summary = has_project_type and has_tech_stack and has_design_prefs and user_said_nope
+        
+        print(f"DEBUG Summary Check: type={has_project_type}, tech={has_tech_stack}, design={has_design_prefs}, nope={user_said_nope}")
+        print(f"DEBUG Should create summary: {should_create_summary}")
+        
         # Generate response with safety handling
+        summary_instruction = """
+        
+IMPORTANT: Based on the conversation, if you have collected:
+1. Project type/purpose 
+2. Technology stack
+3. Design preferences
+4. User indicated no additional requirements
+
+Then you MUST create a PROJECT SUMMARY in this format:
+"PROJECT SUMMARY:
+📱 Type: [type from conversation]
+🎯 Purpose: [purpose from conversation] 
+⭐ Features: [basic features + design preferences]
+💻 Tech: [tech stack from conversation]
+🎨 Style: [design preferences from conversation]
+
+Does this look good? Say 'yes' to generate your app!"
+""" if should_create_summary else ""
+        
         prompt = f"""Conversation so far:
 {conversation_context}
 
@@ -287,7 +328,7 @@ CRITICAL INSTRUCTIONS:
 - If the transcribed text seems like broken English or poor translation, treat it as English and respond in clear English
 - Never respond in Hindi, Urdu, or any Indian language unless explicitly requested
 - Keep responses friendly, professional, and focused on gathering app requirements
-- Use simple, clear English
+- Use simple, clear English{summary_instruction}
 
 Response:"""
         
@@ -306,14 +347,20 @@ Response:"""
             ]
         )
         
-        # Handle blocked responses
+        # Handle blocked responses with debugging
         if response.candidates and len(response.candidates) > 0:
             candidate = response.candidates[0]
-            if hasattr(candidate, 'finish_reason') and candidate.finish_reason != 1:  # 1 = STOP (normal completion)
-                ai_response = "I'm here to help you build your app! Could you tell me more about what you'd like to create? For example, is it a web app, mobile app, or something else?"
+            finish_reason = getattr(candidate, 'finish_reason', None)
+            print(f"DEBUG: AI response finish_reason: {finish_reason}")
+            print(f"DEBUG: AI response text: {response.text[:100] if response.text else 'No text'}")
+            
+            if finish_reason is not None and finish_reason != 1:  # 1 = STOP (normal completion)
+                print(f"DEBUG: AI response was blocked or incomplete, finish_reason: {finish_reason}")
+                ai_response = "I had a technical issue. Let me continue - what else would you like to tell me about your project?"
             else:
                 ai_response = response.text if response.text else "I'm ready to help you build your app! What would you like to create?"
         else:
+            print("DEBUG: No candidates in AI response")
             ai_response = "I'm your AI assistant and I'm ready to help you build amazing projects! What kind of app would you like to create today!"
         
         # Force English response if AI responded in wrong language
@@ -323,11 +370,19 @@ Response:"""
         should_generate = False
         project_spec = None
         
-        # Simple confirmation detection
+        # Simple confirmation detection - only for project generation
         user_msg_lower = chat_data.message.lower()
-        confirmation_words = ['yes', 'looks good', 'generate', 'build', 'create', 'perfect', 'correct', 'right']
+        confirmation_words = ['yes', 'looks good', 'generate', 'build it', 'create it', 'perfect', 'correct', 'sounds good']
         
-        if any(word in user_msg_lower for word in confirmation_words) and "PROJECT SUMMARY:" in conversation_context:
+        # Only trigger generation if there's a PROJECT SUMMARY and a clear confirmation
+        has_project_summary = "PROJECT SUMMARY:" in conversation_context
+        is_confirmation = any(word in user_msg_lower for word in confirmation_words)
+        
+        print(f"DEBUG: User message: '{chat_data.message}'")
+        print(f"DEBUG: Has project summary: {has_project_summary}")
+        print(f"DEBUG: Is confirmation: {is_confirmation}")
+        
+        if is_confirmation and has_project_summary:
             should_generate = True
             
             # Extract project info from conversation properly
@@ -415,9 +470,12 @@ Response:"""
         
     except Exception as e:
         print(f"Chat AI error: {e}")
-        # Return a fallback response instead of throwing an error
+        import traceback
+        print(f"Full traceback: {traceback.format_exc()}")
+        
+        # Return a contextual response instead of generic fallback
         return {
-            "response": "I'm here to help you build your app! Could you tell me what kind of project you'd like to create? For example, a website, mobile app, or desktop application?",
+            "response": "I had a small hiccup processing that. Could you please repeat what you just said?",
             "should_generate": False,
             "project_spec": None
         }
@@ -484,6 +542,206 @@ async def synthesize_speech(request: TextToSpeechRequest):
     except Exception as e:
         print(f"TTS error: {e}")
         raise HTTPException(status_code=500, detail=f"Text-to-speech failed: {str(e)}")
+
+# Enhanced TTS with Chatterbox integration
+class ChatterboxTTSRequest(BaseModel):
+    text: str
+    language: str = "en"
+    voice_prompt_path: Optional[str] = None
+
+@router.post("/synthesize-chatterbox")
+async def synthesize_chatterbox_speech(request: ChatterboxTTSRequest):
+    """Convert text to speech using Chatterbox TTS with advanced features"""
+    
+    if not CHATTERBOX_AVAILABLE:
+        # Fallback to Google Cloud TTS if available
+        if GOOGLE_CLOUD_AVAILABLE:
+            fallback_request = TextToSpeechRequest(text=request.text)
+            return await synthesize_speech(fallback_request)
+        else:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "error": "Advanced TTS not available", 
+                    "message": "Please install chatterbox-tts for enhanced voice synthesis",
+                    "fallback": "Using basic TTS"
+                }
+            )
+    
+    try:
+        # Initialize TTS manager if needed
+        if not tts_manager.is_initialized:
+            await tts_manager.initialize_models()
+        
+        # Generate speech with Chatterbox
+        audio_path = await tts_manager.generate_speech(
+            text=request.text,
+            language=request.language,
+            voice_prompt_path=request.voice_prompt_path
+        )
+        
+        # Read the generated audio file
+        audio_file_path = Path(audio_path)
+        if not audio_file_path.exists():
+            raise HTTPException(status_code=500, detail="Generated audio file not found")
+        
+        # Return audio file
+        with open(audio_file_path, "rb") as audio_file:
+            audio_content = audio_file.read()
+        
+        # Detect watermark
+        watermark_score = detect_watermark(str(audio_file_path))
+        
+        return Response(
+            content=audio_content,
+            media_type="audio/wav",
+            headers={
+                "Content-Disposition": f"inline; filename=chatterbox_tts_{int(time.time() * 1000)}.wav",
+                "X-Watermark-Score": str(watermark_score),
+                "X-TTS-Engine": "Chatterbox",
+                "X-Language": request.language
+            }
+        )
+        
+    except Exception as e:
+        print(f"Chatterbox TTS error: {e}")
+        
+        # Try fallback to Google Cloud TTS
+        if GOOGLE_CLOUD_AVAILABLE and request.language == "en":
+            try:
+                fallback_request = TextToSpeechRequest(text=request.text)
+                return await synthesize_speech(fallback_request)
+            except:
+                pass
+        
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Enhanced TTS failed: {str(e)}"
+        )
+
+@router.post("/voice-clone")
+async def clone_voice(
+    text: str,
+    reference_audio: UploadFile = File(...)
+):
+    """Generate speech with voice cloning from uploaded reference audio"""
+    
+    if not CHATTERBOX_AVAILABLE:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "Voice cloning not available",
+                "message": "Please install chatterbox-tts for voice cloning features"
+            }
+        )
+    
+    try:
+        # Save uploaded reference audio
+        reference_content = await reference_audio.read()
+        
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_ref:
+            temp_ref.write(reference_content)
+            temp_ref_path = temp_ref.name
+        
+        # Initialize TTS manager if needed
+        if not tts_manager.is_initialized:
+            await tts_manager.initialize_models()
+        
+        # Generate cloned speech
+        cloned_audio_path = await tts_manager.clone_voice(
+            text=text,
+            reference_audio_path=temp_ref_path
+        )
+        
+        # Clean up reference file
+        os.unlink(temp_ref_path)
+        
+        # Return cloned audio
+        with open(cloned_audio_path, "rb") as audio_file:
+            audio_content = audio_file.read()
+        
+        return Response(
+            content=audio_content,
+            media_type="audio/wav",
+            headers={
+                "Content-Disposition": f"inline; filename=voice_clone_{int(time.time() * 1000)}.wav",
+                "X-TTS-Engine": "Chatterbox-Clone",
+                "X-Clone-Quality": "High"
+            }
+        )
+        
+    except Exception as e:
+        # Clean up temp file if it exists
+        if 'temp_ref_path' in locals() and os.path.exists(temp_ref_path):
+            os.unlink(temp_ref_path)
+        
+        print(f"Voice cloning error: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Voice cloning failed: {str(e)}"
+        )
+
+@router.get("/multilingual-demo")
+async def generate_multilingual_demo():
+    """Generate demo audio files in multiple languages"""
+    
+    if not CHATTERBOX_AVAILABLE:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "Multilingual TTS not available",
+                "message": "Please install chatterbox-tts for multilingual features"
+            }
+        )
+    
+    try:
+        # Initialize TTS manager if needed
+        if not tts_manager.is_initialized:
+            await tts_manager.initialize_models()
+        
+        # Generate demo files
+        demo_results = await tts_manager.generate_multilingual_demo()
+        
+        # Return results with download links
+        return {
+            "success": True,
+            "message": "Multilingual demo generated successfully",
+            "languages": demo_results,
+            "supported_languages": tts_manager.get_supported_languages()
+        }
+        
+    except Exception as e:
+        print(f"Multilingual demo error: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Demo generation failed: {str(e)}"
+        )
+
+@router.get("/supported-languages")
+async def get_supported_languages():
+    """Get list of supported TTS languages"""
+    
+    languages = {
+        "google_cloud": ["en-US", "en-GB", "es-ES", "fr-FR", "de-DE"] if GOOGLE_CLOUD_AVAILABLE else [],
+        "chatterbox": []
+    }
+    
+    if CHATTERBOX_AVAILABLE:
+        try:
+            if not tts_manager.is_initialized:
+                await tts_manager.initialize_models()
+            languages["chatterbox"] = tts_manager.get_supported_languages()
+        except:
+            pass
+    
+    return {
+        "available_engines": {
+            "google_cloud": GOOGLE_CLOUD_AVAILABLE,
+            "chatterbox": CHATTERBOX_AVAILABLE
+        },
+        "supported_languages": languages,
+        "recommended_engine": "chatterbox" if CHATTERBOX_AVAILABLE else "google_cloud"
+    }
 
 # Health check endpoint
 @router.get("/voice-chat/status")
