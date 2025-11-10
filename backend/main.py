@@ -155,6 +155,15 @@ class ConsoleErrorRequest(BaseModel):
     stack_trace: Optional[str] = None
     error_type: Optional[str] = None
 
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+class LoginResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: Dict[str, Any]
+
 from fastapi import Query, WebSocket, WebSocketDisconnect
 from fastapi.websockets import WebSocketState
 import asyncio
@@ -9042,6 +9051,46 @@ async def google_login():
     except Exception as e:
         print(f"❌ Google login initiation error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Google login failed: {str(e)}")
+
+@app.post("/auth/login", response_model=LoginResponse)
+async def login_user(login_data: LoginRequest):
+    """
+    Basic email/password login endpoint
+    """
+    try:
+        # For now, we'll use a simple demo user validation
+        # In a real app, you'd validate against a database with hashed passwords
+        demo_users = {
+            "admin@altx.com": {"password": "admin123", "id": 1, "name": "Admin User"},
+            "user@altx.com": {"password": "user123", "id": 2, "name": "Demo User"},
+            "test@test.com": {"password": "test123", "id": 3, "name": "Test User"}
+        }
+        
+        user = demo_users.get(login_data.email.lower())
+        if not user or user["password"] != login_data.password:
+            raise HTTPException(
+                status_code=401, 
+                detail="Invalid email or password. Please try again."
+            )
+        
+        # Generate a simple token (in production, use JWT with proper signing)
+        access_token = f"demo_token_{user['id']}_{int(time.time())}"
+        
+        return LoginResponse(
+            access_token=access_token,
+            user={
+                "id": user["id"],
+                "email": login_data.email,
+                "name": user["name"]
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Login error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Login failed: {str(e)}")
+
 @app.get("/auth/status")
 async def auth_status():
     """

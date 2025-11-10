@@ -3,273 +3,77 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import * as THREE from 'three';
 import { BarChart3, Rocket, Shield, GitBranch, Menu, X, ChevronDown, LogOut, MessageCircle } from 'lucide-react';
 import Plasma from './Plasma';
+import StaggeredMenu from './StagMenu';
 
 // --- Sidebar Component (Enhanced) ---
-const Sidebar = ({ isOpen, toggleSidebar, setView, currentView, user, isAuthenticated, onLogout  }) => {
-    const navigate = useNavigate();
-    const location = useLocation();
-    const currentPath = location.pathname;
-    
-    const menuItems = [
-        { icon: <BarChart3 size={20} />, title: 'Dashboard', view: 'dashboard', path: '/home' },
-        { icon: <MessageCircle size={20} />, title: 'Voice Chat Builder', view: 'voice-chat', path: '/voice-chat' },
-        { icon: <Rocket size={20} />, title: 'Deploy Project', view: 'deploy', path: '/deploy' },
-        { icon: <Shield size={20} />, title: 'Security Scan', view: 'security', path: '/security' },
-        { icon: <GitBranch size={20} />, title: 'Repo Analysis', view: 'repo-analysis', path: '/repo-analysis' },
-        { icon: <BarChart3 size={20} />, title: 'Reports', view: 'reports', path: '/report' },
-        { icon: <Rocket size={20} />, title: 'Build Apps', view: 'build', path: '/build' },
-    ];
+const Sidebar = ({ 
+  setSidebarOpen,
+  setView, 
+  currentView, 
+  user, 
+  isAuthenticated, 
+  onLogout  
+}) => {
+  const navigate = useNavigate();
+  const location = useLocation();
 
-    const handleNavigation = (item) => {
-        navigate(item.path);
-        // Add a small delay for smooth transition before closing on mobile
-        if (window.innerWidth < 768) {
-            setTimeout(() => toggleSidebar(), 150);
-        }
-    };
+  // Replace old sidebar items with menu equivalents
+  const menuItems = [
+    { label: 'Dashboard', ariaLabel: 'View Dashboard', link: '/home' },
+    { label: 'Voice Chat Builder', ariaLabel: 'Access Voice Chat Builder', link: '/voice-chat' },
+    { label: 'Deploy Project', ariaLabel: 'Deploy your Project', link: '/deploy' },
+    { label: 'Security Scan', ariaLabel: 'Perform Security Scan', link: '/security' },
+    { label: 'Repo Analysis', ariaLabel: 'Analyze Repositories', link: '/repo-analysis' },
+    { label: 'Reports', ariaLabel: 'View Reports', link: '/report' },
+    { label: 'Build Apps', ariaLabel: 'Start Building Apps', link: '/build' }
+  ];
 
-    return (
-        <>
-            <style>{`
-                .logo-text {
-                    font-family: 'Chakra Petch', sans-serif !important;
-                    font-size: 1.8rem !important;
-                    font-weight: 700 !important;
-                    letter-spacing: 2px !important;
-                    color: #ffffff !important;
-                    text-shadow: none !important;
-                    filter: none !important;
-                    -webkit-text-fill-color: #ffffff !important;
-                    -webkit-text-stroke: none !important;
-                    background: none !important;
-                    background-color: transparent !important;
-                    justify-self: start;
-                    align-self: start;
-                }
-                .logo-text::before,
-                .logo-text::after {
-                    display: none !important;
-                }
-                .sidebar {
-                    width: var(--sidebar-width);
-                    background: rgba(16, 16, 16, 0.6);
-                    border-right: 1px solid rgba(255,255,255,0.15);
-                    backdrop-filter: blur(10px);
-                    -webkit-backdrop-filter: blur(10px);
-                    display: flex;
-                    flex-direction: column;
-                    position: fixed;
-                    top: 0;
-                    left: 0;
-                    height: 100%;
-                    z-index: 100;
-                    transform: translateX(-100%);
-                    transition: transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-                    will-change: transform;
-                }
-                .sidebar.open { 
-                    transform: translateX(0); 
-                }
-                @media (min-width: 768px) {
-                    .sidebar { 
-                        transform: translateX(0); 
-                        transition: transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-                    }
-                    .app-container:not(.sidebar-open) .sidebar {
-                        transform: translateX(-100%);
-                    }
-                }
-                .sidebar-header {
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                    padding: 1.5rem;
-                    border-bottom: 1px solid rgba(255,255,255,0.15);
-                }
-                .close-button {
-                    background: none; 
-                    border: none; 
-                    color: #A0A0A0; 
-                    cursor: pointer;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    padding: 8px;
-                    border-radius: 6px;
-                    transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-                }
-                .close-button:hover {
-                    color: #FFFFFF;
-                    background-color: rgba(255,255,255,0.05);
-                    transform: rotate(90deg);
-                }
-                .sidebar-nav { flex-grow: 1; padding: 1rem 0; }
-                .nav-item {
-                    display: flex;
-                    align-items: center;
-                    gap: 1rem;
-                    padding: 0.875rem 1.5rem;
-                    margin: 0.25rem 0;
-                    color: #A0A0A0;
-                    text-decoration: none;
-                    font-weight: 500;
-                    transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-                    position: relative;
-                    border-radius: 0.5rem;
-                    overflow: hidden;
-                    will-change: background-color, color, transform;
-                }
-                .nav-item:hover {
-                    background-color: rgba(255,255,255,0.05);
-                    color: #FFFFFF;
-                    transform: translateX(4px);
-                }
-                .nav-item.active {
-                    color: #FFFFFF;
-                    font-weight: 600;
-                    background-color: rgba(255,255,255,0.05);
-                    transform: translateX(4px);
-                }
-                .nav-item.active::before {
-                    content: '';
-                    position: absolute;
-                    left: 0;
-                    top: 0;
-                    height: 100%;
-                    width: 3px;
-                    background: #FFFFFF;
-                    box-shadow: 0 0 8px #FFFFFF;
-                    transition: width 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-                }
-                .nav-item.active:hover::before {
-                    width: 4px;
-                }
-                .sidebar-footer { padding: 1.5rem; border-top: 1px solid rgba(255,255,255,0.15); }
-                .user-profile { display: flex; align-items: center; gap: 0.75rem; cursor: pointer; }
-                .user-profile img { border-radius: 50%; border: 1px solid rgba(255,255,255,0.15); }
-                .user-info { flex-grow: 1; }
-                .user-info span { display: block; font-weight: 600; color: #FFFFFF; }
-                .user-info small { color: #A0A0A0; }
+  const socialItems = [
+    { label: 'Twitter', link: 'https://twitter.com' },
+    { label: 'GitHub', link: 'https://github.com' },
+    { label: 'LinkedIn', link: 'https://linkedin.com' }
+  ];
 
-                .menu-button {
-                    position: fixed; top: 20px; left: 20px; z-index: 101;
-                    background: var(--glass-bg);
-                    border: 1px solid var(--border-color);
-                    border-radius: 8px;
-                    padding: 8px;
-                    color: var(--text-primary);
-                    cursor: pointer;
-                    display: flex;
-                    align-items: center;
-                    backdrop-filter: blur(5px);
-                    transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-                    opacity: 1;
-                    transform: scale(1);
-                    will-change: opacity, transform;
-                }
-                .menu-button:hover {
-                    transform: scale(1.05);
-                    background: rgba(255,255,255,0.05);
-                    border-color: #FFFFFF;
-                }
-                .app-container.sidebar-open .menu-button { 
-                    opacity: 0;
-                    transform: scale(0.8);
-                    pointer-events: none;
-                }
+  // Handle navigation
+  const handleNavigation = (link) => {
+    navigate(link);
+  };
 
-                /* Sidebar backdrop for mobile */
-                .sidebar-backdrop {
-                    position: fixed;
-                    top: 0;
-                    left: 0;
-                    width: 100%;
-                    height: 100%;
-                    background-color: rgba(0, 0, 0, 0.5);
-                    backdrop-filter: blur(2px);
-                    z-index: 99;
-                    opacity: 0;
-                    visibility: hidden;
-                    transition: opacity 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94),
-                               visibility 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-                }
-                .sidebar-backdrop.visible {
-                    opacity: 1;
-                    visibility: visible;
-                }
-                @media (min-width: 768px) {
-                    .sidebar-backdrop { display: none; }
-                }
-            `}</style>
-            
-            {/* Backdrop for mobile */}
-            <div 
-                className={`sidebar-backdrop ${isOpen ? 'visible' : ''}`}
-                onClick={toggleSidebar}
-            />
-            
-            {isOpen && (
-                <div className={`sidebar open`}>
-                    <div className="sidebar-header">
-                        <div className="logo">
-                            <span className="logo-text">xVERTA</span>
-                        </div>
-                        <button className="close-button" onClick={toggleSidebar}>
-                            <X size={24} />
-                        </button>
-                    </div>
-                    <nav className="sidebar-nav">
-                        {menuItems.map(item => (
-                            <a 
-                                key={item.view} 
-                                href="#" 
-                                onClick={e => {
-                                    e.preventDefault();
-                                    handleNavigation(item);
-                                }} 
-                                className={`nav-item ${currentPath === item.path ? 'active' : ''}`}
-                            >
-                                {item.icon}
-                                <span>{item.title}</span>
-                            </a>
-                        ))}
-                    </nav>
-                    <div className="sidebar-footer">
-                        {isAuthenticated && user ? (
-                            <div className="user-profile">
-                                <img 
-                                    src={user.avatar || "https://placehold.co/40x40/000000/ffffff?text=" + (user.name?.charAt(0)?.toUpperCase() || 'U')} 
-                                    alt="User Avatar" 
-                                />
-                                <div className="user-info">
-                                    <span>{user.name || 'User'}</span>
-                                    <small>{user.email || 'Not logged in'}</small>
-                                </div>
-                                <button 
-                                    onClick={onLogout}
-                                    className="logout-button"
-                                    title="Logout"
-                                >
-                                    <LogOut size={16} />
-                                </button>
-                            </div>
-                        ) : (
-                            <div className="user-profile login-prompt">
-                                <div className="user-info">
-                                    <span>Not Logged In</span>
-                                    <small>
-                                        <a href="/login" style={{ color: 'var(--accent)', textDecoration: 'none' }}>
-                                            Sign in to continue
-                                        </a>
-                                    </small>
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                </div>
-            )}
-        </>
-    );
+  // Handle menu open/close and sync with PageWrapper state
+  const handleMenuOpen = () => {
+    setSidebarOpen(true);
+  };
+
+  const handleMenuClose = () => {
+    setSidebarOpen(false);
+  };
+
+  return (
+    <div className="sidebar">
+      <StaggeredMenu
+        position="left"
+        items={menuItems.map(item => ({
+          ...item,
+          onClick: () => handleNavigation(item.link),
+          active: location.pathname === item.link
+        }))}
+        socialItems={socialItems}
+        displaySocials={true}
+        displayItemNumbering={true}
+        menuButtonColor="#ffffff"
+        openMenuButtonColor="#ffffff"
+        changeMenuColorOnOpen={true}
+        colors={['#000000', '#111111', '#222222']}
+        logoUrl="/logos/xverta-logo.png"
+        accentColor="#ffffff"
+        onMenuOpen={handleMenuOpen}
+        onMenuClose={handleMenuClose}
+        user={user}
+        isAuthenticated={isAuthenticated}
+        onLogout={onLogout}
+      />
+    </div>
+  );
 };
 
 // --- ✨ UPDATED Vortex Three.js Background ---
@@ -736,15 +540,9 @@ const PageWrapper = ({ children }) => {
             <div className={`app-container ${isSidebarOpen ? 'sidebar-open' : ''} ${hideSidebar ? 'auth-page' : ''}`}>
                 <ThreeBackground /> 
 
-                {!hideSidebar && <Sidebar isOpen={isSidebarOpen} toggleSidebar={toggleSidebar} setView={setCurrentView} 
+                {!hideSidebar && <Sidebar setSidebarOpen={setSidebarOpen} setView={setCurrentView} 
                 currentView={currentView} user={user} isAuthenticated={isAuthenticated} onLogout={handleLogout} 
                 />}
-                
-                {!hideSidebar && !isSidebarOpen && (
-                    <button className="menu-button" onClick={toggleSidebar}>
-                        <Menu size={24} />
-                    </button>
-                )}
                 
                 <div className={`main-content ${hideSidebar ? 'auth-content' : ''}`}>
                     {children}

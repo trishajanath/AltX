@@ -1,8 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Mic, MicOff, Volume2, VolumeX, MessageCircle, Loader, Play, Square, Settings, BrainCircuit, ArrowRight } from 'lucide-react';
+import { Mic, MicOff, Scan, Database, UploadCloud, Volume2, VolumeX, MessageCircle, Loader, Play, Square, Settings, BrainCircuit, ArrowRight, X } from 'lucide-react';
 import PageWrapper from './PageWrapper';
 import usePreventZoom from './usePreventZoom';
-
+import {
+  Menubar,
+  MenubarContent,
+  MenubarItem,
+  MenubarMenu,
+  MenubarSeparator,
+  MenubarShortcut,
+  MenubarTrigger,
+} from "./ui/buttonswitch";
+import './voice.css';
 const VoiceChatInterface = ({ onProjectGenerated }) => {
   usePreventZoom();
   const [isRecording, setIsRecording] = useState(false);
@@ -17,6 +26,22 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [historyError, setHistoryError] = useState(null);
   
+  // Format time ago function
+  const formatTimeAgo = (dateString) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffInHours = Math.floor((now - date) / (1000 * 60 * 60));
+    
+    if (diffInHours < 1) return 'Just now';
+    if (diffInHours < 24) return `${diffInHours} hours ago`;
+    
+    const diffInDays = Math.floor(diffInHours / 24);
+    if (diffInDays === 1) return 'Yesterday';
+    if (diffInDays < 7) return `${diffInDays} days ago`;
+    
+    return date.toLocaleDateString();
+  };
+  
   // Real-time conversation states
   const [isRealTimeMode, setIsRealTimeMode] = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -24,6 +49,9 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
   const [voiceActivityTimer, setVoiceActivityTimer] = useState(null);
   const [silenceTimer, setSilenceTimer] = useState(null);
   const [speechAPIFailures, setSpeechAPIFailures] = useState(0);
+  
+  // NEW: State for dynamic mode switching
+  const [currentMode, setCurrentMode] = useState('voice'); // 'voice', 'scan_website', 'scan_repo', 'deploy'
   
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
@@ -510,6 +538,18 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
   useEffect(() => {
     fetchProjectHistory();
   }, []);
+
+  // Handle edit project - navigate to Monaco editor
+  const handleEditProject = (project) => {
+    const editorUrl = `/project/${project.slug}`;
+    window.location.href = editorUrl;
+  };
+
+  // Handle preview project - open in new tab
+  const handlePreviewProject = (project) => {
+    const previewUrl = project.preview_url || `http://localhost:8000/api/sandbox-preview/${project.slug}`;
+    window.open(previewUrl, '_blank', 'noopener,noreferrer');
+  };
 
   // Speech-to-Text setup
   const startRecording = async () => {
@@ -1193,10 +1233,44 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
   };
   
   const sendTextMessage = () => {
-    if (textInput.trim()) {
-      addMessage('user', textInput);
-      sendToAI(textInput);
-      setTextInput('');
+    if (!textInput.trim() || isLoading) return;
+    
+    addMessage('user', textInput);
+
+    // Handle AI based on the current mode
+    switch (currentMode) {
+      case 'voice':
+        sendToAI(textInput);
+        break;
+      case 'scan_website':
+        sendToAI(`Scanning website: ${textInput}`);
+        break;
+      case 'scan_repo':
+        sendToAI(`Scanning repository: ${textInput}`);
+        break;
+      case 'deploy':
+        sendToAI(`Starting deployment for: ${textInput}`);
+        break;
+      default:
+        sendToAI(textInput);
+    }
+    
+    setTextInput('');
+  };
+
+  // Helper to get placeholder text for the current mode
+  const getPlaceholder = () => {
+    switch (currentMode) {
+      case 'voice':
+        return 'Ask Xverta to create a landing page...';
+      case 'scan_website':
+        return 'Enter a website URL to scan...';
+      case 'scan_repo':
+        return 'Enter a GitHub repository URL to scan...';
+      case 'deploy':
+        return 'Enter a project name to deploy...';
+      default:
+        return 'Ask me anything...';
     }
   };
 
@@ -1267,1271 +1341,201 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
   };
 
 return (
+
     <PageWrapper>
-      <style>{`
-        :root {
-          --bg-black: #000000;
-          --card-bg: #1a1a1a;
-          --card-border: #333333;
-          --text-primary: #ffffff;
-          --text-secondary: #aaaaaa;
-          --accent: #ffffff;
-          --accent-text: #000000; /* NEW: For text on white buttons */
-          --danger-text: #ef4444;
-          --danger-bg: rgba(239, 68, 68, 0.1);
-          --danger-border: rgba(239, 68, 68, 0.3);
-        }
-
-        .voice-chat-page {
-          background: var(--bg-black);
-          color: var(--text-primary);
-          min-height: 100vh;
-          font-family: "Inter", sans-serif;
-          position: relative;
-        }
-
-        /* Lovable-Inspired Single-Focus Layout */
-        .lovable-layout {
-          height: 100vh;
-          position: relative;
-          overflow: hidden;
-        }
-
-        .magical-chat-container {
-          height: 100vh;
-          display: flex;
-          flex-direction: column;
-          max-width: 1200px;
-          margin: 0 auto;
-          padding: 0 2rem;
-          position: relative;
-          z-index: 1;
-        }
-
-        /* Chat Messages Section - Top Half */
-        .chat-messages-section {
-          flex: 1;
-          display: flex;
-          flex-direction: column;
-          justify-content: flex-end;
-          padding: 2rem 0;
-          min-height: 0;
-        }
-
-        .conversation-messages {
-          display: flex;
-          flex-direction: column;
-          gap: 1.5rem;
-          overflow-y: auto;
-          padding: 1rem;
-          background: rgba(0, 0, 0, 0.3);
-          backdrop-filter: blur(20px);
-          border-radius: 20px;
-          border: 1px solid rgba(255, 255, 255, 0.1);
-          box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-          max-height: 60vh;
-          scrollbar-width: none;
-        }
-
-        .conversation-messages::-webkit-scrollbar {
-          display: none;
-        }
-
-        /* Hero Input Section - Bottom Half */
-        .hero-input-section {
-          flex-shrink: 0;
-          padding: 2rem 0;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 2rem;
-        }
-
-        /* Suggested Prompts */
-        .suggested-prompts {
-          width: 100%;
-          max-width: 800px;
-        }
-
-        .prompt-suggestions {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 0.75rem;
-          justify-content: center;
-          margin-bottom: 1rem;
-        }
-
-        .suggestion-pill {
-          background: rgba(255, 255, 255, 0.1);
-          backdrop-filter: blur(10px);
-          border: 1px solid rgba(255, 255, 255, 0.2);
-          border-radius: 25px;
-          padding: 0.75rem 1.5rem;
-          color: var(--text-primary);
-          font-size: 0.875rem;
-          font-weight: 500;
-          cursor: pointer;
-          transition: all 0.3s ease;
-          white-space: nowrap;
-        }
-
-        .suggestion-pill:hover {
-          background: rgba(255, 255, 255, 0.2);
-          border-color: rgba(255, 255, 255, 0.4);
-          transform: translateY(-2px);
-        }
-
-        /* Main Input Controls */
-        .main-input-controls {
-          display: flex;
-          align-items: center;
-          gap: 2rem;
-          width: 100%;
-          max-width: 800px;
-        }
-
-        /* Hero Voice Orb */
-        .hero-orb-container {
-          flex-shrink: 0;
-        }
-
-        .hero-voice-orb {
-          position: relative;
-          width: 80px;
-          height: 80px;
-          cursor: pointer;
-          transition: all 0.4s ease;
-        }
-
-        .hero-voice-orb:hover {
-          transform: scale(1.1);
-        }
-
-        .hero-orb-outer {
-          position: absolute;
-          inset: 0;
-          border-radius: 50%;
-          background: conic-gradient(from 180deg at 50% 50%, #ffffff 0%, #888888 50%, #ffffff 100%);
-          animation: spin 15s linear infinite;
-          filter: blur(12px);
-          opacity: 0.8;
-        }
-
-        .hero-orb-inner {
-          position: absolute;
-          inset: 6px;
-          background: rgba(0, 0, 0, 0.8);
-          backdrop-filter: blur(20px);
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          border: 2px solid rgba(255, 255, 255, 0.3);
-          transition: all 0.4s ease;
-        }
-
-        .hero-voice-orb.recording .hero-orb-outer {
-          animation: pulse 1.5s infinite, spin 15s linear infinite;
-          background: conic-gradient(from 180deg at 50% 50%, #ff4444 0%, #ff6666 50%, #ff4444 100%);
-          opacity: 1;
-        }
-
-        .hero-voice-orb.recording .hero-orb-inner {
-          background: rgba(255, 68, 68, 0.3);
-        }
-
-        /* Hero Text Input */
-        .hero-text-input-container {
-          flex: 1;
-          position: relative;
-        }
-
-        .hero-text-input {
-          width: 100%;
-          background: rgba(255, 255, 255, 0.1);
-          backdrop-filter: blur(20px);
-          border: 2px solid rgba(255, 255, 255, 0.2);
-          border-radius: 25px;
-          padding: 1.25rem 4rem 1.25rem 2rem;
-          color: var(--text-primary);
-          font-size: 1.125rem;
-          font-weight: 500;
-          outline: none;
-          transition: all 0.3s ease;
-        }
-
-        .hero-text-input:focus {
-          border-color: rgba(255, 255, 255, 0.5);
-          background: rgba(255, 255, 255, 0.15);
-          box-shadow: 0 0 30px rgba(255, 255, 255, 0.1);
-        }
-
-        .hero-text-input::placeholder {
-          color: rgba(255, 255, 255, 0.6);
-          font-weight: 400;
-        }
-
-        .hero-send-btn {
-          position: absolute;
-          right: 0.5rem;
-          top: 50%;
-          transform: translateY(-50%);
-          background: var(--accent);
-          border: none;
-          border-radius: 50%;
-          width: 50px;
-          height: 50px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: var(--accent-text);
-          cursor: pointer;
-          transition: all 0.3s ease;
-        }
-
-        .hero-send-btn:hover {
-          transform: translateY(-50%) scale(1.1);
-          box-shadow: 0 8px 25px rgba(255, 255, 255, 0.3);
-        }
-
-        /* Status and Controls */
-        .status-controls {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          width: 100%;
-          max-width: 800px;
-        }
-
-        .chat-status {
-          font-size: 0.875rem;
-          color: var(--text-secondary);
-          font-weight: 500;
-        }
-
-        .chat-status .listening {
-          color: var(--accent);
-          font-weight: 600;
-        }
-
-        .floating-controls {
-          display: flex;
-          gap: 0.75rem;
-        }
-
-        .floating-btn {
-          background: rgba(255, 255, 255, 0.1);
-          backdrop-filter: blur(10px);
-          border: 1px solid rgba(255, 255, 255, 0.2);
-          border-radius: 50%;
-          width: 44px;
-          height: 44px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: var(--text-secondary);
-          cursor: pointer;
-          transition: all 0.3s ease;
-        }
-
-        .floating-btn:hover {
-          background: rgba(255, 255, 255, 0.2);
-          color: var(--text-primary);
-          transform: translateY(-2px);
-        }
-
-        .floating-btn.active {
-          background: var(--accent);
-          border-color: var(--accent);
-          color: var(--accent-text);
-        }
-
-        /* Floating Settings Panel */
-        .floating-settings {
-          position: fixed;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          background: rgba(0, 0, 0, 0.8);
-          backdrop-filter: blur(10px);
-          z-index: 1000;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          opacity: 0;
-          pointer-events: none;
-          transition: all 0.3s ease;
-        }
-
-        .floating-settings.visible {
-          opacity: 1;
-          pointer-events: all;
-        }
-
-        .settings-glass-panel {
-          background: rgba(0, 0, 0, 0.9);
-          backdrop-filter: blur(20px);
-          border: 1px solid rgba(255, 255, 255, 0.2);
-          border-radius: 20px;
-          padding: 2rem;
-          max-width: 500px;
-          width: 90%;
-          max-height: 80vh;
-          overflow-y: auto;
-        }
-
-        .settings-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 1.5rem;
-        }
-
-        .settings-header h3 {
-          margin: 0;
-          font-size: 1.25rem;
-          font-weight: 600;
-          color: var(--text-primary);
-        }
-
-        .close-settings-btn {
-          background: rgba(255, 255, 255, 0.1);
-          border: 1px solid rgba(255, 255, 255, 0.2);
-          border-radius: 50%;
-          width: 32px;
-          height: 32px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: var(--text-secondary);
-          cursor: pointer;
-          font-size: 1.25rem;
-          transition: all 0.2s ease;
-        }
-
-        .close-settings-btn:hover {
-          background: rgba(255, 255, 255, 0.2);
-          color: var(--text-primary);
-        }
-
-        /* Remove old canvas styles - replaced with lovable layout */
-
-        .tts-settings-panel {
-          background: #111111;
-          border-bottom: 1px solid var(--card-border);
-          padding: 1.5rem;
-          flex-shrink: 0;
-        }
-
-        .settings-section h4 {
-          margin: 0 0 1.25rem 0;
-          color: var(--text-primary);
-          font-size: 1rem;
-          font-weight: 600;
-        }
-
-        .setting-row {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          margin-bottom: 1rem;
-          gap: 1.5rem;
-        }
-
-        .setting-row label {
-          color: var(--text-secondary);
-          font-size: 0.875rem;
-          min-width: 100px;
-          font-weight: 500;
-        }
-
-        .setting-select {
-          background: var(--card-bg);
-          border: 1px solid var(--card-border);
-          border-radius: 0.375rem;
-          color: var(--text-primary);
-          padding: 0.5rem 0.75rem;
-          font-size: 0.875rem;
-          flex: 1;
-        }
-
-        .setting-select:focus {
-          outline: none;
-          border-color: var(--accent);
-        }
-
-        .voice-clone-section {
-          display: flex;
-          align-items: center;
-          gap: 0.75rem;
-          flex: 1;
-        }
-
-        .voice-file-input {
-          display: none;
-        }
-
-        .voice-file-label {
-          background: var(--card-bg);
-          border: 1px solid var(--card-border);
-          border-radius: 0.375rem;
-          color: var(--text-secondary);
-          padding: 0.5rem 1rem;
-          font-size: 0.875rem;
-          cursor: pointer;
-          transition: all 0.2s;
-          text-align: center;
-          flex: 1;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-
-        .voice-file-label:hover {
-          background: #2a2a2a;
-          color: var(--text-primary);
-        }
-
-        .clear-voice-btn {
-          background: var(--danger-bg);
-          border: 1px solid var(--danger-border);
-          border-radius: 0.375rem;
-          color: var(--danger-text);
-          padding: 0.375rem 0.75rem;
-          font-size: 0.8rem;
-          font-weight: 500;
-          cursor: pointer;
-          transition: all 0.2s;
-        }
-
-        .clear-voice-btn:hover {
-          background: rgba(239, 68, 68, 0.2);
-        }
-
-        .test-tts-btn {
-          background: var(--accent);
-          border: 1px solid var(--accent);
-          border-radius: 0.375rem;
-          color: var(--accent-text);
-          padding: 0.6rem 1rem;
-          font-size: 0.875rem;
-          font-weight: 600;
-          cursor: pointer;
-          transition: all 0.2s;
-        }
-
-        .test-tts-btn:hover:not(:disabled) {
-          background: transparent;
-          color: var(--accent);
-        }
-
-        .test-tts-btn:disabled {
-          opacity: 0.5;
-          cursor: not-allowed;
-        }
-
-        .project-title {
-          font-weight: 700;
-          font-size: 1.125rem;
-          color: var(--text-primary);
-        }
-
-        .canvas-content {
-          flex: 1;
-          display: flex;
-          flex-direction: column;
-          overflow: hidden;
-        }
-
-        .conversation-display {
-          flex: 1;
-          display: flex;
-          flex-direction: column;
-          overflow: hidden;
-        }
-
-        .conversation-header {
-          padding: 1rem 1.5rem;
-          border-bottom: 1px solid var(--card-border);
-          display: flex;
-          align-items: center;
-          gap: 0.75rem;
-          flex-shrink: 0;
-        }
-
-        .ai-avatar {
-          width: 2rem;
-          height: 2rem;
-          border-radius: 50%;
-          background: var(--accent);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-weight: 700;
-          font-size: 0.875rem;
-          color: var(--accent-text);
-          flex-shrink: 0;
-        }
-
-        .conversation-messages {
-          flex: 1;
-          overflow-y: auto;
-          padding: 1.5rem 1.5rem 1rem 1.5rem;
-          display: flex;
-          flex-direction: column;
-          gap: 1.25rem;
-        }
-
-        .message {
-          display: flex;
-          gap: 0.75rem;
-          align-items: flex-start;
-          max-width: 85%;
-        }
-
-        .message.user {
-          justify-content: flex-end;
-          align-self: flex-end;
-        }
-        
-        .message.ai {
-          align-self: flex-start;
-        }
-
-        .message.system {
-          max-width: 100%;
-          align-self: center;
-        }
-
-        .message.user .message-bubble {
-          background: var(--accent);
-          color: var(--accent-text);
-          border-radius: 1.25rem 1.25rem 0.25rem 1.25rem;
-        }
-
-        .message.ai .message-bubble {
-          background: var(--card-bg);
-          color: var(--text-primary);
-          border: 1px solid var(--card-border);
-          border-radius: 1.25rem 1.25rem 1.25rem 0.25rem;
-        }
-
-        .message.system .message-bubble {
-          background: transparent;
-          color: var(--text-secondary);
-          font-size: 0.8rem;
-          text-align: center;
-          border-radius: 1rem;
-          margin: 0 auto;
-          padding: 0.25rem 1rem;
-        }
-
-        .message-bubble {
-          padding: 0.875rem 1.25rem;
-          font-size: 0.9rem;
-          line-height: 1.6;
-          white-space: pre-wrap;
-          max-width: 450px;
-        }
-        
-        .message-bubble .whitespace-pre-wrap {
-          white-space: pre-wrap;
-        }
-
-        .message-time {
-          font-size: 0.75rem;
-          opacity: 0.6;
-          margin-top: 0.375rem;
-        }
-        
-        .message.user .message-time {
-          color: #333333;
-        }
-
-        /* --- UNIFIED CHAT LAYOUT: Seamless conversation-to-input flow --- */
-        .unified-voice-controls {
-          padding: 1rem 1.5rem 1.25rem 1.5rem;
-          background: #0a0a0a;
-          display: flex;
-          flex-direction: column;
-          gap: 0.75rem;
-          flex-shrink: 0;
-          border-top: 1px solid rgba(51, 51, 51, 0.3);
-        }
-
-        .voice-orb-container {
-          display: flex;
-          justify-content: center;
-          align-items: center;
-          margin-bottom: 0rem;
-        }
-
-        .voice-orb {
-          position: relative;
-          width: 56px;
-          height: 56px;
-          cursor: pointer;
-          transition: all 0.3s ease;
-        }
-
-        .voice-orb:hover {
-          transform: scale(1.05);
-        }
-
-        .orb-outer {
-          position: absolute;
-          inset: 0;
-          border-radius: 50%;
-          background: conic-gradient(from 180deg at 50% 50%, #ffffff 0%, #aaaaaa 50%, #ffffff 100%);
-          animation: spin 10s linear infinite;
-          filter: blur(8px);
-          opacity: 0.7;
-          transition: all 0.3s ease;
-        }
-
-        .orb-inner {
-          position: absolute;
-          inset: 4px;
-          background: #111111;
-          border-radius: 50%;
-          z-index: 10;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          border: 1px solid var(--card-border);
-          transition: all 0.3s ease;
-        }
-
-        .orb-inner svg {
-          width: 1.5rem;
-          height: 1.5rem;
-          color: var(--text-secondary);
-          transition: color 0.3s ease;
-        }
-        
-        .voice-orb:hover .orb-inner svg {
-          color: var(--text-primary);
-        }
-
-        .voice-orb.recording .orb-outer {
-          animation: pulse 1.5s infinite, spin 10s linear infinite;
-          background: conic-gradient(from 180deg at 50% 50%, var(--danger-text) 0%, #dc2626 50%, var(--danger-text) 100%);
-          opacity: 1;
-        }
-        
-        .voice-orb.recording .orb-inner {
-          background: var(--danger-bg);
-          border-color: var(--danger-border);
-        }
-
-        .voice-orb.recording .orb-inner svg {
-          color: var(--danger-text);
-        }
-
-        .text-input-container {
-          position: relative;
-          width: 100%;
-          max-width: 100%;
-          margin: 0.75rem 0 0 0;
-        }
-
-        .text-input {
-          width: 100%;
-          background: var(--card-bg);
-          border: 1px solid var(--card-border);
-          border-radius: 1.5rem;
-          color: var(--text-primary);
-          font-size: 0.95rem;
-          padding: 0.875rem 3.5rem 0.875rem 1.25rem;
-          transition: all 0.2s ease;
-          font-family: "Inter", sans-serif;
-        }
-
-        .text-input:focus {
-          outline: none;
-          border-color: var(--accent);
-          box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.1);
-        }
-
-        .text-input::placeholder {
-          color: var(--text-secondary);
-          opacity: 0.7;
-        }
-
-        .send-button {
-          position: absolute;
-          right: 0.5rem;
-          top: 50%;
-          transform: translateY(-50%);
-          width: 2.25rem;
-          height: 2.25rem;
-          border-radius: 50%;
-          background: var(--accent);
-          border: none;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          cursor: pointer;
-          transition: all 0.2s ease;
-        }
-
-        .send-button:hover:not(:disabled) {
-          transform: translateY(-50%) scale(1.1);
-          box-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
-        }
-
-        .send-button:disabled {
-          opacity: 0.4;
-          cursor: not-allowed;
-        }
-
-        .send-button svg {
-          width: 1rem;
-          height: 1rem;
-          color: var(--accent-text);
-        }
-
-        /* --- Status text below orb --- */
-        .chat-status-text {
-          font-size: 0.75rem;
-          color: var(--text-secondary);
-          text-align: center;
-          min-height: 1.5rem;
-          display: flex;
-          flex-direction: column;
-          justify-content: center;
-          line-height: 1.4;
-        }
-
-        .control-buttons {
-          display: flex;
-          gap: 0.5rem;
-        }
-
-        .control-btn {
-          background: var(--card-bg);
-          border: 1px solid var(--card-border);
-          border-radius: 0.5rem;
-          padding: 0.6rem;
-          color: var(--text-secondary);
-          cursor: pointer;
-          transition: all 0.2s ease;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-
-        .control-btn:hover {
-          background: #2a2a2a;
-          color: var(--text-primary);
-        }
-
-        /* --- UPDATED: Active state is solid white --- */
-        .control-btn.active {
-          background: var(--accent);
-          border-color: var(--accent);
-          color: var(--accent-text);
-        }
-
-        .loading-indicator {
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
-          padding: 0.75rem 1rem;
-          background: var(--card-bg);
-          border-radius: 1rem;
-          color: var(--text-secondary);
-          font-size: 0.875rem;
-          align-self: flex-start;
-          margin-left: 0.75rem;
-        }
-
-        /* --- NEW: Secondary Controls Grid --- */
-        .secondary-controls-grid {
-          display: grid;
-          grid-template-columns: 1fr;
-          gap: 1rem;
-          width: 100%;
-          max-width: 700px;
-          margin: 0 auto;
-        }
-        
-        @media (min-width: 640px) {
-          .secondary-controls-grid {
-            grid-template-columns: 1fr 1fr;
-          }
-        }
-
-        .mic-selector-group, .project-history-group {
-          display: flex;
-          flex-direction: column;
-          gap: 0.5rem;
-        }
-
-        .mic-selector-group label, .project-history-group label {
-          font-size: 0.8rem;
-          font-weight: 600;
-          color: var(--text-secondary);
-        }
-        
-        .mic-selector-group select {
-          width: 100%;
-          background: var(--card-bg);
-          border: 1px solid var(--card-border);
-          border-radius: 0.5rem;
-          color: var(--text-primary);
-          font-size: 0.85rem;
-          padding: 0.6rem;
-          font-family: "Inter", sans-serif;
-        }
-        
-        .project-history-group button {
-          background: var(--card-bg);
-          border: 1px solid var(--card-border);
-          border-radius: 0.5rem;
-          color: var(--text-secondary);
-          font-size: 0.85rem;
-          padding: 0.6rem;
-          cursor: pointer;
-          transition: all 0.2s ease;
-          font-family: "Inter", sans-serif;
-          font-weight: 500;
-        }
-        
-        .project-history-group button:hover {
-          background: #2a2a2a;
-          color: var(--text-primary);
-        }
-        
-        .project-history-panel {
-          background: var(--bg-black);
-          border: 1px solid var(--card-border);
-          border-radius: 0.5rem;
-          max-height: 200px;
-          overflow-y: auto;
-          width: 100%;
-          max-width: 700px;
-          margin: 0 auto;
-        }
-        
-        .project-history-item {
-          padding: 0.75rem 1rem;
-          border-radius: 0.375rem;
-          margin: 0.5rem;
-          background: var(--card-bg);
-          border: 1px solid var(--card-border);
-          cursor: pointer;
-          transition: all 0.2s ease;
-        }
-        
-        .project-history-item:hover {
-          background: #2a2a2a;
-          border-color: #444444;
-        }
-        
-        .project-history-item-name {
-          font-size: 0.85rem; 
-          font-weight: 600; 
-          color: var(--text-primary);
-          margin-bottom: 0.25rem;
-        }
-        
-        .project-history-item-details {
-          font-size: 0.75rem; 
-          color: var(--text-secondary);
-          margin-bottom: 0.6rem;
-        }
-        
-        .project-history-item-actions {
-          display: flex; 
-          gap: 0.5rem;
-        }
-        
-        .project-history-btn {
-          background: rgba(255, 255, 255, 0.1);
-          border: 1px solid var(--card-border);
-          border-radius: 0.25rem;
-          color: #ffffff;
-          font-size: 0.75rem;
-          padding: 0.25rem 0.6rem;
-          cursor: pointer;
-          transition: all 0.2s;
-        }
-        
-        .project-history-btn:hover {
-          background: rgba(255, 255, 255, 0.2);
-        }
-
-        .project-history-empty {
-          padding: 1.5rem; 
-          text-align: center; 
-          color: var(--text-secondary);
-          font-size: 0.85rem;
-        }
-
-        /* --- NEW: Footer Hint Text --- */
-        .chat-footer-hint {
-          font-size: 0.75rem;
-          color: var(--text-secondary);
-          text-align: center;
-          margin-top: 0.5rem;
-          line-height: 1.5;
-        }
-
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-
-        @keyframes pulse {
-          0%, 100% { opacity: 0.8; transform: scale(1); }
-          50% { opacity: 1; transform: scale(1.05); }
-        }
-
-        .fade-in {
-          animation: fadeIn 0.5s ease-in-out forwards;
-        }
-
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(10px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-      `}</style>
-      
       <div className="voice-chat-page">
-        {/* Magical Single-Focus Layout */}
-        <div className="lovable-layout">
-          {/* Floating Settings Panel */}
-          <div className={`floating-settings ${showTTSSettings ? 'visible' : ''}`}>
-            <div className="settings-glass-panel">
-              <div className="settings-header">
-                <h3>Voice Settings</h3>
-                <button
-                  onClick={() => setShowTTSSettings(false)}
-                  className="close-settings-btn"
-                >
-                  ×
-                </button>
+        {/* --- Floating Settings Panel (remains hidden) --- */}
+        <div className={`floating-settings ${showTTSSettings ? 'visible' : ''}`}>
+          <div className="settings-panel">
+            <div className="settings-header">
+              <h3>Voice Settings</h3>
+              <button
+                onClick={() => setShowTTSSettings(false)}
+                className="close-settings-btn"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            {/* (Settings content goes here...) */}
+          </div>
+        </div>
+
+        {/* --- Desktop App Container --- */}
+        <div className="desktop-app-container">
+          {/* Left Sidebar */}
+          <div className="app-sidebar">
+            <div className="sidebar-header">
+              <div className="app-logo">Xverta</div>
+            </div>
+            
+            <button className="new-chat-btn" onClick={() => setConversation([])}>
+              <MessageCircle size={18} />
+              New Chat
+            </button>
+            
+            <div className="sidebar-nav">
+              <div className={`nav-item ${currentMode === 'voice' ? 'active' : ''}`} onClick={() => setCurrentMode('voice')}>
+                <BrainCircuit size={16} />
+                Voice Chat
               </div>
-
-              {/* TTS Settings Content */}
-              <div className="settings-section">
-                <div className="settings-section">
-                  <h4>Text-to-Speech Settings</h4>
-                  
-                  <div className="setting-row">
-                    <label>TTS Engine:</label>
-                    <select 
-                      value={ttsEngine} 
-                      onChange={(e) => {
-                        setTtsEngine(e.target.value);
-                        if (e.target.value !== 'chatterbox') {
-                          setVoiceCloneFile(null);
-                        }
-                      }}
-                      className="setting-select"
-                    >
-                      <option value="chatterbox">Chatterbox TTS (Premium)</option>
-                      <option value="google">Google Cloud TTS (High Quality)</option>
-                    </select>
-                  </div>
-
-                  <div className="setting-row">
-                    <label>Language/Voice:</label>
-                    <select 
-                      value={ttsLanguage} 
-                      onChange={(e) => {
-                        setTtsLanguage(e.target.value);
-                        console.log('Voice changed to:', e.target.value);
-                        addMessage('system', `Voice changed to: ${e.target.options[e.target.selectedIndex].text}`);
-                      }}
-                      className="setting-select"
-                    >
-                      {(supportedLanguages || []).map(lang => (
-                        <option key={lang.code} value={lang.code}>
-                          {lang.name} {lang.engine === 'chatterbox' ? '(Premium)' : ''}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {ttsEngine === 'chatterbox' && (
-                    <div className="setting-row">
-                      <label>Voice Cloning:</label>
-                      <div className="voice-clone-section">
-                        <input
-                          type="file"
-                          accept="audio/*"
-                          onChange={(e) => setVoiceCloneFile(e.target.files[0])}
-                          className="voice-file-input"
-                          id="voice-clone-input"
-                        />
-                        <label htmlFor="voice-clone-input" className="voice-file-label">
-                          {voiceCloneFile ? voiceCloneFile.name : 'Upload Voice Sample'}
-                        </label>
-                        {voiceCloneFile && (
-                          <button 
-                            onClick={() => setVoiceCloneFile(null)}
-                            className="clear-voice-btn"
-                          >
-                            Clear
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="setting-row">
-                    <div style={{ display: 'flex', gap: '0.5rem', flex: 1 }}>
-                      <button 
-                        onClick={testTTSSettings}
-                        className="test-tts-btn"
-                        disabled={isPlaying}
-                        style={{ flex: 1 }}
-                      >
-                        {isPlaying ? 'Playing...' : 'Test Current Voice'}
-                      </button>
-                      <button 
-                        onClick={async () => {
-                          const quickTest = `This is ${supportedLanguages.find(lang => lang.code === ttsLanguage)?.name || ttsLanguage}`;
-                          await speakText(quickTest, ttsLanguage);
-                        }}
-                        className="test-tts-btn"
-                        disabled={isPlaying}
-                        style={{ 
-                          flex: 0, 
-                          padding: '0.5rem',
-                          background: 'var(--card-bg)',
-                          borderColor: 'var(--card-border)',
-                          color: 'var(--text-primary)'
-                        }}
-                        title="Quick voice preview"
-                      >
-                        Test
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="setting-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '0.5rem' }}>
-                    <label style={{ fontSize: '0.8rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Quick Voice Samples:</label>
-                    <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
-                      {[
-                        { code: 'en-US', text: 'Hello from America!', flag: '(US)' },
-                        { code: 'en-GB', text: 'Greetings from Britain!', flag: '(UK)' },
-                        { code: 'es-ES', text: '¡Hola desde España!', flag: '(Spain)' },
-                        { code: 'fr-FR', text: 'Bonjour de France!', flag: '(France)' },
-                        { code: 'de-DE', text: 'Hallo aus Deutschland!', flag: '(Germany)' }
-                      ].filter(sample => supportedLanguages.some(lang => lang.code === sample.code))
-                      .map(sample => (
-                        <button
-                          key={sample.code}
-                          onClick={async () => {
-                            console.log(`Playing sample: ${sample.code} - "${sample.text}"`);
-                            addMessage('system', `Playing ${sample.flag} ${sample.code}: "${sample.text}"`);
-                            const originalLang = ttsLanguage;
-                            await speakText(sample.text, sample.code);
-                            setTimeout(() => {
-                              addMessage('system', `Voice sample complete. Current setting: ${supportedLanguages.find(lang => lang.code === originalLang)?.name || originalLang}`);
-                            }, 1000);
-                          }}
-                          disabled={isPlaying}
-                          style={{
-                            background: ttsLanguage === sample.code ? 'var(--accent)' : 'var(--card-bg)',
-                            border: ttsLanguage === sample.code ? '1px solid var(--accent)' : '1px solid var(--card-border)',
-                            borderRadius: '0.25rem',
-                            color: ttsLanguage === sample.code ? 'var(--accent-text)' : 'var(--text-secondary)',
-                            fontSize: '0.75rem',
-                            padding: '0.375rem 0.6rem',
-                            cursor: 'pointer',
-                            transition: 'all 0.2s',
-                            fontWeight: ttsLanguage === sample.code ? '600' : '400',
-                          }}
-                          title={`Test ${sample.code} voice ${ttsLanguage === sample.code ? '(Current)' : ''}`}
-                        >
-                          {sample.flag} {sample.code.split('-')[0].toUpperCase()}
-                          {ttsLanguage === sample.code && ' ✓'}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
+              <div className={`nav-item ${currentMode === 'scan_website' ? 'active' : ''}`} onClick={() => setCurrentMode('scan_website')}>
+                <Scan size={16} />
+                Scan Website
+              </div>
+              <div className={`nav-item ${currentMode === 'scan_repo' ? 'active' : ''}`} onClick={() => setCurrentMode('scan_repo')}>
+                <Database size={16} />
+                Scan Repository
+              </div>
+              <div className={`nav-item ${currentMode === 'deploy' ? 'active' : ''}`} onClick={() => setCurrentMode('deploy')}>
+                <UploadCloud size={16} />
+                Deploy Project
+              </div>
+              <div className={`nav-item ${showTTSSettings ? 'active' : ''}`} onClick={() => setShowTTSSettings(!showTTSSettings)}>
+                <Settings size={16} />
+                Voice Settings
+              </div>
+              <div className={`nav-item ${isMuted ? 'active' : ''}`} onClick={() => setIsMuted(!isMuted)}>
+                {isMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}
+                {isMuted ? 'Audio Muted' : 'Audio On'}
               </div>
             </div>
           </div>
-
-          {/* Single-Focus Chat Interface */}
-          <div className="magical-chat-container">
-            {/* Chat Messages - Top Half */}
-            <div className="chat-messages-section">
-              <div ref={chatContainerRef} className="conversation-messages">
-                {conversation.map((message, index) => (
-                  <div key={index} className={`message ${message.type}`}>
-                    {message.type === 'ai' && (
-                      <div className="ai-avatar">✨</div>
-                    )}
-                    <div className={`message-bubble ${message.type}`}>
-                      <div className="whitespace-pre-wrap">{message.content}</div>
-                      <div className="message-time">
-                        {message.timestamp.toLocaleTimeString()}
+          
+          {/* Main Content Area */}
+          <div className="main-content-area">
+            {/* Chat Area (Center) */}
+            <div className="chat-area">
+              <div className="magical-chat-container">
+                {/* Chat Wrapper - Contains messages and input as one unit */}
+                <div className="chat-wrapper">
+              {/* Chat Messages (Top, grows) */}
+              <div className="chat-messages-section">
+                <div ref={chatContainerRef} className="conversation-messages">
+                  {conversation.map((message, index) => (
+                    <div key={index} className={`message ${message.type} fade-in`}>
+                      {message.type === 'ai' && <div className="ai-avatar"></div>}
+                      <div className={`message-bubble`}>
+                        <div className="whitespace-pre-wrap">{message.content}</div>
+                        <div className="message-time">
+                          {message.timestamp.toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
-                
-                {isLoading && (
-                  <div className="loading-indicator">
-                    <Loader size={16} className="animate-spin" />
-                    <span>AI is thinking...</span>
-                  </div>
-                )}
+                  ))}
+
+                  {isLoading && (
+                    <div className="loading-indicator fade-in">
+                      <Loader size={16} className="animate-spin" />
+                      <span>AI is thinking...</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+              
+              {/* Hero Input Area (Bottom, fixed) */}
+              <div className="hero-input-section">
+            {/* Main Input Controls */}
+            <div className="main-input-controls">
+              {/* Voice Orb (only show in voice mode) */}
+              {currentMode === 'voice' && (
+                <div
+                  className={`hero-voice-orb ${
+                    isRecording || isListening ? 'recording' : ''
+                  }`}
+                  onClick={
+                    isRecording ? stopRecording : startRecording
+                  }
+                  title={isRecording ? 'Stop Recording' : 'Start Recording'}
+                >
+                  {isRecording ? <Square size={24} /> : <Mic size={24} />}
+                </div>
+              )}
+
+              {/* Text Input (adapts to mode) */}
+              <div className="hero-text-input-container">
+                <input
+                  type="text"
+                  value={textInput}
+                  onChange={(e) => setTextInput(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && sendTextMessage()}
+                  placeholder={getPlaceholder()}
+                  className="hero-text-input"
+                  disabled={isLoading}
+                  style={{ paddingLeft: currentMode !== 'voice' ? '1.5rem' : '' }}
+                />
+                <button
+                  onClick={sendTextMessage}
+                  disabled={!textInput.trim() || isLoading}
+                  className="hero-send-btn"
+                  title="Send Message"
+                >
+                  <ArrowRight size={20} />
+                </button>
               </div>
             </div>
-
-            {/* Hero Input Section - Bottom Half */}
-            <div className="hero-input-section">
-              {/* Suggested Prompts */}
-              <div className="suggested-prompts">
-                <div className="prompt-suggestions">
-                  <button
-                    onClick={() => {
-                      setTextInput("Create a modern e-commerce website");
-                      addMessage('user', "Create a modern e-commerce website");
-                      sendToAI("Create a modern e-commerce website");
-                      setTextInput('');
-                    }}
-                    className="suggestion-pill"
-                  >
-                    Create e-commerce site
-                  </button>
-                  <button
-                    onClick={() => {
-                      setTextInput("Build a social media dashboard");
-                      addMessage('user', "Build a social media dashboard");
-                      sendToAI("Build a social media dashboard");
-                      setTextInput('');
-                    }}
-                    className="suggestion-pill"
-                  >
-                    Social media dashboard
-                  </button>
-                  <button
-                    onClick={() => {
-                      setTextInput("Deploy my project to production");
-                      addMessage('user', "Deploy my project to production");
-                      sendToAI("Deploy my project to production");
-                      setTextInput('');
-                    }}
-                    className="suggestion-pill"
-                  >
-                    Deploy project
-                  </button>
-                  <button
-                    onClick={() => {
-                      setTextInput("Run security scan on my code");
-                      addMessage('user', "Run security scan on my code");
-                      sendToAI("Run security scan on my code");
-                      setTextInput('');
-                    }}
-                    className="suggestion-pill"
-                  >
-                    Security scan
-                  </button>
                 </div>
               </div>
+            </div>
+            </div>
 
-              {/* Main Input Controls */}
-              <div className="main-input-controls">
-                {/* Voice Orb */}
-                <div className="hero-orb-container">
-                  <div 
-                    className={`hero-voice-orb ${(isRecording || isListening) ? 'recording' : ''}`}
-                    onClick={isRealTimeMode ? (isRecording ? stopRecording : startRecording) : (isRecording ? stopRecording : startRecording)}
-                  >
-                    <div className="hero-orb-outer"></div>
-                    <div className="hero-orb-inner">
-                      {isRealTimeMode ? (
-                        isRecording ? <Square size={32} /> : (isListening ? <BrainCircuit size={32} /> : <Mic size={32} />)
-                      ) : (
-                        isRecording ? <Square size={32} /> : <Mic size={32} />
-                      )}
-                    </div>
+            {/* Context Sidebar (Right) */}
+            <div className="context-sidebar">
+              <div className="context-section">
+                <h3>Recent Projects ({projectHistory?.length || 0})</h3>
+                {isLoadingHistory ? (
+                  <div className="context-item">
+                    <span>Loading projects...</span>
                   </div>
-                </div>
-
-                {/* Text Input */}
-                <div className="hero-text-input-container">
-                  <input
-                    type="text"
-                    value={textInput}
-                    onChange={(e) => setTextInput(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && sendTextMessage()}
-                    placeholder="Ask Lovable to create a landing page for my startup..."
-                    className="hero-text-input"
-                    disabled={isLoading}
-                  />
-                  <button 
-                    onClick={sendTextMessage}
-                    disabled={!textInput.trim() || isLoading}
-                    className="hero-send-btn"
-                  >
-                    <ArrowRight size={24} />
-                  </button>
-                </div>
+                ) : historyError ? (
+                  <div className="context-item">
+                    <span>Error: {historyError}</span>
+                  </div>
+                ) : !projectHistory || projectHistory.length === 0 ? (
+                  <div className="context-item">
+                    <span>No recent projects found</span>
+                  </div>
+                ) : (
+                  projectHistory.slice(0, 5).map((project, index) => (
+                    <div key={project.slug || index} className="recent-project">
+                      <div className="project-icon">
+                        {project.tech_stack?.includes('React') ? 'R' : 
+                         project.tech_stack?.includes('FastAPI') ? 'F' : 
+                         'P'}
+                      </div>
+                      <div className="project-details">
+                        <div className="project-name">{project.name || 'Unnamed Project'}</div>
+                        <div className="project-info">
+                          {project.created_date ? formatTimeAgo(new Date(project.created_date * 1000).toISOString()) : 'Unknown date'}
+                        </div>
+                        <div className="project-actions">
+                          <button 
+                            className="action-button edit-button"
+                            onClick={() => handleEditProject(project)}
+                            title="Edit Project"
+                          >
+                            Edit
+                          </button>
+                          <button 
+                            className="action-button preview-button"
+                            onClick={() => handlePreviewProject(project)}
+                            title="Preview Project"
+                          >
+                            Preview
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
 
-              {/* Status and Controls */}
-              <div className="status-controls">
-                <div className="chat-status">
-                  {isRealTimeMode ? (
-                    <span className={isListening ? 'listening' : ''}>
-                      {speechAPIFailures >= 3 ? 'Manual mode (API unavailable)' :
-                      isRecording ? 'Recording...' : (isListening ? '🎤 Listening...' : 'Voice mode active')}
-                    </span>
-                  ) : (
-                    <span>
-                      {isRecording && 'Recording...'}
-                      {isPlaying && 'AI Speaking...'}
-                      {audioStoppedMessage && audioStoppedMessage}
-                      {!isRecording && !isPlaying && !audioStoppedMessage && 'Ready to create magic'}
-                    </span>
-                  )}
-                </div>
-
-                <div className="floating-controls">
-                  <button
-                    onClick={() => setIsMuted(!isMuted)}
-                    className={`floating-btn ${isMuted ? 'active' : ''}`}
-                    title={isMuted ? 'Enable audio' : 'Mute audio'}
-                  >
-                    {isMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
-                  </button>
-                  
-                  <button
-                    onClick={() => setShowTTSSettings(!showTTSSettings)}
-                    className={`floating-btn ${showTTSSettings ? 'active' : ''}`}
-                    title="Voice Settings"
-                  >
-                    <Settings size={18} />
-                  </button>
-                  
-                  <button
-                    onClick={toggleRealTimeMode}
-                    className={`floating-btn ${isRealTimeMode ? 'active' : ''}`}
-                    title="Real-time voice mode"
-                  >
-                    <BrainCircuit size={18} />
-                  </button>
-
-                  {isPlaying && (
-                    <button
-                      onClick={stopSpeaking}
-                      className="floating-btn active"
-                      title="Stop speaking"
-                    >
-                      <Square size={18} />
-                    </button>
-                  )}
+              <div className="context-section">
+                <h3>AI Assistant</h3>
+                <div className="context-item">
+                  <span>Ready to help</span>
                 </div>
               </div>
             </div>
@@ -2540,6 +1544,4 @@ return (
       </div>
     </PageWrapper>
   );
-};
-
-export default VoiceChatInterface;
+};export default VoiceChatInterface;

@@ -9,6 +9,7 @@ const LoginPage = () => {
         password: ''
     });
     const [isLoggingIn, setIsLoggingIn] = useState(false);
+    const [error, setError] = useState('');
 
     const handleChange = (e) => {
         setFormData({
@@ -17,16 +18,54 @@ const LoginPage = () => {
         });
     };
 
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
         setIsLoggingIn(true);
-        setTimeout(() => {
+        setError('');
+        
+        // Basic validation
+        if (!formData.email || !formData.password) {
+            setError('Please fill in all fields');
             setIsLoggingIn(false);
-            // Here you would normally handle the login logic
-            console.log('Login data:', formData);
-            // Redirect to home page after successful login
-            navigate('/home');
-        }, 1800);
+            return;
+        }
+        
+        try {
+            // Make API call to login endpoint
+            const response = await fetch('http://localhost:8000/auth/login', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    email: formData.email,
+                    password: formData.password
+                })
+            });
+            
+            const data = await response.json();
+            
+            if (response.ok && data.success) {
+                // Store authentication data in localStorage
+                localStorage.setItem('access_token', data.access_token);
+                localStorage.setItem('user', JSON.stringify(data.user));
+                
+                console.log('✅ Login successful:', data.user);
+                
+                // Redirect to home page after successful login
+                navigate('/home');
+            } else {
+                // Handle login error
+                const errorMessage = data.message || 'Invalid email or password. Please try again.';
+                console.error('❌ Login failed:', errorMessage);
+                setError(errorMessage);
+            }
+        } catch (error) {
+            console.error('❌ Login error:', error);
+            setError('Login failed. Please check your connection and try again.');
+        } finally {
+            setIsLoggingIn(false);
+        }
     };
 
     const handleBackToLanding = () => {
@@ -180,6 +219,45 @@ const LoginPage = () => {
                         font-size: 0.95rem;
                         font-weight: 400;
                         font-family: 'Inter', sans-serif;
+                    }
+
+                    .demo-credentials {
+                        background: rgba(59, 130, 246, 0.1);
+                        border: 1px solid rgba(59, 130, 246, 0.2);
+                        border-radius: 0.75rem;
+                        padding: 0.75rem 1rem;
+                        margin-top: 1rem;
+                        font-size: 0.8rem;
+                        color: #93c5fd;
+                    }
+
+                    .demo-credentials p {
+                        margin: 0.25rem 0;
+                        font-family: 'Courier New', monospace;
+                    }
+
+                    .demo-credentials strong {
+                        color: #ffffff;
+                        font-family: 'Inter', sans-serif;
+                    }
+
+                    .error-message {
+                        background: rgba(239, 68, 68, 0.1);
+                        border: 1px solid rgba(239, 68, 68, 0.3);
+                        color: #ef4444;
+                        padding: 0.75rem 1rem;
+                        border-radius: 0.75rem;
+                        font-size: 0.875rem;
+                        font-family: 'Inter', sans-serif;
+                        margin-bottom: 1.5rem;
+                        text-align: center;
+                        animation: shake 0.5s ease-in-out;
+                    }
+
+                    @keyframes shake {
+                        0%, 100% { transform: translateX(0); }
+                        25% { transform: translateX(-5px); }
+                        75% { transform: translateX(5px); }
                     }
 
                     .form-group {
@@ -424,7 +502,19 @@ const LoginPage = () => {
                         <div className="login-header">
                             <h1 className="login-title">Welcome Back</h1>
                             <p className="login-subtitle">Sign in to your Xverta account</p>
+                            <div className="demo-credentials">
+                                <p><strong>Demo Credentials:</strong></p>
+                                <p>📧 admin@altx.com / admin123</p>
+                                <p>👤 user@altx.com / user123</p>
+                                <p>🧪 test@test.com / test123</p>
+                            </div>
                         </div>
+
+                        {error && (
+                            <div className="error-message">
+                                {error}
+                            </div>
+                        )}
 
                         <form onSubmit={handleSubmit}>
                             <div className="form-group">

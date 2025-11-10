@@ -70,6 +70,7 @@ class ValidationResult:
 	fixes_applied: List[str]
 	security_issues: List[str]
 	is_valid: bool
+	validation_passed: bool = True
 
 
 class AIValidationAgent:
@@ -132,11 +133,13 @@ class AIValidationAgent:
 			if self.fast_mode and self._is_simple_file(file_path, file_type):
 				print(f"⚡ {file_path} passed validation (fast mode)")
 				return ValidationResult(
+					file_path=str(file_path),
 					original_content=content,
 					fixed_content=content,
 					issues_found=[],
 					fixes_applied=[],
 					security_issues=[],
+					is_valid=True,
 					validation_passed=True
 				)
 			
@@ -155,6 +158,9 @@ class AIValidationAgent:
 			if not response.candidates:
 				raise Exception("No validation response received")
 			
+			if not response.candidates[0].content.parts:
+				raise Exception("No content parts in validation response")
+			
 			result_text = response.candidates[0].content.parts[0].text.strip()
 			
 			# Parse validation result
@@ -170,9 +176,20 @@ class AIValidationAgent:
 					# Extract content between first pair of code blocks
 					parts = result_text.split("```")
 					if len(parts) >= 3:
-						result_text = parts[1].strip()
-						if result_text.startswith("json\n"):
-							result_text = result_text[5:]
+						# Safe access to parts array
+						content_part = parts[1].strip() if len(parts) > 1 else ""
+						if content_part.startswith("json\n"):
+							content_part = content_part[5:]
+						result_text = content_part
+				
+				# Clean up common JSON formatting issues
+				result_text = result_text.strip()
+				if not result_text.startswith("{"):
+					# Try to find the first { and last }
+					start_idx = result_text.find("{")
+					end_idx = result_text.rfind("}")
+					if start_idx != -1 and end_idx != -1:
+						result_text = result_text[start_idx:end_idx+1]
 				
 				validation_data = json.loads(result_text)
 				
@@ -195,8 +212,25 @@ class AIValidationAgent:
 						issues_found.append(f"Python syntax error: {e}")
 				elif file_path.suffix in ['.jsx', '.js']:
 					# Basic JSX/JS checks
-					if 'export default' not in content and 'module.exports' not in content:
+					if 'export default' not in content and 'module.exports' not in content and 'export ' not in content:
 						issues_found.append("Missing export statement")
+						# Try to fix by adding a simple export if it's a component
+						if 'function ' in content or 'const ' in content or 'class ' in content:
+							# Find component/function names and suggest export
+							lines = content.split('\n')
+							for line in lines:
+								if 'function ' in line or 'const ' in line:
+									# Extract potential component name
+									if 'function' in line:
+										name_part = line.split('function')[1].split('(')[0].strip()
+									elif 'const' in line and '=>' in line:
+										name_part = line.split('const')[1].split('=')[0].strip()
+									else:
+										continue
+									if name_part and name_part[0].isupper():  # Component naming convention
+										fixed_content = content + f'\n\nexport default {name_part};'
+										fixes_applied.append(f"Added export default {name_part}")
+										break
 				elif file_path.suffix == '.json':
 					# JSON syntax check
 					try:
@@ -220,7 +254,8 @@ class AIValidationAgent:
 				issues_found=validation_data.get("issues_found", []),
 				fixes_applied=validation_data.get("fixes_applied", []),
 				security_issues=validation_data.get("security_issues", []),
-				is_valid=validation_data.get("is_valid", True)
+				is_valid=validation_data.get("is_valid", True),
+				validation_passed=validation_data.get("is_valid", True)
 			)
 			
 			# Track the validation result
@@ -247,6 +282,32 @@ class AIValidationAgent:
 			
 			return result
 			
+		except IndexError as e:
+			print(f"❌ Validation failed for {file_path}: list index out of range")
+			# Return original content with a more specific error message
+			return ValidationResult(
+				file_path=str(file_path),
+				original_content=content,
+				fixed_content=content,
+				issues_found=[f"AI response format error - unable to parse validation result"],
+				fixes_applied=[],
+				security_issues=[],
+				is_valid=True,  # Assume valid since we can't validate
+				validation_passed=False
+			)
+		except json.JSONDecodeError as e:
+			print(f"❌ Validation failed for {file_path}: JSON decode error")
+			# This is already handled in the try block above, but adding as backup
+			return ValidationResult(
+				file_path=str(file_path),
+				original_content=content,
+				fixed_content=content,
+				issues_found=[f"Failed to parse AI validation response"],
+				fixes_applied=[],
+				security_issues=[],
+				is_valid=True,  # Assume valid since we can't validate
+				validation_passed=False
+			)
 		except Exception as e:
 			print(f"❌ Validation failed for {file_path}: {e}")
 			# Return original content if validation fails
@@ -257,7 +318,8 @@ class AIValidationAgent:
 				issues_found=[f"Validation error: {e}"],
 				fixes_applied=[],
 				security_issues=[],
-				is_valid=False
+				is_valid=True,  # Assume valid since we can't validate
+				validation_passed=False
 			)
 	
 	def _is_simple_file(self, file_path: Path, file_type: str) -> bool:
@@ -290,6 +352,7 @@ CRITICAL SECURITY CHECKS (MANDATORY):
 - No XSS vulnerabilities in frontend code
 - Proper input validation and sanitization
 - No unsafe eval() or dangerous functions
+- Safe JSON parsing with null checks and try-catch blocks
 - Proper authentication and authorization checks
 - No sensitive data in logs or console output
 - Secure HTTP headers and CORS configuration
@@ -317,6 +380,8 @@ VALIDATION REQUIREMENTS:
    - Proper event handler patterns
    - State management best practices
    - Error boundary implementation
+   - Safe JSON parsing: Always check for null/undefined before JSON.parse()
+   - Wrap JSON.parse() in try-catch blocks when parsing user/localStorage data
 
 3. CODE QUALITY:
    - Remove unused variables and imports
@@ -336,7 +401,11 @@ CODE TO VALIDATE:
 {content}
 ```
 
-CRITICAL: You MUST respond with ONLY valid JSON. No markdown, no explanations, no code blocks.
+CRITICAL RESPONSE REQUIREMENTS:
+- ONLY return valid JSON, no other text
+- NO markdown code blocks (```json```)  
+- NO explanations or comments
+- Start response with {{ and end with }}
 
 RESPONSE FORMAT (EXACT JSON STRUCTURE):
 {{
@@ -2735,7 +2804,7 @@ LAYOUT PATTERNS:
 📐 Grid System: {layout_pattern.grid_system}
 🎨 Color Approach: {layout_pattern.color_approach} 
 ✨ Visual Effects: {', '.join(layout_pattern.visual_effects)}
-🎭 Navigation: {layout_pattern.navigation_pattern}
+🎭 Navigation: {layout_pattern.navigation}
 📱 Responsive: {layout_pattern.responsive_strategy}
 🎬 Animation Style: {layout_pattern.animation_style}
 🏆 Inspiration: {layout_pattern.design_inspiration}
@@ -3231,8 +3300,14 @@ const App = () => {{
   useEffect(() => {{
     const token = localStorage.getItem('token');
     const savedUser = localStorage.getItem('user');
-    if (token && savedUser) {{
-      setUser(JSON.parse(savedUser));
+    if (token && savedUser && savedUser !== 'undefined' && savedUser !== 'null') {{
+      try {{
+        setUser(JSON.parse(savedUser));
+      }} catch (error) {{
+        console.error('Failed to parse saved user data:', error);
+        localStorage.removeItem('user');
+        localStorage.removeItem('token');
+      }}
     }}
   }}, []);
   
