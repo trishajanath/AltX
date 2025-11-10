@@ -24,8 +24,7 @@ const Sidebar = ({
     { label: 'Deploy Project', ariaLabel: 'Deploy your Project', link: '/deploy' },
     { label: 'Security Scan', ariaLabel: 'Perform Security Scan', link: '/security' },
     { label: 'Repo Analysis', ariaLabel: 'Analyze Repositories', link: '/repo-analysis' },
-    { label: 'Reports', ariaLabel: 'View Reports', link: '/report' },
-    { label: 'Build Apps', ariaLabel: 'Start Building Apps', link: '/build' }
+    { label: 'Reports', ariaLabel: 'View Reports', link: '/report' }
   ];
 
   const socialItems = [

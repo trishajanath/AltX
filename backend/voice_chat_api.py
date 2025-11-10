@@ -45,7 +45,14 @@ class ProjectSpec(BaseModel):
     target_audience: str
 
 # Initialize Gemini for conversation
-genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+if not GOOGLE_API_KEY:
+    print("❌ WARNING: GOOGLE_API_KEY environment variable not set!")
+    print("   Voice chat will not work without a valid API key.")
+else:
+    print(f"✅ Gemini API key configured (length: {len(GOOGLE_API_KEY)})")
+    
+genai.configure(api_key=GOOGLE_API_KEY)
 
 def _ensure_english_response(ai_response: str, user_message: str) -> str:
     """Ensure AI response is in English, not Hindi or other languages"""
@@ -469,13 +476,27 @@ Response:"""
         }
         
     except Exception as e:
-        print(f"Chat AI error: {e}")
+        print(f"❌ Chat AI error: {e}")
         import traceback
         print(f"Full traceback: {traceback.format_exc()}")
         
-        # Return a contextual response instead of generic fallback
+        # Check for specific error types and provide better feedback
+        error_str = str(e).lower()
+        
+        if "api key" in error_str or "authentication" in error_str:
+            response_text = "I'm having trouble connecting to my AI service. Please check that your API key is properly configured."
+        elif "rate limit" in error_str or "quota" in error_str:
+            response_text = "I'm getting too many requests right now. Please wait a moment and try again."
+        elif "network" in error_str or "connection" in error_str:
+            response_text = "I'm having network issues. Please check your internet connection and try again."
+        else:
+            # Generic fallback with more helpful message
+            response_text = "I'm having a technical issue understanding that. Could you try rephrasing or saying it again?"
+        
+        print(f"🔄 Returning error response: {response_text}")
+        
         return {
-            "response": "I had a small hiccup processing that. Could you please repeat what you just said?",
+            "response": response_text,
             "should_generate": False,
             "project_spec": None
         }

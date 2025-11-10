@@ -6,7 +6,6 @@ import DeployPage from './components/DeployPage';
 import SecurityScanPage from './components/SecurityScanPage';
 import ReportPage from './components/ReportPage';
 import RepoAnalysisPage from './components/RepoAnalysisPage';
-import ProjectBuilder from './components/ProjectBuilder';
 import LandingPage from './components/LandingPage';
 import SignupPage from './components/SignupPage';
 import LoginPage from './components/LoginPage';
@@ -31,11 +30,6 @@ function App() {
             <Route path="/home" element={
               <ProtectedRoute>
                 <div className="page"><HomePage /></div>
-              </ProtectedRoute>
-            } />
-            <Route path="/build" element={
-              <ProtectedRoute>
-                <div className="page"><ProjectBuilder /></div>
               </ProtectedRoute>
             } />
             <Route path="/voice-chat" element={

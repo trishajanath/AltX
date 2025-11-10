@@ -264,6 +264,9 @@ const ThreeBackground = React.memo(({
 // --- Dashboard View Component (Unchanged) ---
 const DashboardView = () => {
     const navigate = useNavigate();
+    const [recentApps, setRecentApps] = useState([]);
+    const [loadingApps, setLoadingApps] = useState(true);
+    
     const deployedProjects = [
         { name: 'project-sentinel.securai.dev', status: 'Live', vulnerabilities: 0, lastScan: '2h ago' },
         { name: 'gamma-platform.securai.dev', status: 'Live', vulnerabilities: 2, lastScan: '8h ago' },
@@ -276,11 +279,114 @@ const DashboardView = () => {
         { repo: 'acme-corp/user-database', status: 'Failed', issues: 1, timestamp: '1h ago' },
     ];
 
+    // Fetch recent apps from backend
+    useEffect(() => {
+        const fetchRecentApps = async () => {
+            try {
+                const response = await fetch('http://localhost:8000/api/project-history');
+                const data = await response.json();
+                
+                if (data.success && data.projects) {
+                    // Sort by modified date and take the most recent 5
+                    const sortedProjects = data.projects
+                        .sort((a, b) => b.modified_date - a.modified_date)
+                        .slice(0, 5)
+                        .map(proj => ({
+                            name: proj.name,
+                            slug: proj.slug,
+                            tech_stack: proj.tech_stack?.slice(0, 3) || ['React'],
+                            created_date: proj.created_date,
+                            editor_url: proj.editor_url
+                        }));
+                    setRecentApps(sortedProjects);
+                }
+            } catch (error) {
+                console.error('Error fetching recent apps:', error);
+            } finally {
+                setLoadingApps(false);
+            }
+        };
+        
+        fetchRecentApps();
+    }, []);
+
+    // Helper function to format time ago
+    const formatTimeAgo = (timestamp) => {
+        const now = Date.now();
+        const diff = now - (timestamp * 1000);
+        const minutes = Math.floor(diff / 60000);
+        const hours = Math.floor(diff / 3600000);
+        const days = Math.floor(diff / 86400000);
+        
+        if (days > 0) return `${days}d ago`;
+        if (hours > 0) return `${hours}h ago`;
+        if (minutes > 0) return `${minutes}m ago`;
+        return 'Just now';
+    };
+
     return (
         <div className="dashboard-view">
             <h1 className="page-title">Dashboard</h1>
             <p className="page-subtitle">Welcome back, here's a summary of your projects.</p>
             <div className="dashboard-grid">
+                {/* Recent Apps Built with Voice Chat */}
+                <div className="card" onClick={() => navigate('/voice-chat')}>
+                    <div className="card-header">
+                        <h2>Recent Apps Built</h2>
+                        <button onClick={e => { e.stopPropagation(); navigate('/voice-chat'); }} className="btn-secondary">Build New</button>
+                    </div>
+                    <div className="card-content">
+                        {loadingApps ? (
+                            <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                                Loading apps...
+                            </div>
+                        ) : recentApps.length > 0 ? (
+                            <div className="table-wrapper">
+                                <table className="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Project Name</th>
+                                            <th>Tech Stack</th>
+                                            <th>Created</th>
+                                            <th>Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {recentApps.map((app, i) => (
+                                            <tr key={i} onClick={(e) => { e.stopPropagation(); navigate(app.editor_url); }} style={{ cursor: 'pointer' }}>
+                                                <td>{app.name}</td>
+                                                <td>
+                                                    <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                                                        {app.tech_stack.map((tech, idx) => (
+                                                            <span key={idx} className="tech-badge">
+                                                                {tech}
+                                                            </span>
+                                                        ))}
+                                                    </div>
+                                                </td>
+                                                <td>{formatTimeAgo(app.created_date)}</td>
+                                                <td>
+                                                    <button 
+                                                        onClick={(e) => { e.stopPropagation(); navigate(app.editor_url); }}
+                                                        className="btn-link"
+                                                        style={{ color: 'var(--primary-green)', fontSize: '0.875rem' }}
+                                                    >
+                                                        Open →
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        ) : (
+                            <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                                No apps built yet. Use Voice Chat Builder to create your first app!
+                            </div>
+                        )}
+                    </div>
+                </div>
+
                 {/* Deployed Projects Card */}
                 <div className="card" onClick={() => navigate('/deploy')}>
                     <div className="card-header">
@@ -390,8 +496,6 @@ export default function HomePage() {
                 return <PlaceholderView title="Repository Analysis" />;
             case 'reports':
                 return <PlaceholderView title="Reports" />;
-            case 'build':
-                 return <PlaceholderView title="Build Apps" />;
             default:
                 return <DashboardView setView={setCurrentView} />;
         }
@@ -478,6 +582,29 @@ export default function HomePage() {
                 .status-live { background-color: rgba(46, 204, 113, 0.1); color: var(--status-ok); }
                 .status-error { background-color: rgba(231, 76, 60, 0.1); color: var(--status-error); }
                 .vulnerability-count.has-issues { color: var(--status-warn); font-weight: 600; }
+
+                .tech-badge {
+                    padding: 0.25rem 0.6rem;
+                    border-radius: 0.375rem;
+                    background-color: rgba(0, 245, 195, 0.1);
+                    color: var(--primary-green);
+                    font-size: 0.75rem;
+                    font-weight: 500;
+                    border: 1px solid rgba(0, 245, 195, 0.2);
+                    display: inline-block;
+                }
+
+                .btn-link {
+                    background: none;
+                    border: none;
+                    cursor: pointer;
+                    padding: 0.25rem 0.5rem;
+                    font-weight: 600;
+                    transition: opacity 0.2s ease;
+                }
+                .btn-link:hover {
+                    opacity: 0.8;
+                }
 
                 .scan-list { list-style: none; display: flex; flex-direction: column; gap: 1.25rem; }
                 .scan-item {
