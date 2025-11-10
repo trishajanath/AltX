@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 // Ensure this component is rendered within a <Router> from react-router-dom.
 import { useNavigate } from 'react-router-dom';
 import { ChevronRight, ChevronDown } from 'lucide-react';
+import * as THREE from 'three';
 
 // --- Main Landing Page Component ---
 const VexelLandingPage = () => {
@@ -148,6 +149,7 @@ const VexelLandingPage = () => {
         const mountNode = mountRef.current;
         let mouse, targetRotation;
         let performanceMode = false;
+        let isInitialized = false;
 
         // Adaptive particle count based on device capability
         const getOptimalParticleCount = () => {
@@ -161,36 +163,24 @@ const VexelLandingPage = () => {
         const colors = new Float32Array(particleCount * 3);
         const velocities = new Float32Array(particleCount * 3);
 
-        const loadThreeJS = () => {
-            return new Promise((resolve, reject) => {
-                if (window.THREE) {
-                    resolve();
-                    return;
-                }
-                const script = document.createElement('script');
-                script.src = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
-                script.onload = () => { setThreeLoaded(true); resolve(); };
-                script.onerror = reject;
-                document.head.appendChild(script);
-            });
-        };
+
 
         const init = async () => {
-            if (!mountNode) return;
+            if (!mountNode || isInitialized) return;
 
             try {
-                await loadThreeJS();
-                if (!window.THREE) { console.error("Three.js failed to load"); return; }
+                isInitialized = true;
+                setThreeLoaded(true);
 
-                mouse = new window.THREE.Vector2();
-                targetRotation = new window.THREE.Vector2();
+                mouse = new THREE.Vector2();
+                targetRotation = new THREE.Vector2();
 
-                scene = new window.THREE.Scene();
+                scene = new THREE.Scene();
 
-                camera = new window.THREE.PerspectiveCamera(75, mountNode.clientWidth / mountNode.clientHeight, 0.1, 1000);
+                camera = new THREE.PerspectiveCamera(75, mountNode.clientWidth / mountNode.clientHeight, 0.1, 1000);
                 camera.position.z = 120; // Adjusted camera position for the visual effect
 
-                renderer = new window.THREE.WebGLRenderer({
+                renderer = new THREE.WebGLRenderer({
                     antialias: !window.innerWidth < 768,
                     alpha: true,
                     powerPreference: "high-performance",
@@ -201,7 +191,7 @@ const VexelLandingPage = () => {
                 mountNode.appendChild(renderer.domElement);
 
                 // Particles shaped into the curved structure
-                const colorGray = new window.THREE.Color(0xa3a3a3);
+                const colorGray = new THREE.Color(0xa3a3a3);
                 const segments = 64;
                 const rings = 128;
                 let particleIndex = 0;
@@ -232,21 +222,21 @@ const VexelLandingPage = () => {
                     colors[i3 + 2] = colorGray.b;
                 }
 
-                const particleGeometry = new window.THREE.BufferGeometry();
-                particleGeometry.setAttribute('position', new window.THREE.BufferAttribute(positions, 3));
-                particleGeometry.setAttribute('color', new window.THREE.BufferAttribute(colors, 3));
+                const particleGeometry = new THREE.BufferGeometry();
+                particleGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                particleGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
-                const particleMaterial = new window.THREE.PointsMaterial({
+                const particleMaterial = new THREE.PointsMaterial({
                     size: window.innerWidth < 768 ? 0.8 : 1.2,
                     vertexColors: true,
-                    blending: window.THREE.AdditiveBlending,
+                    blending: THREE.AdditiveBlending,
                     transparent: true,
                     opacity: 0.9,
                     depthWrite: false,
                     sizeAttenuation: true
                 });
 
-                particles = new window.THREE.Points(particleGeometry, particleMaterial);
+                particles = new THREE.Points(particleGeometry, particleMaterial);
                 particles.rotation.x = 0.5; // Tilt the structure
                 scene.add(particles);
 
@@ -256,7 +246,9 @@ const VexelLandingPage = () => {
                 animate();
             } catch (error) {
                 console.error('Failed to initialize Three.js:', error);
+                isInitialized = false;
                 setEffectsActive(false);
+                setThreeLoaded(false);
             }
         };
 
@@ -338,6 +330,7 @@ const VexelLandingPage = () => {
         init();
 
         return () => {
+            isInitialized = false;
             cancelAnimationFrame(animationId);
             window.removeEventListener('resize', onWindowResize);
             window.removeEventListener('mousemove', onMouseMove);
