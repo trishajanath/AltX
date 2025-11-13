@@ -2,7 +2,25 @@ import React, { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 
 const ProtectedRoute = ({ children }) => {
-  const [isAuthenticated, setIsAuthenticated] = useState(null);
+  // Initialize auth state from localStorage immediately to prevent flickering
+  const getInitialAuthState = () => {
+    try {
+      const userData = localStorage.getItem('user');
+      const token = localStorage.getItem('access_token');
+      
+      if (userData && token) {
+        const user = JSON.parse(userData);
+        if (user.email && user.name) {
+          return true;
+        }
+      }
+    } catch (error) {
+      console.error('Error reading initial auth state:', error);
+    }
+    return null; // null means we need to check for OAuth callback
+  };
+
+  const [isAuthenticated, setIsAuthenticated] = useState(getInitialAuthState());
   const [isProcessingAuth, setIsProcessingAuth] = useState(false);
 
   useEffect(() => {
@@ -49,7 +67,12 @@ const ProtectedRoute = ({ children }) => {
           return;
         }
 
-        // Check for existing authentication
+        // If we already have auth from initial state, skip revalidation
+        if (isAuthenticated === true) {
+          return;
+        }
+
+        // Check for existing authentication only if we don't have it already
         const userData = localStorage.getItem('user');
         const token = localStorage.getItem('access_token');
         

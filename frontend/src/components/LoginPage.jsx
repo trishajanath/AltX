@@ -53,7 +53,7 @@ const LoginPage = () => {
                 console.log('✅ Login successful:', data.user);
                 
                 // Redirect to home page after successful login
-                navigate('/home');
+                navigate('/voice-chat');
             } else {
                 // Handle login error
                 const errorMessage = data.message || 'Invalid email or password. Please try again.';
@@ -502,12 +502,6 @@ const LoginPage = () => {
                         <div className="login-header">
                             <h1 className="login-title">Welcome Back</h1>
                             <p className="login-subtitle">Sign in to your Xverta account</p>
-                            <div className="demo-credentials">
-                                <p><strong>Demo Credentials:</strong></p>
-                                <p>📧 admin@altx.com / admin123</p>
-                                <p>👤 user@altx.com / user123</p>
-                                <p>🧪 test@test.com / test123</p>
-                            </div>
                         </div>
 
                         {error && (
@@ -524,7 +518,7 @@ const LoginPage = () => {
                                     id="email"
                                     name="email"
                                     className="form-input"
-                                    placeholder="john.doe@example.com"
+                                    placeholder="email@example.com"
                                     value={formData.email}
                                     onChange={handleChange}
                                     required
@@ -539,7 +533,7 @@ const LoginPage = () => {
                                     id="password"
                                     name="password"
                                     className="form-input"
-                                    placeholder="••••••••"
+                                    placeholder="••••••••••••••"
                                     value={formData.password}
                                     onChange={handleChange}
                                     required

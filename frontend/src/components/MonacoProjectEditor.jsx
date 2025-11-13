@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import MonacoEditor from '@monaco-editor/react';
-import PageWrapper from './PageWrapper';
 
 // --- NEW: Add Google Font 'Inter' for a professional UI ---
 const fontLink = document.createElement('link');
@@ -44,6 +43,13 @@ const BackIcon = () => (
 const FwdIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
     <path fillRule="evenodd" d="M16.28 11.47a.75.75 0 010 1.06l-7.5 7.5a.75.75 0 01-1.06-1.06L14.69 12 7.72 5.03a.75.75 0 011.06-1.06l7.5 7.5z" clipRule="evenodd" />
+  </svg>
+);
+
+const MicIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+    <path d="M19 10v2a7 7 0 0 1-14 0v-2H3v2a9 9 0 0 0 8 8.94V23h2v-2.06A9 9 0 0 0 21 12v-2h-2z" />
   </svg>
 );
 
@@ -314,17 +320,18 @@ const styles = {
     display: 'flex',
     gap: '12px',
     background: '#0a0a0a',
-    alignItems: 'flex-end',
+    alignItems: 'center',
     boxShadow: '0 -1px 0 rgba(255,255,255,0.06)'
   },
   
   chatInput: {
     flex: 1,
-    background: '#111111',
+    background: 'rgba(255, 255, 255, 0.05)',
+    backdropFilter: 'blur(10px)',
     color: '#ffffff',
-    border: '1px solid #333333',
-    borderRadius: '12px',
-    padding: '14px 18px',
+    border: '1px solid rgba(255, 255, 255, 0.15)',
+    borderRadius: '20px',
+    padding: '12px 18px',
     fontSize: '14px',
     fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
     outline: 'none',
@@ -332,26 +339,48 @@ const styles = {
     minHeight: '22px',
     maxHeight: '120px',
     lineHeight: 1.5,
+    transition: 'all 0.2s ease',
+    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
+  },
+  
+  micButton: {
+    flexShrink: 0,
+    background: 'transparent',
+    border: '1px solid rgba(255, 255, 255, 0.2)',
+    borderRadius: '8px',
+    padding: '0.5rem',
+    color: '#ffffff',
+    cursor: 'pointer',
+    transition: 'all 0.2s ease',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '40px',
+    height: '40px',
+  },
+  
+  micButtonRecording: {
+    background: 'rgba(239, 68, 68, 0.1)',
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+    color: '#ef4444',
   },
   
   // --- UPDATED: Send button styles for icon ---
   chatSendButton: {
-    background: '#ffffff',
-    color: '#000000',
-    border: 'none',
-    borderRadius: '12px',
-    padding: '12px',
+    background: 'transparent',
+    border: '1px solid rgba(255, 255, 255, 0.2)',
+    borderRadius: '8px',
+    padding: '0.5rem',
     cursor: 'pointer',
     fontSize: '14px',
     fontWeight: 600,
-    width: '48px',
-    height: '48px',
+    width: '40px',
+    height: '40px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     transition: 'all 0.2s ease',
-    boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-    marginBottom: '2px',
+    color: '#ffffff',
   },
   
   // File tree styles
@@ -457,8 +486,8 @@ const MonacoProjectEditor = () => {
   
   // Handle close action - navigate back to home
   const handleClose = () => {
-    console.log('Closing Monaco editor, navigating to home');
-    navigate('/home');
+    console.log('Closing Monaco editor, navigating to voice chat');
+    navigate('/voice-chat');
   };
   
   // Create project object from URL parameter
@@ -468,7 +497,9 @@ const MonacoProjectEditor = () => {
   const [fileTree, setFileTree] = useState([]);
   const [selectedFile, setSelectedFile] = useState(null);
   const [fileContents, setFileContents] = useState({});
-  const [activeTab, setActiveTab] = useState('files');
+  const [activeTab, setActiveTab] = useState('preview');
+  const [chatTab, setChatTab] = useState('chat'); // 'chat' or 'tasks'
+  const [aiTasks, setAiTasks] = useState([]); // List of AI-completed tasks
   const [errors, setErrors] = useState([]);
   const [isBuilding, setIsBuilding] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
@@ -478,8 +509,11 @@ const MonacoProjectEditor = () => {
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
   const [isAiThinking, setIsAiThinking] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
   const [layoutMode, setLayoutMode] = useState('preview'); // 'preview' or 'code'
-  const [terminalOutput, setTerminalOutput] = useState([]); // Live generation output
+  const [viewMode, setViewMode] = useState('desktop'); // 'desktop' or 'mobile'
   const [viewHistory, setViewHistory] = useState([]);
   const [currentViewIndex, setCurrentViewIndex] = useState(-1);
   const [pendingChanges, setPendingChanges] = useState(false);
@@ -489,6 +523,10 @@ const MonacoProjectEditor = () => {
   const changeTimeoutRef = useRef(null);
   const wsRef = useRef(null);
   const connectTimerRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const currentAudioRef = useRef(null);
+  const recognitionRef = useRef(null);
 
   // Function to refresh preview - FIXED SCOPE ISSUE
   const refreshPreview = useCallback(() => {
@@ -532,18 +570,22 @@ const MonacoProjectEditor = () => {
       initializeProject();
       setupWebSocket();
       
+      // Auto-run the project on mount
+      setTimeout(() => {
+        runProject();
+      }, 1000);
+      
       // Initialize chat with welcome message
       const welcomeMessage = {
         role: 'assistant',
-        // --- UPDATED: Welcome message formatting ---
-        content: `Welcome to your AI coding assistant!
-I'm here to help you build, debug, and improve your project.
+        content: `Welcome to your AI product assistant!
+I'm here to help you build, design, and improve your project.
 
 You can ask me to:
-•  Add new features
-•  Fix bugs and errors
-•  Improve styling
-•  Explain complex code
+•  Change the look and feel (e.g., "Make the button blue")
+•  Add new sections (e.g., "Add a 'Contact Us' page")
+•  Find and fix issues (e.g., "The 'Sign Up' button is broken")
+•  Improve this page
 
 Just tell me what you'd like to do.`
       };
@@ -734,7 +776,7 @@ Just tell me what you'd like to do.`
           // Show success message in chat
           const successMessage = {
             role: 'assistant',
-            content: `**Auto-Fix Applied!**\n\n**Issue Fixed:** ${result.explanation}\n\n${result.suggestions?.length > 0 ? `**Additional Suggestions:**\n${result.suggestions.map(s => `• ${s}`).join('\n')}` : ''}\n\n*The error has been automatically resolved using Gemini AI.*`
+            content: `**Fixed!**\n\n**Issue Resolved:** ${result.explanation}\n\n${result.suggestions?.length > 0 ? `**Improvements:**\n${result.suggestions.map(s => `• ${s}`).join('\n')}` : ''}\n\n*The issue has been automatically fixed.*`
           };
           
           setChatMessages(prev => [...prev, successMessage]);
@@ -751,7 +793,7 @@ Just tell me what you'd like to do.`
           // Show error message in chat
           const errorMessage = {
             role: 'assistant',
-            content: `**Auto-Fix Issue**\n\nI detected an error but couldn't fix it automatically:\n\n**Error:** ${result.error}\n\n${result.explanation ? `**Analysis:** ${result.explanation}\n\n` : ''}Please check the console for more details or ask me for help manually.`
+            content: `**Couldn't Fix This One**\n\nI found an issue but couldn't fix it automatically:\n\n**What happened:** ${result.error}\n\n${result.explanation ? `**Details:** ${result.explanation}\n\n` : ''}Please describe what you'd like me to do, and I'll help you fix it.`
           };
           
           setChatMessages(prev => [...prev, errorMessage]);
@@ -898,12 +940,11 @@ Just tell me what you'd like to do.`
     if (hasErrors && errors.length > 0) {
       const errorMessage = {
         role: 'assistant',
-        // --- UPDATED: Error message formatting ---
-        content: `**Warning: ${errors.length} error(s) detected.**
+        content: `**Warning: ${errors.length} issue(s) detected.**
 
 ${errors.slice(-3).map(err => `• ${err.message}`).join('\n')}
 
-Click the "Fix Errors" button or ask me to "fix the errors" and I'll try to resolve them automatically.`
+Click the "Fix Issues" button or ask me to "fix the issues" and I'll try to resolve them automatically.`
       };
       
       // Only add if we don't already have a recent error message
@@ -994,7 +1035,6 @@ Click the "Fix Errors" button or ask me to "fix the errors" and I'll try to reso
           setPreviewUrl(data.url);
           setIsBuilding(false);
           setIsRunning(true);
-          setTerminalOutput(prev => [...prev, `Live preview ready!`]);
           // Clear errors on successful preview
           setHasErrors(false);
           setErrors([]);
@@ -1006,43 +1046,26 @@ Click the "Fix Errors" button or ask me to "fix the errors" and I'll try to reso
             if (data.preview_url) {
               setPreviewUrl(data.preview_url);
             }
-          } else if (data.phase === 'generate') {
-            // Show AI generation progress
-            setTerminalOutput(prev => [...prev, `AI: ${data.message}`]);
-          } else if (data.phase === 'frontend') {
-            setTerminalOutput(prev => [...prev, `Frontend: ${data.message}`]);
-          } else if (data.phase === 'backend') {
-            setTerminalOutput(prev => [...prev, `Backend: ${data.message}`]);
-          } else if (data.phase === 'config') {
-            setTerminalOutput(prev => [...prev, `Config: ${data.message}`]);
           }
           break;
         case 'file_created':
-          // Show live file creation
-          setTerminalOutput(prev => [...prev, `Created ${data.file_path}`]);
           // Refresh file tree to show new file
           if (fileTree.length > 0) {
             initializeProject();
           }
           break;
         case 'file_content_update':
-          // Show live typing effect for file content
-          setTerminalOutput(prev => [...prev, `Writing ${data.file_path}...`]);
+          // Live typing effect for file content
           break;
         case 'file_creation_start':
-          setTerminalOutput(prev => [...prev, `${data.message}`]);
           break;
         case 'file_creation_complete':
-          setTerminalOutput(prev => [...prev, `Success: ${data.message}`]);
           // Refresh file tree after completion
           setTimeout(() => {
             initializeProject();
           }, 500);
           break;
         case 'terminal_output':
-          // Show general terminal output
-          setTerminalOutput(prev => [...prev, data.message]);
-          
           // Check for error patterns in terminal output
           if (data.level === 'error' || data.message.includes('Error:') || 
               data.message.includes('Failed to') || data.message.includes('Cannot find')) {
@@ -1068,7 +1091,6 @@ Click the "Fix Errors" button or ask me to "fix the errors" and I'll try to reso
             severity: 'error',
             timestamp: new Date().toISOString()
           }]);
-          setTerminalOutput(prev => [...prev, `Error: ${data.message}`]);
           break;
         }
       };
@@ -1077,7 +1099,6 @@ Click the "Fix Errors" button or ask me to "fix the errors" and I'll try to reso
 
   const runProject = async () => {
     setIsBuilding(true);
-    setTerminalOutput([]); // Clear terminal on new run
     try {
       const response = await fetch('http://localhost:8000/api/run-project', {
         method: 'POST',
@@ -1130,11 +1151,11 @@ Click the "Fix Errors" button or ask me to "fix the errors" and I'll try to reso
         // Add success message to chat
         const successMessage = {
           role: 'assistant',
-          content: `**Auto-Fix Completed!**
+          content: `**All Fixed!**
 ${result.message}
-${result.fixes_applied && result.fixes_applied.length > 0 ? `\n**Fixes Applied:**\n${result.fixes_applied.map(fix => `• ${fix}`).join('\n')}` : ''}
+${result.fixes_applied && result.fixes_applied.length > 0 ? `\n**What I Fixed:**\n${result.fixes_applied.map(fix => `• ${fix}`).join('\n')}` : ''}
 
-Your project has been repaired. Trying to run it again...`
+Your project is ready. Starting it up again...`
         };
         setChatMessages(prev => [...prev, successMessage]);
         
@@ -1213,14 +1234,14 @@ Please try describing the issue manually.`
     if (geminiResult.success) {
       const successMessage = {
         role: 'assistant',
-        content: `**Gemini AI Auto-Fix Applied!**
+        content: `**Fixed!**
 
-**Analysis:** ${geminiResult.explanation}
-${geminiResult.suggestions?.length > 0 ? `\n**Improvements Made:**\n${geminiResult.suggestions.map(s => `• ${s}`).join('\n')}` : ''}
+**What I found:** ${geminiResult.explanation}
+${geminiResult.suggestions?.length > 0 ? `\n**Changes Made:**\n${geminiResult.suggestions.map(s => `• ${s}`).join('\n')}` : ''}
 
-${geminiResult.changes_applied ? '*Files have been automatically updated.*' : '*Analysis complete. Please review the suggestions.*'}
+${geminiResult.changes_applied ? '*Your project has been updated.*' : '*Here\'s what I found.*'}
 
-Trying to run the project again...`
+Starting your project again...`
       };
       setChatMessages(prev => [...prev, successMessage]);
       
@@ -1299,6 +1320,204 @@ Trying to run the project again...`
   const canGoBack = currentViewIndex > 0;
   const canGoForward = currentViewIndex < viewHistory.length - 1;
 
+  // Audio recording handler (like VoiceChatInterface)
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: { 
+          sampleRate: 48000,
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        } 
+      });
+      
+      mediaRecorderRef.current = new MediaRecorder(stream, {
+        mimeType: 'audio/webm;codecs=opus'
+      });
+      
+      audioChunksRef.current = [];
+      
+      mediaRecorderRef.current.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+      
+      mediaRecorderRef.current.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        
+        // Send to backend for transcription using existing endpoint
+        const formData = new FormData();
+        formData.append('audio', audioBlob, 'recording.webm');
+        
+        try {
+          const response = await fetch('http://localhost:8000/api/process-speech', {
+            method: 'POST',
+            body: formData
+          });
+          
+          const result = await response.json();
+          
+          if (result.transcript) {
+            // Add user message to chat
+            const userMessage = {
+              role: 'user',
+              content: result.transcript
+            };
+            setChatMessages(prev => [...prev, userMessage]);
+            
+            // Send to AI for processing
+            setIsAiThinking(true);
+            
+            try {
+              const aiResponse = await fetch(`http://localhost:8000/api/ai-project-assistant`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                  project_name: project.name,
+                  user_message: result.transcript,
+                  tech_stack: project.tech_stack || [],
+                  re_run: true
+                })
+              });
+              
+              const aiResult = await aiResponse.json();
+              
+              if (aiResult.success) {
+                const assistantMessage = {
+                  role: 'assistant',
+                  content: `**Done!** ${aiResult.explanation || "I've made the requested changes!"}
+${aiResult.files_modified && aiResult.files_modified.length > 0 ? `\n**Updated:** ${aiResult.files_modified.join(', ')}` : ''}
+${aiResult.errors && aiResult.errors.length > 0 ? `\n**Note:** ${aiResult.errors.length} issue(s) detected.` : ''}
+
+The changes are live in your preview.`
+                };
+                setChatMessages(prev => [...prev, assistantMessage]);
+                
+                // AI speaks the response
+                const spokenText = `Done! ${aiResult.explanation || "I've made the requested changes!"}`;
+                speakText(spokenText);
+                
+                // Add task to task list
+                const taskTitle = aiResult.explanation || result.transcript;
+                const cleanTitle = taskTitle.replace(/\*\*/g, '').split('\n')[0];
+                setAiTasks(prev => [...prev, {
+                  title: cleanTitle,
+                  description: aiResult.files_modified && aiResult.files_modified.length > 0 
+                    ? `Updated: ${aiResult.files_modified.join(', ')}` 
+                    : undefined,
+                  timestamp: Date.now()
+                }]);
+                
+                // Reload project files and preview
+                initializeProject();
+              } else {
+                const errorMessage = {
+                  role: 'assistant',
+                  content: `**Oops!** ${aiResult.error || 'I encountered an issue and could not make those changes.'}`
+                };
+                setChatMessages(prev => [...prev, errorMessage]);
+                speakText(aiResult.error || 'I encountered an issue and could not make those changes.');
+              }
+            } catch (aiError) {
+              console.error('AI processing error:', aiError);
+              const errorMessage = {
+                role: 'assistant',
+                content: `**Oops!** Sorry, something went wrong: ${aiError.message}`
+              };
+              setChatMessages(prev => [...prev, errorMessage]);
+            } finally {
+              setIsAiThinking(false);
+            }
+          } else {
+            console.error('Transcription failed:', result.error);
+            setChatMessages(prev => [...prev, {
+              role: 'assistant',
+              content: result.error || '⚠️ Could not transcribe audio. Please try again or type your message.'
+            }]);
+          }
+        } catch (error) {
+          console.error('Error sending audio:', error);
+          setChatMessages(prev => [...prev, {
+            role: 'assistant',
+            content: '⚠️ Recording error. Please check your microphone and try again.'
+          }]);
+        }
+        
+        // Cleanup
+        stream.getTracks().forEach(track => track.stop());
+      };
+      
+      mediaRecorderRef.current.start();
+      setIsRecording(true);
+    } catch (error) {
+      console.error('Microphone access error:', error);
+      alert('Could not access microphone. Please check your browser permissions.');
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+    }
+  };
+
+  // Text-to-speech function
+  const speakText = async (text) => {
+    if (isMuted || !text || isPlaying) return;
+    
+    // Stop any current audio
+    if (currentAudioRef.current) {
+      currentAudioRef.current.pause();
+      currentAudioRef.current = null;
+    }
+    
+    try {
+      // Try Chatterbox TTS first
+      const response = await fetch('http://localhost:8000/api/synthesize-chatterbox', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, language: 'en' })
+      });
+      
+      if (response.ok) {
+        const audioBlob = await response.blob();
+        const audioUrl = URL.createObjectURL(audioBlob);
+        const audio = new Audio(audioUrl);
+        
+        currentAudioRef.current = audio;
+        setIsPlaying(true);
+        
+        audio.onended = () => {
+          setIsPlaying(false);
+          currentAudioRef.current = null;
+          URL.revokeObjectURL(audioUrl);
+        };
+        
+        audio.onerror = () => {
+          setIsPlaying(false);
+          currentAudioRef.current = null;
+          URL.revokeObjectURL(audioUrl);
+        };
+        
+        await audio.play();
+      } else {
+        // Fallback to browser TTS
+        const cleanText = text.replace(/[#*_`]/g, '').replace(/\*\*/g, '');
+        const utterance = new SpeechSynthesisUtterance(cleanText);
+        utterance.rate = 0.9;
+        utterance.pitch = 1;
+        utterance.volume = 0.8;
+        speechSynthesis.speak(utterance);
+      }
+    } catch (error) {
+      console.error('TTS error:', error);
+    }
+  };
+
   const sendChatMessage = async () => {
     if (!chatInput.trim() || isAiThinking) return;
     
@@ -1346,13 +1565,28 @@ Trying to run the project again...`
       if (result.success) {
         const assistantMessage = {
           role: 'assistant',
-          content: `**Success:** ${result.explanation || "I've made the requested changes!"}
-${result.files_modified && result.files_modified.length > 0 ? `\n**Modified files:** ${result.files_modified.join(', ')}` : ''}
-${result.errors && result.errors.length > 0 ? `\n**Warning:** ${result.errors.length} issue(s) detected.` : ''}
+          content: `**Done!** ${result.explanation || "I've made the requested changes!"}
+${result.files_modified && result.files_modified.length > 0 ? `\n**Updated:** ${result.files_modified.join(', ')}` : ''}
+${result.errors && result.errors.length > 0 ? `\n**Note:** ${result.errors.length} issue(s) detected.` : ''}
 
-The changes have been applied and the preview has been updated.`
+The changes are live in your preview.`
         };
         setChatMessages(prev => [...prev, assistantMessage]);
+        
+        // AI speaks the response
+        const spokenText = `Done! ${result.explanation || "I've made the requested changes!"}`;
+        speakText(spokenText);
+        
+        // Add task to task list
+        const taskTitle = result.explanation || messageToSend;
+        const cleanTitle = taskTitle.replace(/\*\*/g, '').split('\n')[0]; // Remove markdown and get first line
+        setAiTasks(prev => [...prev, {
+          title: cleanTitle,
+          description: result.files_modified && result.files_modified.length > 0 
+            ? `Updated: ${result.files_modified.join(', ')}` 
+            : undefined,
+          timestamp: Date.now()
+        }]);
         
         // Reload project files and preview
         initializeProject();
@@ -1362,14 +1596,17 @@ The changes have been applied and the preview has been updated.`
       } else {
         const errorMessage = {
           role: 'assistant',
-          content: `**Error:** ${result.error || 'I encountered an issue and could not make those changes.'}`
+          content: `**Oops!** ${result.error || 'I encountered an issue and could not make those changes.'}`
         };
         setChatMessages(prev => [...prev, errorMessage]);
+        
+        // AI speaks the error
+        speakText(result.error || 'I encountered an issue and could not make those changes.');
       }
     } catch (error) {
       const errorMessage = {
         role: 'assistant',
-        content: `**Error:** Sorry, there was an error processing your request: ${error.message}`
+        content: `**Oops!** Sorry, something went wrong: ${error.message}`
       };
       setChatMessages(prev => [...prev, errorMessage]);
     } finally {
@@ -1438,109 +1675,91 @@ The changes have been applied and the preview has been updated.`
   }
 
   return (
-    <PageWrapper>
-      <div style={styles.monacoProjectEditor}>
-      {/* Header */}
+    <div style={styles.monacoProjectEditor}>
+      {/* Simplified Header - Just project name and status */}
       <div style={styles.editorHeader}>
         <div style={styles.editorTitle}>
           <button 
             style={{
-              ...styles.btnEditorAction,
               background: 'transparent',
-              border: '1px solid #555555',
+              border: 'none',
               color: '#aaaaaa',
-              marginRight: '12px',
+              fontSize: '20px',
+              cursor: 'pointer',
+              padding: '8px 12px',
+              marginRight: '16px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
             }}
             onClick={handleClose}
-            // --- UPDATED: Text ---
-            title="Return to Dashboard"
+            title="Back to projects"
           >
-            Exit Editor
+            ← Back
           </button>
           <span style={styles.projectName}>{project.name}</span>
-          <span style={styles.projectType}>({project.tech_stack?.join(', ') || 'Mixed'})</span>
-          {isBuilding && <span style={styles.buildingIndicator}>Building...</span>}
+          
+          {isBuilding && (
+            <span style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              marginLeft: '16px',
+              fontSize: '14px',
+              color: '#ffffff'
+            }}>
+              <span style={{
+                width: '8px',
+                height: '8px',
+                borderRadius: '50%',
+                background: '#fbbf24',
+                animation: 'pulse 1.5s infinite'
+              }}></span>
+              Building...
+            </span>
+          )}
+          {!isBuilding && isRunning && (
+            <span style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              marginLeft: '16px',
+              fontSize: '14px',
+              color: '#ffffff'
+            }}>
+              <span style={{
+                width: '8px',
+                height: '8px',
+                borderRadius: '50%',
+                background: '#10b981'
+              }}></span>
+              Live
+            </span>
+          )}
         </div>
         
         <div style={styles.editorActions}>
-          <button 
-            style={{
-              ...styles.btnEditorAction,
-              ...(isRunning || isBuilding ? { opacity: 0.5 } : {})
-            }}
-            onClick={runProject}
-            disabled={isRunning || isBuilding}
-            title="Run Project (F5)"
-          >
-            {/* --- UPDATED: Text --- */}
-            {isBuilding ? 'Building...' : isRunning ? 'Running...' : 'Run'}
-          </button>
-          
           {hasErrors && (
             <button 
               style={{
-                ...styles.btnEditorAction,
-                color: '#000000', // Black text
-                background: '#ffffff', // White background for error
+                padding: '8px 16px',
+                fontSize: '13px',
+                fontWeight: '500',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+                color: '#000000',
+                background: '#ffffff',
                 border: '1px solid #ffffff',
                 ...(isAutoFixing ? { opacity: 0.5 } : {})
               }}
               onClick={autoFixErrors}
               disabled={isAutoFixing}
-              title="Auto-fix detected errors"
+              title="Fix detected issues automatically"
             >
-              {/* --- UPDATED: Text --- */}
-              {isAutoFixing ? 'Fixing...' : 'Fix Errors'}
+              {isAutoFixing ? 'Fixing...' : 'Fix Issues'}
             </button>
           )}
-          
-          {previewUrl && (
-            <button 
-              style={{
-                ...styles.btnEditorAction,
-                ...(pendingChanges ? { 
-                  background: '#ffffff', 
-                  color: '#000000',
-                  boxShadow: '0 0 10px rgba(255, 255, 255, 0.5)'
-                } : {})
-              }}
-              onClick={() => {
-                refreshPreview();
-                setPendingChanges(false);
-                if (changeTimeoutRef.current) {
-                  clearTimeout(changeTimeoutRef.current);
-                }
-                setChatMessages(prev => [...prev, {
-                  role: 'assistant',
-                  content: 'Info: **Preview Refreshed!**\n\nThe preview has been manually reloaded.'
-                }]);
-              }}
-              title={pendingChanges ? "File changes detected - Click to refresh" : "Refresh Preview"}
-            >
-              {/* --- UPDATED: Text --- */}
-              {pendingChanges ? 'Refresh (Changes)' : 'Refresh Preview'}
-            </button>
-          )}
-          
-          {previewUrl && (
-            <button 
-              style={{...styles.btnEditorAction}}
-              onClick={() => window.open(previewUrl, '_blank')}
-              title="Open in New Tab"
-            >
-              {/* --- UPDATED: Text --- */}
-              Open Tab
-            </button>
-          )}
-          
-          <button 
-            style={{...styles.btnEditorAction, border: '1px solid #555555', color: '#aaaaaa'}}
-            onClick={handleClose}
-            title="Exit Editor"
-          >
-            {/* --- UPDATED: Text --- */}
-            Exit
-          </button>
         </div>
       </div>
 
@@ -1550,15 +1769,47 @@ The changes have been applied and the preview has been updated.`
         <div style={styles.chatPanel}>
           <div style={styles.rightPanelHeader}>
             <div style={styles.sidebarTabs}>
-              <button style={{...styles.sidebarTab, ...styles.sidebarTabActive}}>
-                {/* --- UPDATED: Text --- */}
-                AI Chat
+              <button 
+                style={{
+                  ...styles.sidebarTab,
+                  ...(chatTab === 'chat' ? styles.sidebarTabActive : {})
+                }}
+                onClick={() => setChatTab('chat')}
+              >
+                Chat
+              </button>
+              <button 
+                style={{
+                  ...styles.sidebarTab,
+                  ...(chatTab === 'tasks' ? styles.sidebarTabActive : {})
+                }}
+                onClick={() => setChatTab('tasks')}
+              >
+                Tasks
               </button>
             </div>
+            <button
+              style={{
+                background: 'transparent',
+                border: '1px solid rgba(255, 255, 255, 0.2)',
+                borderRadius: '6px',
+                color: isMuted ? '#999' : '#fff',
+                cursor: 'pointer',
+                fontSize: '16px',
+                padding: '4px 8px',
+                marginLeft: 'auto'
+              }}
+              onClick={() => setIsMuted(!isMuted)}
+              title={isMuted ? "Unmute AI voice" : "Mute AI voice"}
+            >
+              {isMuted ? '🔇' : '🔊'}
+            </button>
           </div>
           
           <div style={styles.chatContainer}>
-            <div style={styles.chatMessages} ref={chatEndRef}>
+            {chatTab === 'chat' ? (
+              <>
+                <div style={styles.chatMessages} ref={chatEndRef}>
               {chatMessages.map((message, index) => (
                 <div 
                   key={index} 
@@ -1612,9 +1863,20 @@ The changes have been applied and the preview has been updated.`
             </div>
             
             <div style={styles.chatInputContainer}>
+              <button 
+                style={{
+                  ...styles.micButton,
+                  ...(isRecording ? styles.micButtonRecording : {})
+                }}
+                onClick={isRecording ? stopRecording : startRecording}
+                disabled={isAiThinking || isPlaying}
+                title={isRecording ? "Stop recording" : "Start recording"}
+              >
+                <MicIcon />
+              </button>
               <textarea
                 style={styles.chatInput}
-                placeholder="Type your message to AI assistant..."
+                placeholder={isRecording ? "Recording..." : "Type or speak your message..."}
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
                 onKeyDown={(e) => {
@@ -1623,7 +1885,7 @@ The changes have been applied and the preview has been updated.`
                     sendChatMessage();
                   }
                 }}
-                disabled={isAiThinking}
+                disabled={isAiThinking || isRecording}
                 rows={1}
               />
               <button 
@@ -1635,77 +1897,259 @@ The changes have been applied and the preview has been updated.`
                 onClick={sendChatMessage}
                 disabled={isAiThinking || !chatInput.trim()}
               >
-                {/* --- UPDATED: Replaced text with SVG icon --- */}
                 {isAiThinking ? '...' : <SendIcon />}
               </button>
             </div>
+              </>
+            ) : (
+              /* Tasks View */
+              <div style={{
+                ...styles.chatMessages,
+                padding: '16px'
+              }}>
+                {aiTasks.length === 0 ? (
+                  <div style={{
+                    textAlign: 'center',
+                    color: '#888',
+                    padding: '40px 20px',
+                    fontSize: '14px'
+                  }}>
+                    No tasks yet. Ask the AI to make changes and completed tasks will appear here.
+                  </div>
+                ) : (
+                  aiTasks.map((task, index) => (
+                    <div key={index} style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: '12px',
+                      padding: '12px',
+                      background: '#111111',
+                      border: '1px solid #333333',
+                      borderRadius: '8px',
+                      marginBottom: '8px'
+                    }}>
+                      <span style={{
+                        fontSize: '18px',
+                        lineHeight: '1',
+                        marginTop: '2px'
+                      }}>✅</span>
+                      <div style={{ flex: 1 }}>
+                        <div style={{
+                          color: '#ffffff',
+                          fontSize: '14px',
+                          fontWeight: '500',
+                          marginBottom: '4px'
+                        }}>
+                          {task.title}
+                        </div>
+                        {task.description && (
+                          <div style={{
+                            color: '#aaaaaa',
+                            fontSize: '12px',
+                            lineHeight: '1.4'
+                          }}>
+                            {task.description}
+                          </div>
+                        )}
+                        <div style={{
+                          color: '#666',
+                          fontSize: '11px',
+                          marginTop: '6px'
+                        }}>
+                          {new Date(task.timestamp).toLocaleTimeString()}
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
           </div>
         </div>
 
         {/* Right Panel: Preview or Code */}
         <div style={styles.rightPanel}>
           <div style={styles.rightPanelHeader}>
-            <div style={styles.sidebarTabs}>
-              <button 
-                style={{
-                  ...styles.sidebarTab,
-                  ...(activeTab === 'files' ? styles.sidebarTabActive : {})
-                }}
-                onClick={() => setActiveTab('files')}
-              >
-                Files
-              </button>
-              <button 
-                style={{
-                  ...styles.sidebarTab,
-                  ...(activeTab === 'errors' ? styles.sidebarTabActive : {})
-                }}
-                onClick={() => setActiveTab('errors')}
-              >
-                Problems ({errors.length})
-              </button>
-            </div>
-            
             <div style={styles.viewToggleButtons}>
               <button 
                 style={{
                   ...styles.viewToggleButton,
-                  ...(layoutMode === 'preview' ? styles.viewToggleButtonActive : {})
+                  ...(viewMode === 'desktop' ? styles.viewToggleButtonActive : {})
                 }}
-                onClick={() => setLayoutMode('preview')}
-                title="Live Preview"
+                onClick={() => setViewMode('desktop')}
+                title="Desktop View"
               >
-                Preview
+                Desktop
               </button>
               <button 
                 style={{
                   ...styles.viewToggleButton,
-                  ...(layoutMode === 'code' ? styles.viewToggleButtonActive : {})
+                  ...(viewMode === 'mobile' ? styles.viewToggleButtonActive : {})
                 }}
-                onClick={() => setLayoutMode('code')}
-                title="Code Editor"
+                onClick={() => setViewMode('mobile')}
+                title="Mobile View"
               >
-                Code
+                Phone
+              </button>
+              <button 
+                style={{
+                  ...styles.viewToggleButton,
+                  ...(activeTab === 'settings' ? styles.viewToggleButtonActive : {})
+                }}
+                onClick={() => setActiveTab(activeTab === 'settings' ? 'preview' : 'settings')}
+                title="Project Settings"
+              >
+                Settings
               </button>
             </div>
           </div>
           
           <div style={styles.rightPanelContent}>
-            {layoutMode === 'preview' && previewUrl ? (
-              <iframe
-                src={previewUrl}
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  border: 'none',
-                  background: '#ffffff', // Set to white for contrast
-                  overflow: 'auto'
-                }}
-                title="Live Preview"
-                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
-                allow="clipboard-read; clipboard-write"
-                scrolling="yes"
-              />
+            {activeTab === 'settings' ? (
+              /* Project Settings Panel */
+              <div style={{
+                padding: '32px',
+                background: '#ffffff',
+                height: '100%',
+                overflow: 'auto'
+              }}>
+                <h2 style={{
+                  fontSize: '24px',
+                  fontWeight: '600',
+                  color: '#1a1a1a',
+                  marginBottom: '24px',
+                  borderBottom: '2px solid #f0f0f0',
+                  paddingBottom: '12px'
+                }}>
+                  Project Settings
+                </h2>
+                
+                <div style={{ marginBottom: '24px' }}>
+                  <label style={{
+                    display: 'block',
+                    fontSize: '14px',
+                    fontWeight: '500',
+                    color: '#666',
+                    marginBottom: '8px'
+                  }}>
+                    Project Name
+                  </label>
+                  <input
+                    type="text"
+                    value={project?.name || projectName || ''}
+                    readOnly
+                    style={{
+                      width: '100%',
+                      padding: '12px',
+                      fontSize: '16px',
+                      border: '1px solid #e0e0e0',
+                      borderRadius: '6px',
+                      background: '#f9f9f9',
+                      color: '#1a1a1a'
+                    }}
+                  />
+                </div>
+
+                <div style={{ marginBottom: '24px' }}>
+                  <label style={{
+                    display: 'block',
+                    fontSize: '14px',
+                    fontWeight: '500',
+                    color: '#666',
+                    marginBottom: '8px'
+                  }}>
+                    Live URL
+                  </label>
+                  <div style={{
+                    width: '100%',
+                    padding: '12px',
+                    fontSize: '16px',
+                    border: '1px solid #e0e0e0',
+                    borderRadius: '6px',
+                    background: '#f9f9f9',
+                    color: previewUrl ? '#0066cc' : '#999',
+                    wordBreak: 'break-all'
+                  }}>
+                    {previewUrl || 'Not deployed yet - click Run to preview'}
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: '24px' }}>
+                  <label style={{
+                    display: 'block',
+                    fontSize: '14px',
+                    fontWeight: '500',
+                    color: '#666',
+                    marginBottom: '8px'
+                  }}>
+                    Plan
+                  </label>
+                  <div style={{
+                    width: '100%',
+                    padding: '12px',
+                    fontSize: '16px',
+                    border: '1px solid #e0e0e0',
+                    borderRadius: '6px',
+                    background: '#f9f9f9',
+                    color: '#1a1a1a'
+                  }}>
+                    Starter
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: '24px' }}>
+                  <label style={{
+                    display: 'block',
+                    fontSize: '14px',
+                    fontWeight: '500',
+                    color: '#666',
+                    marginBottom: '8px'
+                  }}>
+                    Analytics
+                  </label>
+                  <div style={{
+                    width: '100%',
+                    padding: '12px',
+                    fontSize: '16px',
+                    border: '1px solid #e0e0e0',
+                    borderRadius: '6px',
+                    background: '#f9f9f9',
+                    color: '#999',
+                    fontStyle: 'italic'
+                  }}>
+                    Coming Soon
+                  </div>
+                </div>
+              </div>
+            ) : layoutMode === 'preview' && previewUrl ? (
+              <div style={{
+                width: '100%',
+                height: '100%',
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                background: viewMode === 'mobile' ? '#f0f0f0' : '#ffffff',
+                padding: viewMode === 'mobile' ? '20px' : '0'
+              }}>
+                <iframe
+                  src={previewUrl}
+                  style={{
+                    width: viewMode === 'mobile' ? '375px' : '100%',
+                    height: viewMode === 'mobile' ? '667px' : '100%',
+                    maxWidth: viewMode === 'mobile' ? '375px' : '100%',
+                    maxHeight: viewMode === 'mobile' ? '667px' : '100%',
+                    border: viewMode === 'mobile' ? '8px solid #1a1a1a' : 'none',
+                    borderRadius: viewMode === 'mobile' ? '36px' : '0',
+                    background: '#ffffff',
+                    overflow: 'auto',
+                    boxShadow: viewMode === 'mobile' ? '0 20px 60px rgba(0,0,0,0.3)' : 'none'
+                  }}
+                  title="Live Preview"
+                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+                  allow="clipboard-read; clipboard-write"
+                  scrolling="yes"
+                />
+              </div>
             ) : layoutMode === 'preview' && isBuilding ? (
               /* Live Generation Progress */
               <div style={styles.welcomeScreen}>
@@ -1713,39 +2157,6 @@ The changes have been applied and the preview has been updated.`
                 <p style={styles.welcomeScreenP}>
                   Watch your application being created in real-time.
                 </p>
-                <div style={{
-                  background: '#1a1a1a',
-                  border: '1px solid #333333',
-                  borderRadius: '8px',
-                  padding: '16px',
-                  marginTop: '20px',
-                  maxHeight: '400px',
-                  overflow: 'auto',
-                  fontFamily: "'Consolas', 'Monaco', 'Courier New', monospace",
-                  fontSize: '14px',
-                  color: '#d4d4d4',
-                  textAlign: 'left'
-                }}>
-                  {terminalOutput.length === 0 ? (
-                    <div style={{ color: '#aaaaaa' }}>Initializing AI generation...</div>
-                  ) : (
-                    terminalOutput.map((line, index) => (
-                      <div key={index} style={{ 
-                        marginBottom: '4px',
-                        animation: 'fadeIn 0.3s ease-in'
-                      }}>
-                        {line}
-                      </div>
-                    ))
-                  )}
-                  <div style={{ 
-                    marginTop: '8px',
-                    color: '#ffffff',
-                    animation: 'pulse 1.5s infinite'
-                  }}>
-                    ...
-                  </div>
-                </div>
               </div>
             ) : layoutMode === 'preview' && !previewUrl ? (
               <div style={styles.welcomeScreen}>
@@ -1898,7 +2309,6 @@ The changes have been applied and the preview has been updated.`
         </div>
       </div>
     </div>
-    </PageWrapper>
   );
 };
 

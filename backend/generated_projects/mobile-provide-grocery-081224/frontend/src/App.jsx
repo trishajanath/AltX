@@ -10,7 +10,9 @@ const createMotionFallback = (element) => {
   const Component = ({ children, className, style, onClick, id, ...props }) => {
     // Filter out framer-motion specific props
     const validProps = Object.keys(props).reduce((acc, key) => {
-      if (!['initial', 'animate', 'exit', 'whileHover', 'whileTap', 'whileInView', 'transition', 'variants', 'viewport'].includes(key)) {
+      if (
+!['initial', 'animate', 'exit', 'whileHover', 'whileTap', 'whileInView', 'transition', 'variants', 'viewport'].includes(key)
+) {
         acc[key] = props[key];
       }
       return acc;
@@ -76,10 +78,10 @@ const ChevronRightIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="16
 const Button = ({ children, variant = "default", className = "", ...props }) => {
     const baseClasses = "inline-flex items-center justify-center rounded-full text-sm font-bold ring-offset-background transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50";
     const variants = {
-        default: "bg-white text-slate-900 hover:bg-white/80 px-8 py-3",
-        primary: "bg-gradient-to-br from-purple-600 via-pink-500 to-red-500 text-white shadow-lg shadow-pink-500/30 hover:scale-105 hover:-translate-y-1 px-8 py-3",
-        outline: "border-2 border-white/50 bg-transparent text-white hover:bg-white/10 hover:border-white px-8 py-3",
-        ghost: "hover:bg-white/10 text-white",
+        default: "bg-white text-slate-900 hover:bg-gray-200 px-8 py-3",
+        primary: "bg-white text-slate-900 hover:bg-gray-200 px-8 py-3",
+        outline: "bg-white text-slate-900 hover:bg-gray-200 px-8 py-3",
+        ghost: "hover:bg-gray-200 text-slate-900",
         link: "text-primary underline-offset-4 hover:underline",
     };
     return <button className={cn(baseClasses, variants[variant], className)} {...props}>{children}</button>;
@@ -90,7 +92,7 @@ const Modal = ({ isOpen, onClose, children, title }) => {
     return (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={onClose}>
             <motion.div
-                className="relative bg-slate-800/80 backdrop-blur-lg border border-white/10 rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto shadow-2xl shadow-purple-500/20"
+                className="relative bg-black/80 backdrop-blur-lg border border-white/10 rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto shadow-2xl shadow-purple-500/20"
                 onClick={(e) => e.stopPropagation()}
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -128,7 +130,7 @@ const Toast = ({ message, type = "success", onClose }) => (
 // AUTHENTICATION COMPONENTS
 const AuthInput = (props) => (
     <input
-        className="w-full px-4 py-3 bg-slate-900/50 border border-white/10 rounded-lg text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-purple-500 transition-all"
+        className="w-full px-4 py-3 bg-slate-950/50 border border-white/10 rounded-lg text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-purple-500 transition-all"
         {...props}
     />
 );
@@ -244,7 +246,7 @@ const CartModal = ({ isOpen, onClose }) => {
                                 <p className="font-semibold">{item.name}</p>
                                 <p className="text-sm text-white/60">${item.price.toFixed(2)}</p>
                             </div>
-                            <div className="flex items-center space-x-2 bg-slate-900/50 border border-white/10 rounded-full p-1">
+                            <div className="flex items-center space-x-2 bg-slate-950/50 border border-white/10 rounded-full p-1">
                                 <button onClick={() => updateQuantity(item.id, item.quantity - 1)} className="p-1 rounded-full hover:bg-white/10"><MinusIcon /></button>
                                 <span className="w-6 text-center">{item.quantity}</span>
                                 <button onClick={() => updateQuantity(item.id, item.quantity + 1)} className="p-1 rounded-full hover:bg-white/10"><PlusIcon /></button>
@@ -304,7 +306,7 @@ const Header = () => {
 const HeroSection = () => {
     const { showSignup } = useAuth();
     return (
-        <section className="relative min-h-screen flex items-center justify-center overflow-hidden bg-slate-900 text-white">
+        <section className="relative min-h-screen flex items-center justify-center overflow-hidden bg-black text-white">
             <div className="absolute inset-0 bg-gradient-to-br from-indigo-600 to-purple-700 clip-path-diagonal z-0"></div>
             <div className="absolute inset-0 bg-gradient-radial from-purple-400/10 via-pink-300/0 to-red-400/0"></div>
             
@@ -353,8 +355,8 @@ const FeatureSection = ({ title, description, useCase, imageUrl, reverse = false
     const [inViewRef, isInView] = useInView(ref, { once: true, amount: 0.3 });
 
     return (
-        <section ref={inViewRef} className={cn("relative py-20 md:py-32 overflow-hidden", reverse ? "bg-slate-800" : "bg-slate-900")}>
-            <div className={cn("absolute inset-0", reverse ? "diagonal-section-even bg-gradient-to-bl from-slate-900 to-slate-800" : "diagonal-section bg-gradient-to-br from-slate-900 to-slate-800")}></div>
+        <section ref={inViewRef} className="relative py-20 md:py-32 overflow-hidden bg-black">
+            <div className={cn("absolute inset-0", reverse ? "diagonal-section-even bg-gradient-to-bl from-slate-950 to-black" : "diagonal-section bg-gradient-to-br from-black to-slate-950")}></div>
             <div className="container mx-auto grid md:grid-cols-2 gap-12 items-center relative z-10 px-6">
                 <motion.div 
                     className={cn("relative", reverse && "md:order-2")}
@@ -391,7 +393,7 @@ const MealKitsSection = () => {
     const [inViewRef, isInView] = useInView(ref, { once: true, amount: 0.2 });
 
     return (
-        <section ref={inViewRef} className="py-20 md:py-32 bg-slate-900 text-white">
+        <section ref={inViewRef} className="py-20 md:py-32 bg-black text-white">
             <div className="container mx-auto px-6 text-center">
                 <motion.h2 
                     className="text-4xl md:text-5xl font-bold tracking-tight"
@@ -413,7 +415,7 @@ const MealKitsSection = () => {
                     {MOCK_MEAL_KITS.map((kit, index) => (
                         <motion.div
                             key={kit.id}
-                            className="bg-slate-800/50 rounded-2xl overflow-hidden group border border-white/10 transform transition-all duration-300 hover:!opacity-100 hover:scale-105 hover:shadow-2xl hover:shadow-purple-500/20"
+                            className="bg-slate-900/50 rounded-2xl overflow-hidden group border border-white/10 transform transition-all duration-300 hover:!opacity-100 hover:scale-105 hover:shadow-2xl hover:shadow-purple-500/20"
                             initial={{ opacity: 0, y: 50 }}
                             animate={isInView ? { opacity: 1, y: 0 } : {}}
                             transition={{ duration: 0.5, delay: 0.1 * index }}
@@ -436,7 +438,7 @@ const MealKitsSection = () => {
 };
 
 const Footer = () => (
-    <footer className="bg-slate-900 border-t border-white/10 text-white/50 py-12">
+    <footer className="bg-black border-t border-white/10 text-white/50 py-12">
         <div className="container mx-auto px-6 text-center">
             <p>&copy; {new Date().getFullYear()} Grocerly. All rights reserved.</p>
             <p className="text-sm mt-2">Awwwards-Inspired Design for Busy Professionals.</p>
@@ -610,7 +612,7 @@ const App = () => {
         <NotificationProvider>
             <AuthProvider>
                 <CartProvider>
-                    <div className="bg-slate-900 font-sans antialiased">
+                    <div className="bg-black font-sans antialiased">
                         <Header />
                         <main>
                             <HeroSection />

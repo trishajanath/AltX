@@ -23,7 +23,7 @@ const CardNav = ({
 
   const calculateHeight = () => {
     const navEl = navRef.current;
-    if (!navEl) return 260;
+    if (!navEl) return 180;
 
     const isMobile = window.matchMedia('(max-width: 768px)').matches;
     if (isMobile) {
@@ -41,8 +41,8 @@ const CardNav = ({
 
         contentEl.offsetHeight;
 
-        const topBar = 60;
-        const padding = 16;
+        const topBar = 50;
+        const padding = 14;
         const contentHeight = contentEl.scrollHeight;
 
         contentEl.style.visibility = wasVisible;
@@ -53,15 +53,15 @@ const CardNav = ({
         return topBar + contentHeight + padding;
       }
     }
-    return 260;
+    return 180;
   };
 
   const createTimeline = () => {
     const navEl = navRef.current;
     if (!navEl) return null;
 
-    gsap.set(navEl, { height: 60, overflow: 'hidden' });
-    gsap.set(cardsRef.current, { y: 50, opacity: 0 });
+    gsap.set(navEl, { height: 50, overflow: 'hidden' });
+    gsap.set(cardsRef.current, { y: 40, opacity: 0 });
 
     const tl = gsap.timeline({ paused: true });
 

@@ -1,79 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import * as THREE from 'three';
-import { BarChart3, Rocket, Shield, GitBranch, Menu, X, ChevronDown, LogOut, MessageCircle } from 'lucide-react';
+import { BarChart3, Rocket, Shield, GitBranch, Menu, X, ChevronDown, LogOut, MessageCircle, User } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import Plasma from './Plasma';
-import StaggeredMenu from './StagMenu';
-
-// --- Sidebar Component (Enhanced) ---
-const Sidebar = ({ 
-  setSidebarOpen,
-  setView, 
-  currentView, 
-  user, 
-  isAuthenticated, 
-  onLogout  
-}) => {
-  const navigate = useNavigate();
-  const location = useLocation();
-
-  // Replace old sidebar items with menu equivalents
-  const menuItems = [
-    { label: 'Dashboard', ariaLabel: 'View Dashboard', link: '/home' },
-    { label: 'Voice Chat Builder', ariaLabel: 'Access Voice Chat Builder', link: '/voice-chat' },
-    { label: 'Deploy Project', ariaLabel: 'Deploy your Project', link: '/deploy' },
-    { label: 'Security Scan', ariaLabel: 'Perform Security Scan', link: '/security' },
-    { label: 'Repo Analysis', ariaLabel: 'Analyze Repositories', link: '/repo-analysis' },
-    { label: 'Reports', ariaLabel: 'View Reports', link: '/report' }
-  ];
-
-  const socialItems = [
-    { label: 'Twitter', link: 'https://twitter.com' },
-    { label: 'GitHub', link: 'https://github.com' },
-    { label: 'LinkedIn', link: 'https://linkedin.com' }
-  ];
-
-  // Handle navigation
-  const handleNavigation = (link) => {
-    navigate(link);
-  };
-
-  // Handle menu open/close and sync with PageWrapper state
-  const handleMenuOpen = () => {
-    setSidebarOpen(true);
-  };
-
-  const handleMenuClose = () => {
-    setSidebarOpen(false);
-  };
-
-  return (
-    <div className="sidebar">
-      <StaggeredMenu
-        position="left"
-        items={menuItems.map(item => ({
-          ...item,
-          onClick: () => handleNavigation(item.link),
-          active: location.pathname === item.link
-        }))}
-        socialItems={socialItems}
-        displaySocials={true}
-        displayItemNumbering={true}
-        menuButtonColor="#ffffff"
-        openMenuButtonColor="#ffffff"
-        changeMenuColorOnOpen={true}
-        colors={['#000000', '#111111', '#222222']}
-        logoUrl="/logos/xverta-logo.png"
-        accentColor="#ffffff"
-        onMenuOpen={handleMenuOpen}
-        onMenuClose={handleMenuClose}
-        user={user}
-        isAuthenticated={isAuthenticated}
-        onLogout={onLogout}
-      />
-    </div>
-  );
-};
+import MainNavBar from './MainNavBar';
 
 // --- ✨ UPDATED Vortex Three.js Background ---
 import {
@@ -184,7 +115,7 @@ const fragmentShader = `
         col.rgb = hueShiftRGB(col.rgb, uHueShift);
 
         float scanline_val = sin(gl_FragCoord.y * uScanFreq) * 0.5 + 0.5;
-        col.rgb *= 1.0 - (scanline_val * scanline_val) * uScan;
+        col.rgb *= 1.5 - (scanline_val * scanline_val) * uScan;
         col.rgb += (rand(gl_FragCoord.xy + iTime) - 0.5) * uNoise;
 
         gl_FragColor = vec4(clamp(col.rgb, 0.0, 1.0), 1.0);
@@ -196,9 +127,9 @@ const fragmentShader = `
 // This is useful for a background component that might be part of a larger, dynamic UI.
 const ThreeBackground = React.memo(({
     hueShift = 0.0,
-    noiseIntensity = 0.03,
+    noiseIntensity = 0.06,
     scanlineIntensity = 0.05,
-    speed = 0.3,
+    speed = 0.5,
     scanlineFrequency = 800.0,
     warpAmount = 1.0
 }) => {
@@ -311,17 +242,30 @@ const ThreeBackground = React.memo(({
 
 // --- Shared Page Wrapper Component (Enhanced) ---
 const PageWrapper = ({ children }) => {
-    const [isSidebarOpen, setSidebarOpen] = useState(true);
     const [currentView, setCurrentView] = useState('dashboard');
-    const [user, setUser] = useState(null);
-    const [isAuthenticated, setIsAuthenticated] = useState(false);
-    const location = useLocation();
-
-    useEffect(() => {
-        if (window.innerWidth < 768) {
-            setSidebarOpen(false);
+    
+    // Initialize auth state from localStorage immediately to prevent flickering
+    const getInitialAuthState = () => {
+        try {
+            const userData = localStorage.getItem('user');
+            const token = localStorage.getItem('access_token');
+            
+            if (userData && token) {
+                const userInfo = JSON.parse(userData);
+                if (userInfo.email && userInfo.name) {
+                    return { user: userInfo, isAuthenticated: true };
+                }
+            }
+        } catch (error) {
+            console.error('Error reading initial auth state:', error);
         }
-    }, []);
+        return { user: null, isAuthenticated: false };
+    };
+    
+    const initialAuth = getInitialAuthState();
+    const [user, setUser] = useState(initialAuth.user);
+    const [isAuthenticated, setIsAuthenticated] = useState(initialAuth.isAuthenticated);
+    const location = useLocation();
     
     // Check for authentication state on component mount and set up listener
     useEffect(() => {
@@ -352,8 +296,8 @@ const PageWrapper = ({ children }) => {
             }
         };
 
-        // Check auth state on mount
-        checkAuthState();
+        // No need to check auth state on mount since we initialized from localStorage
+        // Just set up the listeners for future changes
 
         // Set up storage event listener to react to auth changes
         const handleStorageChange = (e) => {
@@ -362,19 +306,17 @@ const PageWrapper = ({ children }) => {
             }
         };
 
+        
         window.addEventListener('storage', handleStorageChange);
         
-        // Also check periodically in case of same-tab changes
-        const interval = setInterval(checkAuthState, 1000);
+        // Also check periodically in case of same-tab changes (reduced frequency)
+        const interval = setInterval(checkAuthState, 2000);
 
         return () => {
             window.removeEventListener('storage', handleStorageChange);
             clearInterval(interval);
         };
     }, []);
-
-    const toggleSidebar = () => setSidebarOpen(!isSidebarOpen);
-
 
     const handleLogout = () => {
         localStorage.removeItem('user');
@@ -388,9 +330,18 @@ const PageWrapper = ({ children }) => {
         // Redirect to landing page after logout
         window.location.href = '/';
     };
+    const [hue, setHue] = useState(0);
 
-    // Hide sidebar on /login and /signup
-    const hideSidebar = location.pathname === '/login' || location.pathname === '/signup';
+    useEffect(() => {
+        // This will make the color slowly cycle
+        const interval = setInterval(() => {
+        setHue(prevHue => (prevHue + 0.1) % 360);
+        }, 16); // ~60fps
+
+        return () => clearInterval(interval);
+    }, []);
+    // Hide navbar on landing page, login, and signup pages
+    const hideNavBar = location.pathname === '/' || location.pathname === '/login' || location.pathname === '/signup';
 
     return (
         <>
@@ -406,10 +357,19 @@ const PageWrapper = ({ children }) => {
                         box-sizing: border-box;
                     }
                     
-                    html, body {
+                    html {
+                        overflow-y: scroll;
                         overflow-x: hidden;
                         width: 100%;
                         height: 100%;
+                    }
+                    
+                    body {
+                        overflow-x: hidden;
+                        width: 100%;
+                        height: 100%;
+                        margin: 0;
+                        padding: 0;
                     }
                     
                     :root {
@@ -421,7 +381,6 @@ const PageWrapper = ({ children }) => {
                         --card-bg-hover: rgba(0, 0, 0, 0.5);
                         --card-border: rgba(0, 245, 195, 0.2);
                         --card-border-hover: rgba(0, 245, 195, 0.5);
-                        --sidebar-width: 260px;
                         --glass-bg: rgba(16, 16, 16, 0.6);
                         --surface-color: rgba(255, 255, 255, 0.05);
                         --border-color: rgba(255, 255, 255, 0.15);
@@ -435,31 +394,30 @@ const PageWrapper = ({ children }) => {
                         background-color: transparent !important;
                     }
 
-                    /* App Container with Sidebar Effects */
+                    /* App Container */
                     .app-container { 
-                        display: flex; 
+                        display: block; 
                         min-height: 100vh; 
                         background-color: transparent;
                         position: relative;
+                        width: 100vw;
                     }
 
-                    /* Login/Signup pages should have full width without sidebar constraints */
+                    /* Login/Signup pages should have full width */
                     .app-container.auth-page {
                         display: block;
                     }
 
                     .main-content {
-                        flex-grow: 1;
-                        padding: 1.5rem;
-                        transition: margin-left 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94), 
-                                   transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-                        margin-left: 0;
+                        width: 100%;
+                        max-width: 1400px;
+                        margin: 0 auto;
+                        padding: 6rem 2rem 2rem 2rem;
                         position: relative;
                         z-index: 2;
                         min-height: 100vh;
                         overflow-x: hidden;
-                        overflow-y: auto;
-                        will-change: margin-left, transform;
+                        overflow-y: visible;
                     }
 
                     /* Auth pages should have no padding and full control */
@@ -472,79 +430,35 @@ const PageWrapper = ({ children }) => {
                     
                     @media (min-width: 768px) {
                         .main-content { 
-                            padding: 3rem; 
-                            transition: margin-left 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-                        }
-                        .app-container.sidebar-open .main-content {
-                            margin-left: var(--sidebar-width);
+                            padding: 6rem 3rem 3rem 3rem; 
                         }
                     }
 
-                    .sidebar-footer { padding: 1rem; border-top: 1px solid var(--border-color); }
-                    .user-profile { 
-                        display: flex; align-items: center; gap: 0.5rem; cursor: pointer;
-                        min-height: 48px; padding: 0.5rem;
-                        border-radius: 6px; transition: background 0.2s ease;
-                    }
-                    .user-profile:hover { background: rgba(255, 255, 255, 0.05); }
-                    .user-profile img { 
-                        width: 32px; height: 32px; border-radius: 50%; 
-                        border: 1px solid var(--border-color); flex-shrink: 0;
-                        object-fit: cover;
-                    }
-                    .user-info { 
-                        flex-grow: 1; min-width: 0; /* Allow text to shrink */
-                    }
-                    .user-info span { 
-                        display: block; font-weight: 600; color: var(--text-primary);
-                        font-size: 0.875rem; line-height: 1.2;
-                        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-                    }
-                    .user-info small { 
-                        color: var(--text-secondary); font-size: 0.75rem; line-height: 1.2;
-                        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-                        display: block;
-                    }
-                    .logout-button {
-                        background: none; border: none; color: var(--text-secondary);
-                        cursor: pointer; padding: 0.375rem; border-radius: 4px;
-                        transition: all 0.2s ease; flex-shrink: 0;
-                        display: flex; align-items: center; justify-content: center;
-                        width: 28px; height: 28px;
-                    }
-                    .logout-button:hover {
-                        background: rgba(239, 68, 68, 0.1); 
-                        color: #ef4444;
-                        transform: translateX(2px);
-                    }
-                    .logout-button:hover::after {
-                        content: 'Logout';
-                        position: absolute;
-                        right: 100%;
-                        margin-right: 8px;
-                        background: rgba(0, 0, 0, 0.8);
-                        color: white;
-                        padding: 4px 8px;
-                        border-radius: 4px;
-                        font-size: 12px;
-                        white-space: nowrap;
-                        pointer-events: none;
-                    }
+                    /* Auth page specific styles */
                     .login-prompt { cursor: default; }
                     .login-prompt .user-info small a:hover {
                         text-decoration: underline !important;
                     }
                 `}
             </style>
-            <div className={`app-container ${isSidebarOpen ? 'sidebar-open' : ''} ${hideSidebar ? 'auth-page' : ''}`}>
-                <ThreeBackground /> 
+            <div className={`app-container ${hideNavBar ? 'auth-page' : ''}`}>
+                <ThreeBackground hueShift={50.0}/> 
 
-                {!hideSidebar && <Sidebar setSidebarOpen={setSidebarOpen} setView={setCurrentView} 
-                currentView={currentView} user={user} isAuthenticated={isAuthenticated} onLogout={handleLogout} 
-                />}
+                {!hideNavBar && <MainNavBar user={user} isAuthenticated={isAuthenticated} onLogout={handleLogout} />}
                 
-                <div className={`main-content ${hideSidebar ? 'auth-content' : ''}`}>
-                    {children}
+                <div className={`main-content ${hideNavBar ? 'auth-content' : ''}`}>
+                    <AnimatePresence mode="wait">
+                        <motion.div
+                            key={location.pathname}
+                            initial={{ opacity: 0, y: 15 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -15 }}
+                            transition={{ duration: 0.3, ease: "easeInOut" }}
+                            style={{ position: 'relative', width: '100%' }}
+                        >
+                            {children}
+                        </motion.div>
+                    </AnimatePresence>
                 </div>
             </div>
         </>

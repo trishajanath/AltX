@@ -1239,7 +1239,6 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
         window.fetch = mockFetch;
         
         // Create utility functions for className manipulation
-        console.log('Setting up utility functions...');
         
         // Fallback clsx implementation if CDN fails
         if (typeof window.clsx === 'undefined') {{
@@ -1320,16 +1319,11 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
             return window.twMerge(...inputs);
         }};
         
-        console.log('Loading components...');
-        
         {components_code}
-        
-        console.log('Loading App component...');
         
         {app_content}
         
         // Render the app
-        console.log('Rendering app...');
         try {{
             if (typeof window.App === 'function') {{
                 const root = ReactDOM.createRoot(document.getElementById('root'));
@@ -1338,7 +1332,6 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
                         React.createElement(window.App)
                     )
                 );
-                console.log('App rendered successfully!');
             }} else {{
                 throw new Error('App component not found or not a function');
             }}
@@ -1965,7 +1958,7 @@ async def ai_project_assistant(request: dict = Body(...)):
         await manager.send_to_project(project_name, {
             "type": "status",
             "phase": "thinking",
-            "message": "🤖 Processing your request..."
+            "message": "🤖 Working on it..."
         })
 
         # Get project context (read existing files)
@@ -2034,12 +2027,10 @@ ANALYZING PROJECT FILES FOR SPECIFIC FIXES..."""
             
         elif is_vague_request(user_message):
             await manager.send_to_project(project_name, {
-                "type": "status", 
+                "type": "status",
                 "phase": "analyzing",
-                "message": "🔍 Analyzing project for common issues..."
-            })
-            
-            # Quick analysis of common frontend issues
+                "message": "🔍 Looking at your project..."
+            })            # Quick analysis of common frontend issues
             analysis_points = []
             
             # Check for React-specific issues in App.jsx
@@ -2089,20 +2080,72 @@ ANALYZING PROJECT FILES FOR SPECIFIC FIXES..."""
             else:
                 project_analysis = f"\n\nSUGGESTION: Be more specific. Examples:\n- 'Fix the array.map error'\n- 'Add a login form'\n- 'Make buttons responsive'"
 
+        # Get project file tree to help AI understand what files exist
+        def get_file_tree(path: Path, prefix="", max_depth=3, current_depth=0):
+            """Generate a simple file tree structure"""
+            if current_depth >= max_depth:
+                return ""
+            
+            tree = []
+            try:
+                items = sorted(path.iterdir(), key=lambda x: (not x.is_dir(), x.name))
+                for item in items:
+                    # Skip node_modules, .git, etc
+                    if item.name in ['node_modules', '.git', '__pycache__', 'dist', 'build', '.vite']:
+                        continue
+                    if item.is_dir():
+                        tree.append(f"{prefix}📁 {item.name}/")
+                        tree.append(get_file_tree(item, prefix + "  ", max_depth, current_depth + 1))
+                    else:
+                        tree.append(f"{prefix}📄 {item.name}")
+            except:
+                pass
+            return "\n".join(filter(None, tree))
+        
+        project_file_tree = get_file_tree(project_path)
+        
+        # For editing requests, include relevant file content
+        file_context = ""
+        if any(keyword in user_message.lower() for keyword in ['change', 'update', 'modify', 'edit', 'fix', 'button', 'color', 'style']):
+            # Try to find and include App.jsx content for context
+            app_file = project_path / "frontend" / "src" / "App.jsx"
+            if app_file.exists():
+                try:
+                    with open(app_file, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                    # Include first 150 lines (usually contains components and UI)
+                    lines = content.split('\n')[:150]
+                    file_context = f"\n\nRELEVANT FILE CONTENT (App.jsx first 150 lines):\n```jsx\n" + '\n'.join(lines) + "\n```\n"
+                except:
+                    pass
+
         # Use AI to generate changes with STRICT JSON-only prompt
         prompt = f"""You MUST respond with ONLY valid JSON. No other text. No markdown. No explanations outside JSON.
 
 User Request: "{user_message}"
 Project: {project_name}
 
-CRITICAL RULES:
+PROJECT FILE STRUCTURE:
+{project_file_tree}
+{file_context}
+IMPORTANT: Only edit files that exist in the project structure above. Do NOT create edits for files that don't exist.
+IMPORTANT: When making targeted edits, use the EXACT code from the file content above - match spacing, quotes, and formatting precisely.
+
+CRITICAL RULES - TARGETED EDITS ONLY:
 1. Your ENTIRE response must be valid JSON
 2. Do NOT use markdown code blocks (no ```)
 3. Do NOT add explanations before or after the JSON
 4. Start with {{ and end with }}
-5. Generate COMPLETE, FUNCTIONAL React components - no placeholder comments
-6. Include proper imports, exports, and working JSX
-7. For App.jsx updates, provide the FULL file content with imports
+5. Generate COMPLETE, FUNCTIONAL React components for NEW files
+6. For EXISTING files (like App.jsx, App.css), use "edit_type": "targeted_edit" with search/replace
+7. NEVER send full file replacements for existing files - only send the specific lines to change
+8. Keep search/replace strings SHORT - edit ONE line at a time for complex changes
+9. Make MULTIPLE small targeted edits instead of one large edit
+
+EDIT TYPES:
+- "new_file": Create a completely new file (for new components only)
+- "targeted_edit": Modify existing files with search/replace patterns (PREFERRED - use multiple small edits)
+- "append": Add content to end of file
 
 EXAMPLE - For vague requests like "add more features":
 {{
@@ -2110,7 +2153,7 @@ EXAMPLE - For vague requests like "add more features":
   "explanation": "I can add many features! Please specify:\\n• Customer reviews\\n• User login\\n• Dark mode\\n• Search functionality\\nWhat would you like?"
 }}
 
-EXAMPLE - For specific requests like "add customer reviews":
+EXAMPLE - For creating NEW components:
 {{
   "changes": [
     {{
@@ -2122,7 +2165,55 @@ EXAMPLE - For specific requests like "add customer reviews":
   "explanation": "Created functional CustomerReviews component with sample reviews and star ratings"
 }}
 
-Generate WORKING React code - no placeholder comments. Include proper imports and exports.
+EXAMPLE - For modifying EXISTING files like "change background color to black":
+{{
+  "changes": [
+    {{
+      "file_path": "frontend/src/App.css",
+      "edit_type": "targeted_edit",
+      "search": "  background-color: #282c34;",
+      "replace": "  background-color: #000000;"
+    }}
+  ],
+  "explanation": "Changed App background color to black"
+}}
+
+EXAMPLE - For changing multiple button colors (MULTIPLE small edits):
+{{
+  "changes": [
+    {{
+      "file_path": "frontend/src/App.jsx",
+      "edit_type": "targeted_edit",
+      "search": "        primary: \\"bg-gradient-to-br from-purple-600 via-pink-500 to-red-500 text-white shadow-lg shadow-pink-500/30 hover:scale-105 hover:-translate-y-1 px-8 py-3\\",",
+      "replace": "        primary: \\"bg-white text-slate-900 hover:bg-gray-200 px-8 py-3\\","
+    }},
+    {{
+      "file_path": "frontend/src/App.jsx",
+      "edit_type": "targeted_edit",
+      "search": "        outline: \\"border-2 border-white/50 bg-transparent text-white hover:bg-white/10 hover:border-white px-8 py-3\\",",
+      "replace": "        outline: \\"bg-white text-slate-900 hover:bg-gray-200 px-8 py-3\\","
+    }}
+  ],
+  "explanation": "Changed primary and outline button variants to white background"
+}}
+
+EXAMPLE with user-friendly language:
+{{
+  "changes": [...],
+  "explanation": "Done! All buttons are now white."
+}}
+
+CRITICAL: For modifying existing files, use MULTIPLE small "targeted_edit" changes (one per line) instead of one large edit.
+CRITICAL: Match EXACT spacing, quotes, and formatting from the file content provided above.
+CRITICAL: If the search string ends with a comma (,) the replace string MUST also end with a comma to maintain valid syntax!
+
+IMPORTANT - USER-FRIENDLY EXPLANATIONS:
+- Write explanations for non-technical users, NOT developers
+- NEVER mention: "file_path", "edit_type", "targeted_edit", "append", "JSON", "component", "class", "function", "import", "export"
+- NEVER mention: "App.jsx", "index.html", ".css", "src/", "frontend/", "backend/"
+- DO say: "I changed the button color", "I added the image", "I updated the text", "I fixed the layout"
+- Keep it simple: "Done! Your buttons are now white." NOT "Successfully modified Button component variants"
+
 RESPOND WITH ONLY JSON NOW:"""
 
         try:
@@ -2440,14 +2531,28 @@ RESPOND WITH ONLY JSON NOW:"""
             print(f"🔍 DEBUG - Extracted changes: {len(changes)} items")
             print(f"🔍 DEBUG - Extracted explanation: {explanation[:100]}...")
             
-            # Validate changes structure
+            # Validate changes structure - support both full file and targeted edits
             valid_changes = []
             for change in changes:
-                if isinstance(change, dict) and change.get("file_path") and change.get("content"):
-                    # Ensure content is not truncated or invalid
+                if not isinstance(change, dict) or not change.get("file_path"):
+                    continue
+                
+                edit_type = change.get("edit_type", "replace")
+                
+                # Validate based on edit type
+                if edit_type == "targeted_edit":
+                    # Targeted edits need search/replace or old_code/new_code
+                    has_search_replace = change.get("search") and "replace" in change
+                    has_old_new = change.get("old_code") and "new_code" in change
+                    if has_search_replace or has_old_new:
+                        valid_changes.append(change)
+                        print(f"✅ DEBUG - Valid targeted edit for {change.get('file_path')}")
+                elif edit_type in ["new_file", "replace", "append"]:
+                    # These edit types need content
                     content = str(change.get("content", "")).strip()
                     if len(content) > 10:  # Minimum content check
                         valid_changes.append(change)
+                        print(f"✅ DEBUG - Valid {edit_type} for {change.get('file_path')}")
             
             print(f"🔍 DEBUG - Valid changes found: {len(valid_changes)}")
             
@@ -2576,12 +2681,26 @@ RESPOND WITH ONLY JSON NOW:"""
                 # Handle different edit types
                 if edit_type == "targeted_edit":
                     # Targeted edit - modify specific sections
-                    old_code = change.get("old_code", "")
-                    new_code = change.get("new_code", "")
-                    target_section = change.get("target_section", "")
+                    # Support both old/new and search/replace field names
+                    search_pattern = change.get("search", change.get("old_code", ""))
+                    replace_with = change.get("replace", change.get("new_code", ""))
+                    target_section = change.get("target_section", "targeted modification")
                     
-                    if not old_code or new_code is None:
+                    if not search_pattern or replace_with is None:
+                        await manager.send_to_project(project_name, {
+                            "type": "warning",
+                            "message": f"⚠️ Targeted edit for {file_path} missing search/replace patterns"
+                        })
                         continue
+                    
+                    # CRITICAL: Preserve trailing punctuation from search pattern
+                    # If search ends with , or ; but replace doesn't, add it
+                    if search_pattern.rstrip().endswith(',') and not replace_with.rstrip().endswith(','):
+                        replace_with = replace_with.rstrip() + ','
+                        print(f"⚠️ Auto-fixed: Added missing comma to replacement in {file_path}")
+                    elif search_pattern.rstrip().endswith(';') and not replace_with.rstrip().endswith(';'):
+                        replace_with = replace_with.rstrip() + ';'
+                        print(f"⚠️ Auto-fixed: Added missing semicolon to replacement in {file_path}")
                     
                     # Read existing file if it exists
                     if target.exists():
@@ -2589,8 +2708,8 @@ RESPOND WITH ONLY JSON NOW:"""
                             existing_content = f.read()
                         
                         # Apply targeted edit
-                        if old_code in existing_content:
-                            updated_content = existing_content.replace(old_code, new_code, 1)
+                        if search_pattern in existing_content:
+                            updated_content = existing_content.replace(search_pattern, replace_with, 1)
                             cleaned = _clean_ai_generated_content(updated_content, target.name)
                             
                             with open(target, 'w', encoding='utf-8', newline='\n') as f:
@@ -2600,17 +2719,19 @@ RESPOND WITH ONLY JSON NOW:"""
                             await manager.send_to_project(project_name, {
                                 "type": "file_changed",
                                 "file_path": file_path,
-                                "message": f"✏️ Applied targeted edit to {file_path} ({target_section})"
+                                "message": f"✏️ Updated your project"
                             })
                         else:
                             await manager.send_to_project(project_name, {
                                 "type": "warning",
-                                "message": f"⚠️ Could not find target code in {file_path} for section: {target_section}"
+                                "message": f"⚠️ I couldn't make that change. Can you be more specific about what you'd like me to update?"
                             })
+                            print(f"❌ Search pattern not found in {file_path}")
+                            print(f"🔍 Looking for: {repr(search_pattern[:100])}")
                     else:
                         await manager.send_to_project(project_name, {
                             "type": "warning", 
-                            "message": f"⚠️ File {file_path} does not exist for targeted edit"
+                            "message": f"⚠️ That file doesn't exist yet. Let me know if you'd like me to create it."
                         })
                         
                 elif edit_type == "append":
@@ -2689,7 +2810,7 @@ RESPOND WITH ONLY JSON NOW:"""
             if files_modified:
                 await manager.send_to_project(project_name, {
                     "type": "success",
-                    "message": f"✅ Successfully modified {len(files_modified)} file(s) with targeted changes"
+                    "message": f"✅ Done! Check the preview to see your changes."
                 })
 
             return {

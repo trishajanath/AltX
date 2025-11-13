@@ -27,14 +27,14 @@ function App() {
             <Route path="/" element={<div className="page"><LandingPage /></div>} />
             <Route path="/login" element={<div className="page"><LoginPage /></div>} />
             <Route path="/signup" element={<div className="page"><SignupPage /></div>} />
-            <Route path="/home" element={
-              <ProtectedRoute>
-                <div className="page"><HomePage /></div>
-              </ProtectedRoute>
-            } />
             <Route path="/voice-chat" element={
               <ProtectedRoute>
                 <div className="page"><VoiceChatInterface onProjectGenerated={(projectName) => window.location.href = `/project/${projectName}`} /></div>
+              </ProtectedRoute>
+            } />
+            <Route path="/home" element={
+              <ProtectedRoute>
+                <div className="page"><HomePage/></div>
               </ProtectedRoute>
             } />
             <Route path="/project/*" element={

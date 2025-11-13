@@ -1384,7 +1384,40 @@ You can help with:
 - Code explanations
 - File creation and editing
 
-When suggesting code changes, provide clear, actionable responses. If you want to modify files, format your response to include specific file changes."""
+CRITICAL INSTRUCTION FOR FILE MODIFICATIONS:
+When you need to modify a file, you MUST use targeted edits, NOT replace the entire file.
+
+Format your response like this:
+EDIT FILE: path/to/file.ext
+SEARCH:
+```
+[exact code to find - include 3-5 lines of context before and after]
+```
+REPLACE:
+```
+[exact code to replace it with - same context lines]
+```
+
+Example:
+EDIT FILE: src/App.css
+SEARCH:
+```
+.App {{
+  text-align: center;
+  background-color: #282c34;
+  min-height: 100vh;
+}}
+```
+REPLACE:
+```
+.App {{
+  text-align: center;
+  background-color: #000000;
+  min-height: 100vh;
+}}
+```
+
+NEVER output the entire file content. Only output the specific sections that need to change with enough context to uniquely identify them."""
             },
             {
                 "role": "user",
@@ -1395,42 +1428,108 @@ When suggesting code changes, provide clear, actionable responses. If you want t
         # Get AI response
         ai_response = get_chat_response(chat_history, "smart")
         
-        # Parse response for file changes (basic implementation)
-        file_changes = []
-        if "CREATE FILE:" in ai_response or "MODIFY FILE:" in ai_response:
-            # This is a simplified parser - could be enhanced
+        # Parse response for targeted file edits
+        file_edits = []
+        if "EDIT FILE:" in ai_response:
             lines = ai_response.split('\n')
             current_file = None
-            current_content = []
+            current_search = []
+            current_replace = []
+            in_search = False
+            in_replace = False
+            in_code_block = False
             
             for line in lines:
-                if line.startswith("CREATE FILE:") or line.startswith("MODIFY FILE:"):
-                    if current_file:
-                        file_changes.append({
-                            "type": "modify" if "MODIFY" in line else "create",
-                            "path": current_file,
-                            "content": '\n'.join(current_content)
+                # Detect file to edit
+                if line.startswith("EDIT FILE:"):
+                    # Save previous edit if exists
+                    if current_file and current_search and current_replace:
+                        file_edits.append({
+                            "file_path": current_file,
+                            "changes": [{
+                                "search": '\n'.join(current_search),
+                                "replace": '\n'.join(current_replace)
+                            }]
                         })
+                    
                     current_file = line.split(":", 1)[1].strip()
-                    current_content = []
-                elif line.startswith("```") and current_file:
-                    # Skip code block markers
+                    current_search = []
+                    current_replace = []
+                    in_search = False
+                    in_replace = False
                     continue
-                elif current_file and line.strip():
-                    current_content.append(line)
+                
+                # Detect SEARCH section
+                if line.strip() == "SEARCH:":
+                    in_search = True
+                    in_replace = False
+                    current_search = []
+                    continue
+                
+                # Detect REPLACE section
+                if line.strip() == "REPLACE:":
+                    in_replace = True
+                    in_search = False
+                    current_replace = []
+                    continue
+                
+                # Handle code block markers
+                if line.strip().startswith("```"):
+                    in_code_block = not in_code_block
+                    continue
+                
+                # Collect search pattern
+                if in_search and not line.strip().startswith("```"):
+                    current_search.append(line)
+                
+                # Collect replace pattern
+                if in_replace and not line.strip().startswith("```"):
+                    current_replace.append(line)
             
-            # Add last file if exists
-            if current_file and current_content:
-                file_changes.append({
-                    "type": "modify",
-                    "path": current_file,
-                    "content": '\n'.join(current_content)
+            # Save last edit if exists
+            if current_file and current_search and current_replace:
+                file_edits.append({
+                    "file_path": current_file,
+                    "changes": [{
+                        "search": '\n'.join(current_search),
+                        "replace": '\n'.join(current_replace)
+                    }]
                 })
+        
+        # Apply file edits using the smart-edit endpoint
+        edit_results = []
+        for edit in file_edits:
+            try:
+                # Call the smart edit function internally
+                edit_result = await smart_edit_file({
+                    "project_name": project_name,
+                    "file_path": edit["file_path"],
+                    "changes": edit["changes"]
+                })
+                edit_results.append({
+                    "file": edit["file_path"],
+                    "success": edit_result.get("success", False),
+                    "message": edit_result.get("message", edit_result.get("error", "Unknown error"))
+                })
+            except Exception as e:
+                edit_results.append({
+                    "file": edit["file_path"],
+                    "success": False,
+                    "message": str(e)
+                })
+        
+        # Build response message
+        response_message = ai_response
+        if edit_results:
+            response_message += "\n\n**Changes Applied:**\n"
+            for result in edit_results:
+                status = "✅" if result["success"] else "❌"
+                response_message += f"\n{status} {result['file']}: {result['message']}"
         
         return {
             "success": True,
-            "response": ai_response,
-            "file_changes": file_changes,
+            "response": response_message,
+            "file_edits": edit_results,
             "actions": []
         }
         
@@ -1473,6 +1572,99 @@ async def create_file_endpoint(request: dict = Body(...)):
             f.write(content)
         
         return {"success": True, "message": f"File created: {file_path}"}
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+# --- Smart File Edit Endpoint (For AI-Assisted Changes) ---
+@app.post("/api/smart-edit-file")
+async def smart_edit_file(request: dict = Body(...)):
+    """
+    Intelligently edit a file by making targeted changes instead of replacing the whole file.
+    Uses search/replace patterns to modify specific sections.
+    """
+    try:
+        project_name = request.get("project_name")
+        file_path = request.get("file_path")
+        changes = request.get("changes", [])  # List of {search: str, replace: str} objects
+        
+        if not project_name or not file_path:
+            return {"success": False, "error": "Missing project_name or file_path"}
+        
+        if not changes:
+            return {"success": False, "error": "No changes specified"}
+        
+        project_slug = project_name.lower().replace(" ", "-")
+        projects_dir = Path("generated_projects")
+        project_path = projects_dir / project_slug
+        
+        if not project_path.exists():
+            return {"success": False, "error": "Project not found"}
+        
+        full_file_path = project_path / file_path.lstrip('/')
+        
+        # Security check
+        try:
+            full_file_path.resolve().relative_to(project_path.resolve())
+        except ValueError:
+            return {"success": False, "error": "Invalid file path"}
+        
+        if not full_file_path.exists():
+            return {"success": False, "error": "File not found"}
+        
+        # Read current file content
+        with open(full_file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        original_content = content
+        changes_applied = []
+        
+        # Apply each change
+        for idx, change in enumerate(changes):
+            search_pattern = change.get("search", "")
+            replace_with = change.get("replace", "")
+            
+            if not search_pattern:
+                continue
+            
+            # Check if pattern exists
+            if search_pattern in content:
+                content = content.replace(search_pattern, replace_with, 1)  # Replace only first occurrence
+                changes_applied.append({
+                    "index": idx,
+                    "search": search_pattern[:100] + "..." if len(search_pattern) > 100 else search_pattern,
+                    "status": "applied"
+                })
+            else:
+                changes_applied.append({
+                    "index": idx,
+                    "search": search_pattern[:100] + "..." if len(search_pattern) > 100 else search_pattern,
+                    "status": "pattern_not_found"
+                })
+        
+        # Only write if changes were actually applied
+        if content != original_content:
+            with open(full_file_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            
+            # Notify via WebSocket
+            await manager.send_to_project(project_name, {
+                "type": "file_changed",
+                "file_path": file_path,
+                "message": f"Smart edit applied to {file_path}"
+            })
+            
+            return {
+                "success": True,
+                "message": f"Applied {len([c for c in changes_applied if c['status'] == 'applied'])} changes to {file_path}",
+                "changes_applied": changes_applied
+            }
+        else:
+            return {
+                "success": False,
+                "error": "No changes could be applied - patterns not found",
+                "changes_applied": changes_applied
+            }
         
     except Exception as e:
         return {"success": False, "error": str(e)}

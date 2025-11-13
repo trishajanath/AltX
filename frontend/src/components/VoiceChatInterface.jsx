@@ -68,24 +68,37 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
   const recognitionInstanceIdRef = useRef(0);
   const lastMessageContentRef = useRef('');
 
-  // Initialize with greeting
+  // Initialize with AI welcome message
   useEffect(() => {
-    const greeting = {
+    // Start with AI welcome message
+    setConversation([{
       type: 'ai',
-      content: "Hello! I'm your coding buddy and I'm very excited to help you build something. What idea do you have in mind?",
+      content: 'Hi! What would you like to build today?',
+      timestamp: new Date()
+    }]);
+  }, []); // Empty dependency array to run only once
+
+  // Suggestion chips for initial conversation
+  const suggestionChips = [
+    { icon: '🌐', text: 'Create a portfolio website', prompt: 'I want to create a modern portfolio website to showcase my work' },
+    { icon: '🛒', text: 'Build an e-commerce site', prompt: 'Help me build an e-commerce website with a shopping cart' },
+    { icon: '📱', text: 'Make a landing page', prompt: 'Create a professional landing page for my product' },
+    { icon: '✨', text: 'Design a blog platform', prompt: 'I need a blog platform with post management' }
+  ];
+
+  const handleSuggestionClick = (prompt) => {
+    // Add user message to conversation
+    const userMessage = {
+      type: 'user',
+      content: prompt,
       timestamp: new Date()
     };
-    setConversation([greeting]);
     
-    // Speak the greeting only once with proper language
-    const timer = setTimeout(() => {
-      if (!isMuted) {
-        speakText(greeting.content, 'en-US');
-      }
-    }, 1500); // Longer delay to ensure TTS settings are loaded
+    setConversation(prev => [...prev, userMessage]);
     
-    return () => clearTimeout(timer);
-  }, []); // Empty dependency array to run only once
+    // Send to AI
+    handleUserInput(prompt);
+  };
 
   // Auto-scroll to latest message
   useEffect(() => {
@@ -1302,15 +1315,15 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
         
         testRecognition.onresult = (event) => {
           const transcript = event.results[0][0].transcript;
-          addMessage('system', `✅ Microphone test successful! I heard: "${transcript}"`);
+          addMessage('system', `Microphone test successful! I heard: "${transcript}"`);
           stream.getTracks().forEach(track => track.stop());
         };
         
         testRecognition.onerror = (event) => {
           if (event.error === 'network') {
-            addMessage('system', `❌ Web Speech API network error. This is a Chrome/Google service issue. Solution: Use manual recording (click orb) or try Firefox browser.`);
+            addMessage('system', `Web Speech API network error. This is a Chrome/Google service issue. Solution: Use manual recording (click orb) or try Firefox browser.`);
           } else {
-            addMessage('system', `❌ Speech recognition test failed: ${event.error}`);
+            addMessage('system', `Speech recognition test failed: ${event.error}`);
           }
           stream.getTracks().forEach(track => track.stop());
         };
@@ -1330,13 +1343,13 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
         }, 10000);
         
       } else {
-        addMessage('system', '⚠️ Speech recognition not supported in this browser');
+        addMessage('system', 'Speech recognition not supported in this browser');
         stream.getTracks().forEach(track => track.stop());
       }
       
     } catch (error) {
       console.error('Microphone test failed:', error);
-      addMessage('system', `❌ Microphone test failed: ${error.message}`);
+      addMessage('system', `Microphone test failed: ${error.message}`);
     }
   };
 
@@ -1362,181 +1375,204 @@ return (
 
         {/* --- Desktop App Container --- */}
         <div className="desktop-app-container">
-          {/* Left Sidebar */}
-          <div className="app-sidebar">
-            <div className="sidebar-header">
-              <div className="app-logo">Xverta</div>
-            </div>
-            
-            <button className="new-chat-btn" onClick={() => setConversation([])}>
-              <MessageCircle size={18} />
-              New Chat
-            </button>
-            
-            <div className="sidebar-nav">
-              <div className={`nav-item ${currentMode === 'voice' ? 'active' : ''}`} onClick={() => setCurrentMode('voice')}>
-                <BrainCircuit size={16} />
-                Voice Chat
-              </div>
-              <div className={`nav-item ${currentMode === 'scan_website' ? 'active' : ''}`} onClick={() => setCurrentMode('scan_website')}>
-                <Scan size={16} />
-                Scan Website
-              </div>
-              <div className={`nav-item ${currentMode === 'scan_repo' ? 'active' : ''}`} onClick={() => setCurrentMode('scan_repo')}>
-                <Database size={16} />
-                Scan Repository
-              </div>
-              <div className={`nav-item ${currentMode === 'deploy' ? 'active' : ''}`} onClick={() => setCurrentMode('deploy')}>
-                <UploadCloud size={16} />
-                Deploy Project
-              </div>
-              <div className={`nav-item ${showTTSSettings ? 'active' : ''}`} onClick={() => setShowTTSSettings(!showTTSSettings)}>
-                <Settings size={16} />
-                Voice Settings
-              </div>
-              <div className={`nav-item ${isMuted ? 'active' : ''}`} onClick={() => setIsMuted(!isMuted)}>
-                {isMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}
-                {isMuted ? 'Audio Muted' : 'Audio On'}
-              </div>
-            </div>
-          </div>
-          
-          {/* Main Content Area */}
+          {/* Main Content Area (Full Width) */}
           <div className="main-content-area">
-            {/* Chat Area (Center) */}
-            <div className="chat-area">
-              <div className="magical-chat-container">
-                {/* Chat Wrapper - Contains messages and input as one unit */}
-                <div className="chat-wrapper">
-              {/* Chat Messages (Top, grows) */}
-              <div className="chat-messages-section">
-                <div ref={chatContainerRef} className="conversation-messages">
-                  {conversation.map((message, index) => (
-                    <div key={index} className={`message ${message.type} fade-in`}>
-                      {message.type === 'ai' && <div className="ai-avatar"></div>}
-                      <div className={`message-bubble`}>
-                        <div className="whitespace-pre-wrap">{message.content}</div>
-                        <div className="message-time">
-                          {message.timestamp.toLocaleTimeString([], {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
+            {/* NEW: Hero/Chat Block - Top Section */}
+            <div className="hero-chat-block">
+              {/* Hero Heading */}
+              <div className="hero-heading-section">
+                <h1 className="hero-main-title">Build applications with XVERTA</h1>
+                <p className="hero-subtitle">Create, iterate, and launch your next application by talking with XVERTA.</p>
+              </div>
+
+              <div className="centered-content-block">
+                {/* NEW: Top Chatbox Component */}
+                <div className="top-chatbox-component">
+                {/* Chat Messages Display Area */}
+                <div className="chatbox-messages-area">
+                  <div ref={chatContainerRef} className="conversation-messages">
+                    {conversation.map((message, index) => (
+                      <div key={index} className={`message ${message.type} fade-in`}>
+                        {message.type === 'ai' && <div className="ai-avatar"></div>}
+                        <div className={`message-bubble`}>
+                          <div className="whitespace-pre-wrap">{message.content}</div>
+                          <div className="message-time">
+                            {message.timestamp.toLocaleTimeString([], {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
 
-                  {isLoading && (
-                    <div className="loading-indicator fade-in">
-                      <Loader size={16} className="animate-spin" />
-                      <span>AI is thinking...</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-              
-              {/* Hero Input Area (Bottom, fixed) */}
-              <div className="hero-input-section">
-            {/* Main Input Controls */}
-            <div className="main-input-controls">
-              {/* Voice Orb (only show in voice mode) */}
-              {currentMode === 'voice' && (
-                <div
-                  className={`hero-voice-orb ${
-                    isRecording || isListening ? 'recording' : ''
-                  }`}
-                  onClick={
-                    isRecording ? stopRecording : startRecording
-                  }
-                  title={isRecording ? 'Stop Recording' : 'Start Recording'}
-                >
-                  {isRecording ? <Square size={24} /> : <Mic size={24} />}
-                </div>
-              )}
-
-              {/* Text Input (adapts to mode) */}
-              <div className="hero-text-input-container">
-                <input
-                  type="text"
-                  value={textInput}
-                  onChange={(e) => setTextInput(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && sendTextMessage()}
-                  placeholder={getPlaceholder()}
-                  className="hero-text-input"
-                  disabled={isLoading}
-                  style={{ paddingLeft: currentMode !== 'voice' ? '1.5rem' : '' }}
-                />
-                <button
-                  onClick={sendTextMessage}
-                  disabled={!textInput.trim() || isLoading}
-                  className="hero-send-btn"
-                  title="Send Message"
-                >
-                  <ArrowRight size={20} />
-                </button>
-              </div>
-            </div>
-                </div>
-              </div>
-            </div>
-            </div>
-
-            {/* Context Sidebar (Right) */}
-            <div className="context-sidebar">
-              <div className="context-section">
-                <h3>Recent Projects ({projectHistory?.length || 0})</h3>
-                {isLoadingHistory ? (
-                  <div className="context-item">
-                    <span>Loading projects...</span>
-                  </div>
-                ) : historyError ? (
-                  <div className="context-item">
-                    <span>Error: {historyError}</span>
-                  </div>
-                ) : !projectHistory || projectHistory.length === 0 ? (
-                  <div className="context-item">
-                    <span>No recent projects found</span>
-                  </div>
-                ) : (
-                  projectHistory.slice(0, 5).map((project, index) => (
-                    <div key={project.slug || index} className="recent-project">
-                      <div className="project-icon">
-                        {project.tech_stack?.includes('React') ? 'R' : 
-                         project.tech_stack?.includes('FastAPI') ? 'F' : 
-                         'P'}
-                      </div>
-                      <div className="project-details">
-                        <div className="project-name">{project.name || 'Unnamed Project'}</div>
-                        <div className="project-info">
-                          {project.created_date ? formatTimeAgo(new Date(project.created_date * 1000).toISOString()) : 'Unknown date'}
-                        </div>
-                        <div className="project-actions">
-                          <button 
-                            className="action-button edit-button"
-                            onClick={() => handleEditProject(project)}
-                            title="Edit Project"
+                    {/* Show suggestion chips only when conversation has just the welcome message */}
+                    {conversation.length === 1 && conversation[0].type === 'ai' && (
+                      <div className="suggestion-chips-container fade-in">
+                        {suggestionChips.map((chip, index) => (
+                          <button
+                            key={index}
+                            className="suggestion-chip"
+                            onClick={() => handleSuggestionClick(chip.prompt)}
+                            disabled={isLoading}
                           >
-                            Edit
+                            <span className="chip-text">{chip.text}</span>
                           </button>
-                          <button 
-                            className="action-button preview-button"
-                            onClick={() => handlePreviewProject(project)}
-                            title="Preview Project"
-                          >
-                            Preview
-                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {isLoading && (
+                      <div className="loading-indicator fade-in">
+                        <Loader size={16} className="animate-spin" />
+                        <span>AI is thinking...</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Chat Input Bar */}
+                <div className="chatbox-input-bar">
+                  <div className="main-input-controls">
+                    {/* Mic Button (left side - always visible) */}
+                    <button
+                      className={`unified-mic-btn ${
+                        isRecording || isListening ? 'recording' : ''
+                      }`}
+                      onClick={isRecording ? stopRecording : startRecording}
+                      title={isRecording ? 'Stop Recording' : 'Start Recording'}
+                    >
+                      {isRecording ? <Square size={18} /> : <Mic size={18} />}
+                    </button>
+
+                    {/* Text Input (adapts to mode) */}
+                    <div className="hero-text-input-container">
+                      <input
+                        type="text"
+                        value={textInput}
+                        onChange={(e) => setTextInput(e.target.value)}
+                        onKeyPress={(e) => e.key === 'Enter' && sendTextMessage()}
+                        placeholder={getPlaceholder()}
+                        className="hero-text-input"
+                        disabled={isLoading}
+                      />
+                      <button
+                        onClick={sendTextMessage}
+                        disabled={!textInput.trim() || isLoading}
+                        className="hero-send-btn"
+                        title="Send Message"
+                      >
+                        <ArrowRight size={16} />
+                      </button>
+                    </div>
+
+                    {/* Settings and Audio Controls */}
+                    <div className="input-side-controls">
+                      <button
+                        className={`side-control-btn ${showTTSSettings ? 'active' : ''}`}
+                        onClick={() => setShowTTSSettings(!showTTSSettings)}
+                        title="Voice Settings"
+                      >
+                        <Settings size={18} />
+                      </button>
+                      <button
+                        className={`side-control-btn ${isMuted ? 'active' : ''}`}
+                        onClick={() => setIsMuted(!isMuted)}
+                        title={isMuted ? 'Unmute Audio' : 'Mute Audio'}
+                      >
+                        {isMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              </div>
+            </div>
+
+            {/* NEW: Project Block - Below Hero Section */}
+            <div className="project-block">
+              <div className="project-block-inner">
+                <div className="below-chatbox-content">
+                {projectHistory && projectHistory.length > 0 && (
+                  <div className="jump-back-in-section">
+                    {/* Interactive Header Bar */}
+                    <div className="jump-back-in-header">
+                      <h2 className="empty-state-section-title">Jump Right Back In</h2>
+                      
+                      <div className="jump-back-in-controls">
+                        {/* Search Bar */}
+                        <div className="project-search-container">
+                          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="search-icon">
+                            <circle cx="7" cy="7" r="5" stroke="currentColor" strokeWidth="1.5"/>
+                            <path d="M11 11L14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                          </svg>
+                          <input 
+                            type="text" 
+                            placeholder="Search projects..."
+                            className="project-search-input"
+                          />
                         </div>
+                        
+                        {/* Filter/Sort Dropdown */}
+                        <select className="project-sort-select">
+                          <option value="recent">Last edited</option>
+                          <option value="name">Name (A-Z)</option>
+                          <option value="oldest">Oldest first</option>
+                        </select>
+                        
+                        {/* View All Button */}
+                        <button className="view-all-btn">
+                          View All
+                          <ArrowRight size={14} />
+                        </button>
                       </div>
                     </div>
-                  ))
+                    
+                    <div className="project-cards-grid">
+                      {projectHistory.slice(0, 6).map((project, index) => (
+                        <div key={project.slug || index} className="project-card">
+                          <div className="project-card-header">
+                            <div className="project-card-info">
+                              <h4 className="project-card-name">{project.name || 'Unnamed Project'}</h4>
+                              <p className="project-card-meta">
+                                Edited {project.created_date ? formatTimeAgo(new Date(project.created_date * 1000).toISOString()) : 'recently'}
+                              </p>
+                            </div>
+                          </div>
+                          
+                          {/* Live Preview Container */}
+                          <div className="project-card-preview">
+                            <iframe
+                              src={`/api/sandbox-preview/${project.slug}`}
+                              title={`Preview of ${project.name}`}
+                              className="project-preview-iframe"
+                              sandbox="allow-scripts allow-same-origin"
+                              scrolling="no"
+                            />
+                          </div>
+                          
+                          <div className="project-card-actions">
+                            <button 
+                              className="project-card-btn primary"
+                              onClick={() => handleEditProject(project)}
+                            >
+                              Open Project
+                            </button>
+                            <button 
+                              className="project-card-btn"
+                              onClick={() => handlePreviewProject(project)}
+                            >
+                              Preview
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 )}
-              </div>
 
-              <div className="context-section">
-                <h3>AI Assistant</h3>
-                <div className="context-item">
-                  <span>Ready to help</span>
-                </div>
+
+              </div>
               </div>
             </div>
           </div>

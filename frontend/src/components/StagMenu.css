@@ -1,25 +1,35 @@
 .staggered-menu-wrapper {
   position: relative;
-  width: 100%;
+  width: 0;
   height: 100%;
   z-index: 40;
+  transition: width 0.3s ease;
+}
+
+.staggered-menu-wrapper[data-open] {
+  width: 320px;
 }
 
 .staggered-menu-wrapper.fixed-wrapper {
   position: fixed;
   top: 0;
   left: 0;
-  width: 100vw;
+  width: 0;
   height: 100vh;
   z-index: 40;
   overflow: hidden;
+  transition: width 0.3s ease;
+}
+
+.staggered-menu-wrapper.fixed-wrapper[data-open] {
+  width: 320px;
 }
 
 .staggered-menu-header {
   position: absolute;
   top: 0;
   left: 0;
-  width: 100%;
+  width: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -28,6 +38,11 @@
   pointer-events: none;
   z-index: 20;
   backdrop-filter: blur(5px);
+  overflow: visible;
+}
+
+.staggered-menu-wrapper[data-open] .staggered-menu-header {
+  width: 100%;
 }
 
 .staggered-menu-header > * {
@@ -55,31 +70,34 @@
 }
 
 .sm-toggle {
-  position: relative;
+  position: fixed;
+  top: 20px;
+  left: 200px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  background: rgba(255, 255, 255, 0.9);
-  border: 2px solid rgba(255, 255, 255, 1);
+  background: #000000;
+  border: 2px solid rgba(255, 255, 255, 0.2);
   border-radius: 8px;
   padding: 10px 14px;
   cursor: pointer;
-  color: #000000;
+  color: #FFFFFF;
   font-weight: 600;
   line-height: 1;
   overflow: visible;
   pointer-events: auto;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
   min-width: 50px;
   min-height: 40px;
+  z-index: 9999;
 }
 
 .sm-toggle:hover {
-  background: rgba(255, 255, 255, 1);
-  border-color: rgba(200, 200, 200, 1);
+  background: #1A1A1A;
+  border-color: rgba(255, 255, 255, 0.3);
   transform: scale(1.05);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
 }
 
 .sm-toggle:focus-visible {
@@ -175,7 +193,7 @@
   top: 0;
   right: 0;
   bottom: 0;
-  width: clamp(260px, 38vw, 420px);
+  width: clamp(220px, 30vw, 320px);
   pointer-events: none;
   z-index: 5;
 }
