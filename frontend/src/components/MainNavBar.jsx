@@ -122,6 +122,14 @@ const MainNavBar = ({ user, isAuthenticated, onLogout }) => {
     whiteSpace: 'nowrap'
   };
 
+  const avatarStyle = {
+    width: '24px',
+    height: '24px',
+    borderRadius: '50%',
+    objectFit: 'cover',
+    border: '1px solid var(--border-color)'
+  };
+
   const dropdownStyle = {
     position: 'absolute',
     top: 'calc(100% + 0.5rem)',
@@ -213,16 +221,33 @@ const MainNavBar = ({ user, isAuthenticated, onLogout }) => {
               onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
               style={profileButtonStyle}
             >
-              <User size={16} />
-              {user?.name || 'User'}
+              {user?.avatar ? (
+                <img src={user.avatar} alt="Profile" style={avatarStyle} />
+              ) : (
+                <User size={16} />
+              )}
+              {user?.username || user?.name || 'User'}
               <ChevronDown size={16} />
             </button>
 
             {isProfileMenuOpen && (
               <div style={dropdownStyle}>
                 <div style={userInfoStyle}>
-                  <div style={userNameStyle}>{user?.name}</div>
-                  <div style={userEmailStyle}>{user?.email}</div>
+                  {user?.avatar && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
+                      <img src={user.avatar} alt="Profile" style={{ width: '40px', height: '40px', borderRadius: '50%', objectFit: 'cover' }} />
+                      <div>
+                        <div style={userNameStyle}>{user?.username || user?.name || 'User'}</div>
+                        <div style={userEmailStyle}>{user?.email}</div>
+                      </div>
+                    </div>
+                  )}
+                  {!user?.avatar && (
+                    <>
+                      <div style={userNameStyle}>{user?.username || user?.name || 'User'}</div>
+                      <div style={userEmailStyle}>{user?.email}</div>
+                    </>
+                  )}
                 </div>
                 <button
                   onClick={() => {

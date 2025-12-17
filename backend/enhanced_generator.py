@@ -165,7 +165,7 @@ export default defineConfig({
     port: 3000,
     proxy: {
       '/api': {
-        target: 'http://localhost:8001',
+        target: 'https://api.xverta.com',
         changeOrigin: true,
       }
     }
@@ -400,9 +400,9 @@ websockets==11.0.3
    ```
 
 The application will be available at:
-- **Frontend**: http://localhost:3000
-- **Backend API**: http://localhost:8001
-- **API Documentation**: http://localhost:8001/docs
+- **Frontend**: https://xverta.com
+- **Backend API**: https://api.xverta.com
+- **API Documentation**: https://api.xverta.com/docs
 
 ## Features
 
@@ -1129,7 +1129,7 @@ app = FastAPI(
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=["https://xverta.com", "https://www.xverta.com"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

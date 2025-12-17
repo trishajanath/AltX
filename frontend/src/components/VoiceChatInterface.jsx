@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Mic, MicOff, Scan, Database, UploadCloud, Volume2, VolumeX, MessageCircle, Loader, Play, Square, Settings, BrainCircuit, ArrowRight, X } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
+import { apiUrl } from '../config/api';
 import PageWrapper from './PageWrapper';
 import usePreventZoom from './usePreventZoom';
 import {
@@ -12,8 +15,10 @@ import {
   MenubarTrigger,
 } from "./ui/buttonswitch";
 import './voice.css';
-const VoiceChatInterface = ({ onProjectGenerated }) => {
+const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
   usePreventZoom();
+  const navigate = useNavigate();
+  const { authenticatedFetch, login, token } = useAuth();
   const [isRecording, setIsRecording] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -25,6 +30,18 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
   const [showHistory, setShowHistory] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [historyError, setHistoryError] = useState(null);
+  const [demoProject, setDemoProject] = useState(null);
+  const [demoStage, setDemoStage] = useState('initial'); // 'initial', 'awaiting_confirmation', 'confirmed'
+  const [demoPendingProject, setDemoPendingProject] = useState(null);
+  const [demoSessionId, setDemoSessionId] = useState(() => {
+    // Get or create session ID
+    let sessionId = localStorage.getItem('demoSessionId');
+    if (!sessionId) {
+      sessionId = `demo-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      localStorage.setItem('demoSessionId', sessionId);
+    }
+    return sessionId;
+  });
   
   // Format time ago function
   const formatTimeAgo = (dateString) => {
@@ -56,6 +73,7 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const chatContainerRef = useRef(null);
+  const chatContentRef = useRef(null);
   const speechSynthRef = useRef(null);
   const currentAudioRef = useRef(null);
   const recognitionRef = useRef(null);
@@ -67,16 +85,38 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
   const errorProcessingRef = useRef(false);
   const recognitionInstanceIdRef = useRef(0);
   const lastMessageContentRef = useRef('');
+  const prevConversationLengthRef = useRef(0);
+  const userAtBottomRef = useRef(true); // Track if user is at bottom (ref-only, no re-renders)
 
   // Initialize with AI welcome message
   useEffect(() => {
+    console.log('🔍 VoiceChatInterface mounted');
+    
     // Start with AI welcome message
+    const welcomeMessage = 'Hi! What would you like to build today?';
     setConversation([{
       type: 'ai',
-      content: 'Hi! What would you like to build today?',
+      content: welcomeMessage,
       timestamp: new Date()
     }]);
+    prevConversationLengthRef.current = 1; // Set initial length to prevent auto-scroll on mount
   }, []); // Empty dependency array to run only once
+  
+  // Separate effect to speak welcome message in demo mode
+  useEffect(() => {
+    if (isDemo && conversation.length === 1 && conversation[0].content === 'Hi! What would you like to build today?') {
+      const timer = setTimeout(() => {
+        if (!isMuted) {
+          const utterance = new SpeechSynthesisUtterance('Hi! What would you like to build today?');
+          utterance.rate = 1.8;
+          utterance.pitch = 1.0;
+          utterance.volume = 1.0;
+          window.speechSynthesis.speak(utterance);
+        }
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [conversation, isDemo, isMuted]);
 
   // Suggestion chips for initial conversation
   const suggestionChips = [
@@ -96,16 +136,191 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
     
     setConversation(prev => [...prev, userMessage]);
     
-    // Send to AI
-    handleUserInput(prompt);
+    // Check if in demo mode
+    if (isDemo) {
+      // Demo flow: Show thinking message instantly (no delays)
+      const thinkingMessage = {
+        type: 'ai',
+        content: "Great! I'm designing that project for you right now...",
+        timestamp: new Date()
+      };
+      
+      setConversation(prev => [...prev, thinkingMessage]);
+      
+      // Speak the thinking message
+      if (!isMuted) {
+        speakText(thinkingMessage.content);
+      }
+      
+      // Extract project name from the prompt
+      let projectName = 'My New Website';
+      if (prompt.includes('portfolio')) {
+        projectName = 'Portfolio Site';
+      } else if (prompt.includes('e-commerce') || prompt.includes('shopping')) {
+        projectName = 'E-Commerce Store';
+      } else if (prompt.includes('landing')) {
+        projectName = 'Landing Page';
+      } else if (prompt.includes('blog')) {
+        projectName = 'Blog Platform';
+      }
+      
+      // Store pending project details
+      const mockProject = {
+        name: projectName,
+        slug: projectName.toLowerCase().replace(/\s+/g, '-'),
+        created_date: Math.floor(Date.now() / 1000),
+        type: 'demo',
+        isDemo: true
+      };
+      setDemoPendingProject(mockProject);
+      
+      // After a short delay, show the confirmation message
+      setTimeout(() => {
+        const confirmationMessage = {
+          type: 'ai',
+          content: `Okay, I've generated the first draft of your project. Would you like me to create this project for you?`,
+          timestamp: new Date(),
+          isConfirmation: true
+        };
+        setConversation(prev => [...prev, confirmationMessage]);
+        setDemoStage('awaiting_confirmation');
+        
+        // Speak the confirmation message
+        if (!isMuted) {
+          speakText(confirmationMessage.content);
+        }
+      }, 800);
+    } else {
+      // Normal flow: Send to AI
+      if (typeof handleUserInput === 'function') {
+        handleUserInput(prompt);
+      } else {
+        // Fallback if handleUserInput doesn't exist
+        sendTextMessageWithContent(prompt);
+      }
+    }
+  };
+  
+  const handleDemoConfirmation = async (confirmed) => {
+    // Add user's response to conversation
+    const userResponse = {
+      type: 'user',
+      content: confirmed ? 'Yes' : 'No',
+      timestamp: new Date()
+    };
+    setConversation(prev => [...prev, userResponse]);
+    
+    if (confirmed) {
+      // User said yes - show conversion message
+      setDemoStage('confirmed');
+      setDemoProject(demoPendingProject);
+      
+      // Save project details to S3 via API for post-login/signup
+      if (demoPendingProject) {
+        try {
+          await fetch(apiUrl('api/demo/save-pending-project'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              project: demoPendingProject,
+              session_id: demoSessionId
+            })
+          });
+          console.log('✅ Pending demo project saved to S3');
+        } catch (error) {
+          console.error('❌ Failed to save pending project to S3:', error);
+        }
+      }
+      
+      const conversionMessage = {
+        type: 'ai',
+        content: 'DEMO_CONVERSION_MESSAGE',
+        timestamp: new Date(),
+        isConversion: true
+      };
+      setConversation(prev => [...prev, conversionMessage]);
+      
+      // Speak the conversion message
+      if (!isMuted) {
+        const spokenMessage = "Okay, I've generated the first draft of your project. To view the live preview, save your project, and start editing, please create a free account.";
+        speakText(spokenMessage);
+      }
+    } else {
+      // User said no - reset demo
+      setDemoStage('initial');
+      setDemoPendingProject(null);
+      
+      const resetMessage = {
+        type: 'ai',
+        content: 'No problem! What else would you like to build?',
+        timestamp: new Date()
+      };
+      setConversation(prev => [...prev, resetMessage]);
+      
+      // Speak the reset message
+      if (!isMuted) {
+        speakText(resetMessage.content);
+      }
+    }
+  };
+  
+  const sendTextMessageWithContent = (content) => {
+    if (!content.trim() || isLoading) return;
+    
+    addMessage('user', content);
+    
+    switch (currentMode) {
+      case 'voice':
+        sendToAI(content);
+        break;
+      case 'scan_website':
+        sendToAI(`Scanning website: ${content}`);
+        break;
+      case 'scan_repo':
+        sendToAI(`Scanning repository: ${content}`);
+        break;
+      case 'deploy':
+        sendToAI(`Starting deployment for: ${content}`);
+        break;
+      default:
+        sendToAI(content);
+    }
   };
 
-  // Auto-scroll to latest message
+  // Auto-scroll using ResizeObserver (runs once on mount)
   useEffect(() => {
-    if (chatContainerRef.current) {
-      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
-    }
-  }, [conversation]);
+    const container = chatContainerRef.current;
+    const content = chatContentRef.current;
+
+    if (!container || !content) return;
+
+    // Create an observer that fires when the content's size changes
+    const observer = new ResizeObserver(() => {
+      // Only auto-scroll if user is at bottom
+      if (userAtBottomRef.current) {
+        container.scrollTop = container.scrollHeight;
+      }
+    });
+
+    // Start observing the inner content div
+    observer.observe(content);
+
+    // Clean up the observer on unmount
+    return () => {
+      observer.disconnect();
+    };
+  }, []); // Empty array runs this only once
+
+  // Detect when user scrolls manually (NO STATE - refs only to prevent re-renders)
+  const handleScroll = () => {
+    const el = chatContainerRef.current;
+    if (!el) return;
+
+    const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
+    
+    // Update ref only (no state update = no re-render = no scroll jump)
+    userAtBottomRef.current = isAtBottom;
+  };
 
   // Cleanup effect: Stop all audio when component unmounts (navigation away)
   useEffect(() => {
@@ -448,10 +663,33 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
 
   // Process real-time message with AI
   const processRealTimeMessage = async (message) => {
+    // In demo mode, provide instant canned response
+    if (isDemo) {
+      const demoResponses = [
+        "That sounds like a great project! Let me help you build that.",
+        "Perfect! I can create that for you right away.",
+        "Excellent idea! I'll start working on that now.",
+        "Great choice! Let me design that for you."
+      ];
+      
+      const aiMessage = {
+        type: 'ai',
+        content: demoResponses[Math.floor(Math.random() * demoResponses.length)],
+        timestamp: new Date()
+      };
+      setConversation(prev => [...prev, aiMessage]);
+      
+      // Fast speech
+      if (!isMuted) {
+        speakText(aiMessage.content);
+      }
+      return;
+    }
+    
     setIsLoading(true);
     
     try {
-      const response = await fetch('/api/chat', {
+      const response = await fetch(apiUrl('api/chat'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -474,8 +712,8 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
       };
       setConversation(prev => [...prev, aiMessage]);
       
-      // Handle project generation
-      if (result.should_generate) {
+      // Handle project generation (skip in demo mode)
+      if (result.should_generate && !isDemo) {
         await handleProjectGeneration(result.project_spec);
       }
       
@@ -516,7 +754,7 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
       setIsLoadingHistory(true);
       setHistoryError(null);
       
-      const response = await fetch('http://localhost:8000/api/project-history');
+      const response = await authenticatedFetch('https://api.xverta.com/api/project-history');
       
       console.log('Response status:', response.status);
       console.log('Response headers:', Object.fromEntries(response.headers.entries()));
@@ -560,7 +798,7 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
 
   // Handle preview project - open in new tab
   const handlePreviewProject = (project) => {
-    const previewUrl = project.preview_url || `http://localhost:8000/api/sandbox-preview/${project.slug}`;
+    const previewUrl = project.preview_url || `https://api.xverta.com/api/sandbox-preview/${project.slug}`;
     window.open(previewUrl, '_blank', 'noopener,noreferrer');
   };
 
@@ -651,6 +889,93 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
 
   // Process audio input and send to backend
   const processAudioInput = async (audioBlob) => {
+    // In demo mode, simulate quick transcription with canned responses
+    if (isDemo) {
+      // If already awaiting confirmation, handle yes/no responses
+      if (demoStage === 'awaiting_confirmation') {
+        const responses = ['Yes', 'Sure', 'Okay', 'Yes please'];
+        const transcript = responses[Math.floor(Math.random() * responses.length)];
+        
+        handleDemoConfirmation(true);
+        return;
+      }
+      
+      const demoTranscripts = [
+        "I want to build a portfolio website",
+        "Create an e-commerce site for me",
+        "Help me make a landing page",
+        "I need a blog platform"
+      ];
+      
+      const transcript = demoTranscripts[Math.floor(Math.random() * demoTranscripts.length)];
+      
+      // Add user message
+      const userMessage = {
+        type: 'user',
+        content: transcript,
+        timestamp: new Date()
+      };
+      setConversation(prev => [...prev, userMessage]);
+      
+      // Quick AI response
+      const aiResponse = "Great! I'm designing that project for you right now...";
+      const aiMessage = {
+        type: 'ai',
+        content: aiResponse,
+        timestamp: new Date()
+      };
+      
+      setTimeout(() => {
+        setConversation(prev => [...prev, aiMessage]);
+        
+        // Fast speech
+        if (!isMuted) {
+          speakText(aiResponse);
+        }
+        
+        // Extract project name
+        let projectName = 'My New Website';
+        if (transcript.includes('portfolio')) {
+          projectName = 'Portfolio Site';
+        } else if (transcript.includes('e-commerce') || transcript.includes('shopping')) {
+          projectName = 'E-Commerce Store';
+        } else if (transcript.includes('landing')) {
+          projectName = 'Landing Page';
+        } else if (transcript.includes('blog')) {
+          projectName = 'Blog Platform';
+        }
+        
+        // Store pending project
+        const mockProject = {
+          name: projectName,
+          slug: projectName.toLowerCase().replace(/\s+/g, '-'),
+          created_date: Math.floor(Date.now() / 1000),
+          type: 'demo',
+          isDemo: true
+        };
+        setDemoPendingProject(mockProject);
+        
+        // Show confirmation message
+        setTimeout(() => {
+          const confirmationMessage = {
+            type: 'ai',
+            content: `Okay, I've generated the first draft of your project. Would you like me to create this project for you?`,
+            timestamp: new Date(),
+            isConfirmation: true
+          };
+          setConversation(prev => [...prev, confirmationMessage]);
+          setDemoStage('awaiting_confirmation');
+          
+          // Speak the confirmation message
+          if (!isMuted) {
+            speakText(confirmationMessage.content);
+          }
+        }, 800);
+      }, 200);
+      
+      return;
+    }
+    
     setIsLoading(true);
     
     try {
@@ -658,7 +983,7 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
       const formData = new FormData();
       formData.append('audio', audioBlob, 'recording.webm');
       
-      const transcribeResponse = await fetch('/api/process-speech', {
+      const transcribeResponse = await fetch(apiUrl('api/process-speech'), {
         method: 'POST',
         body: formData
       });
@@ -675,7 +1000,7 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
         setConversation(prev => [...prev, userMessage]);
         
         // Step 2: Process with AI chat
-        const chatResponse = await fetch('/api/chat', {
+        const chatResponse = await fetch(apiUrl('api/chat'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
@@ -703,8 +1028,8 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
           setProjectSummary(chatResult.response);
         }
         
-        // Check if user confirmed and ready to generate
-        if (chatResult.should_generate) {
+        // Check if user confirmed and ready to generate (skip in demo mode)
+        if (chatResult.should_generate && !isDemo) {
           await handleProjectGeneration(chatResult.project_spec);
         }
         
@@ -755,10 +1080,15 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
 
   // Send message to AI assistant
   const sendToAI = async (message) => {
+    // Skip API call in demo mode
+    if (isDemo) {
+      return;
+    }
+    
     setIsLoading(true);
     
     try {
-      const response = await fetch('/api/chat', {
+      const response = await fetch(apiUrl('api/chat'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -783,8 +1113,8 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
         setProjectSummary(result.response);
       }
       
-      // Check if user confirmed and ready to generate
-      if (result.should_generate) {
+      // Check if user confirmed and ready to generate (skip in demo mode)
+      if (result.should_generate && !isDemo) {
         handleProjectGeneration(result.project_spec);
       }
       
@@ -803,60 +1133,32 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
 
   // Text-to-Speech using server-side TTS first, fallback to browser
   const speakText = async (text, language = 'en') => {
-    if (isMuted || !text || isPlaying) return; // Don't play if already playing
+    if (isMuted || !text) return;
     
-    // Stop any current audio
+    // Stop any current audio (new messages interrupt old ones)
     stopSpeaking();
     
+    // In demo mode, use fast browser TTS only
+    if (isDemo) {
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1.8; // 80% faster
+      utterance.pitch = 1.0;
+      utterance.volume = 1.0;
+      utterance.lang = language;
+      
+      utterance.onstart = () => setIsPlaying(true);
+      utterance.onend = () => setIsPlaying(false);
+      utterance.onerror = () => setIsPlaying(false);
+      
+      window.speechSynthesis.speak(utterance);
+      return;
+    }
+    
     try {
-      // Try enhanced Chatterbox TTS first
-      console.log('Attempting Chatterbox TTS...');
-      const chatterboxResponse = await fetch('/api/synthesize-chatterbox', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          text,
-          language
-        })
-      });
-      
-      if (chatterboxResponse.ok) {
-        console.log('Using Chatterbox TTS');
-        const audioBlob = await chatterboxResponse.blob();
-        const audioUrl = URL.createObjectURL(audioBlob);
-        const audio = new Audio(audioUrl);
-        
-        // Store reference to current audio
-        currentAudioRef.current = audio;
-        
-        // Check for watermark info
-        const watermarkScore = chatterboxResponse.headers.get('X-Watermark-Score');
-        const ttsEngine = chatterboxResponse.headers.get('X-TTS-Engine');
-        
-        if (watermarkScore) {
-          console.log(`Watermark detected: ${watermarkScore} (Engine: ${ttsEngine})`);
-        }
-        
-        setIsPlaying(true);
-        audio.onended = () => {
-          setIsPlaying(false);
-          currentAudioRef.current = null;
-          URL.revokeObjectURL(audioUrl); // Clean up URL
-        };
-        audio.onerror = () => {
-          setIsPlaying(false);
-          currentAudioRef.current = null;
-          URL.revokeObjectURL(audioUrl); // Clean up URL
-        };
-        
-        await audio.play();
-        return; // Success, exit early
-      }
-      
-      // Fallback to Google Cloud TTS
-      console.log('Warning: Chatterbox TTS unavailable, trying Google Cloud TTS...');
-      console.log('Using language:', language);
-      const response = await fetch('/api/synthesize-speech', {
+      // Use Google Cloud TTS (Chatterbox disabled due to errors)
+      console.log('Using Google Cloud TTS...');
+      console.log('Language:', language);
+      const response = await fetch(apiUrl('api/synthesize-speech'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -880,18 +1182,30 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
           currentAudioRef.current = null;
           URL.revokeObjectURL(audioUrl); // Clean up URL
         };
-        audio.onerror = () => {
+        audio.onerror = (e) => {
+          console.error('Google TTS audio playback error:', e);
           setIsPlaying(false);
           currentAudioRef.current = null;
-          URL.revokeObjectURL(audioUrl); // Clean up URL
+          URL.revokeObjectURL(audioUrl);
+          // Fallback to browser TTS on error
+          useBrowserTTS(text);
         };
         
-        await audio.play();
-      } else {
-        // Final fallback to browser speech synthesis
-        console.log('Warning: Server TTS unavailable, using browser TTS...');
-        useBrowserTTS(text);
+        try {
+          await audio.play();
+          return; // Success
+        } catch (playError) {
+          console.error('Failed to play Google TTS audio:', playError);
+          setIsPlaying(false);
+          currentAudioRef.current = null;
+          URL.revokeObjectURL(audioUrl);
+          // Fall through to browser TTS
+        }
       }
+      
+      // Final fallback to browser speech synthesis
+      console.log('Warning: Server TTS unavailable, using browser TTS...');
+      useBrowserTTS(text);
     } catch (error) {
       console.error('TTS error, using browser fallback:', error);
       useBrowserTTS(text);
@@ -899,22 +1213,45 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
   };
 
   const useBrowserTTS = (text) => {
-    // Cancel any ongoing speech
-    if (speechSynthRef.current) {
-      speechSynthesis.cancel();
-    }
-    
-    // Clean text for speech (remove markdown, special chars)
-    const cleanText = text
-      .replace(/[#*_`]/g, '')
-      .replace(/PROJECT SUMMARY:/g, 'Project Summary:')
-      .replace(/- /g, '. ');
+    try {
+      // Cancel any ongoing speech
+      if (speechSynthRef.current) {
+        speechSynthesis.cancel();
+      }
+      
+      // Clean text for speech (remove markdown, special chars)
+      const cleanText = text
+        .replace(/[#*_`]/g, '')
+        .replace(/PROJECT SUMMARY:/g, 'Project Summary:')
+        .replace(/- /g, '. ');
 
-    const utterance = new SpeechSynthesisUtterance(cleanText);
-    utterance.rate = 0.9;
-    utterance.pitch = 1;
-    utterance.volume = 0.8;
-    speechSynthesis.speak(utterance);
+      const utterance = new SpeechSynthesisUtterance(cleanText);
+      utterance.rate = 1.4;
+      utterance.pitch = 1;
+      utterance.volume = 0.8;
+      
+      // Set state on start and end
+      utterance.onstart = () => {
+        setIsPlaying(true);
+        console.log('Browser TTS started');
+      };
+      
+      utterance.onend = () => {
+        setIsPlaying(false);
+        console.log('Browser TTS ended');
+      };
+      
+      utterance.onerror = (e) => {
+        console.error('Browser TTS error:', e);
+        setIsPlaying(false);
+      };
+      
+      speechSynthesis.speak(utterance);
+      console.log('Browser TTS initiated');
+    } catch (error) {
+      console.error('Browser TTS failed:', error);
+      setIsPlaying(false);
+    }
   };
 
   const stopSpeaking = () => {
@@ -993,10 +1330,12 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
 
       const projectName = generateProjectName(projectSpec.description, projectSpec.type);
 
-      const response = await fetch('/api/build-with-ai', {
+      // Step 1: Create async job
+      const response = await fetch(apiUrl('api/build-with-ai'), {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
           project_name: projectName,
@@ -1004,33 +1343,85 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
           tech_stack: projectSpec.tech_stack || [],
           project_type: projectSpec.type || 'web app',
           features: projectSpec.features || [],
-          requirements: projectSpec
+          requirements: projectSpec,
+          customizations: projectSpec.customizations || {}
         })
       });
       
       if (!response.ok) {
-        throw new Error('Project generation failed');
+        throw new Error('Failed to start project generation');
       }
       
       const result = await response.json();
       
-      if (result.success) {
-        addMessage('system', `Success: Project "${projectName}" generated successfully!`);
-        
-        // Refresh project history to include the new project
-        fetchProjectHistory();
-        
-        // Redirect to Monaco editor
-        setTimeout(() => {
-          if (onProjectGenerated) {
-            onProjectGenerated(projectName);
-          } else {
-            window.location.href = `/project/${projectName}`;
-          }
-        }, 2000);
-      } else {
-        addMessage('system', `Error: Project generation failed: ${result.error || 'Unknown error'}`);
+      if (!result.success || !result.job_id) {
+        throw new Error(result.error || 'Failed to create generation job');
       }
+      
+      const jobId = result.job_id;
+      addMessage('system', `Starting project generation... (Job ID: ${jobId})`);
+      
+      // Step 2: Poll for job status
+      const pollInterval = 2000; // Poll every 2 seconds
+      const maxAttempts = 300; // 10 minutes max (300 * 2s)
+      let attempts = 0;
+      
+      const pollJobStatus = async () => {
+        try {
+          const statusResponse = await fetch(apiUrl(`api/jobs/${jobId}`), {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+          
+          if (!statusResponse.ok) {
+            throw new Error('Failed to check job status');
+          }
+          
+          const statusResult = await statusResponse.json();
+          const job = statusResult.job;
+          
+          // Update progress message
+          if (job.logs && job.logs.length > 0) {
+            const latestLog = job.logs[job.logs.length - 1];
+            addMessage('system', `Progress: ${latestLog} (${job.progress}%)`);
+          }
+          
+          if (job.status === 'completed') {
+            addMessage('system', `Success: Project "${projectName}" generated successfully!`);
+            
+            // Refresh project history
+            fetchProjectHistory();
+            
+            // Redirect to Monaco editor
+            setTimeout(() => {
+              if (onProjectGenerated) {
+                onProjectGenerated(projectName);
+              } else {
+                window.location.href = `/project/${projectName}`;
+              }
+            }, 2000);
+            
+            return; // Done!
+          } else if (job.status === 'failed') {
+            throw new Error(job.error || 'Project generation failed');
+          } else {
+            // Still running, poll again
+            attempts++;
+            if (attempts < maxAttempts) {
+              setTimeout(pollJobStatus, pollInterval);
+            } else {
+              throw new Error('Project generation timed out');
+            }
+          }
+        } catch (error) {
+          console.error('Poll error:', error);
+          addMessage('system', `Error: ${error.message}`);
+        }
+      };
+      
+      // Start polling
+      setTimeout(pollJobStatus, pollInterval);
       
     } catch (error) {
       console.error('Project generation error:', error);
@@ -1077,7 +1468,7 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
   useEffect(() => {
     const loadSupportedLanguages = async () => {
       try {
-        const response = await fetch('/api/supported-languages');
+        const response = await fetch(apiUrl('api/supported-languages'));
         if (response.ok) {
           const data = await response.json();
           console.log('Success: Supported TTS languages loaded:', data);
@@ -1178,7 +1569,7 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
       formData.append('text', text);
       formData.append('reference_audio', voiceCloneFile);
       
-      const response = await fetch('/api/voice-clone', {
+      const response = await fetch(apiUrl('api/voice-clone'), {
         method: 'POST',
         body: formData
       });
@@ -1220,10 +1611,12 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
 
   // Enhanced TTS with language and engine selection
   const speakTextWithSettings = async (text) => {
-    if (voiceCloneFile && ttsEngine === 'chatterbox') {
-      await handleVoiceClone(text);
-    } else {
+    try {
+      // Always use Google Cloud TTS with configured language
       await speakText(text, ttsLanguage);
+    } catch (error) {
+      console.error('TTS settings error, using browser fallback:', error);
+      useBrowserTTS(text);
     }
   };
 
@@ -1246,7 +1639,7 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
   };
   
   const sendTextMessage = () => {
-    if (!textInput.trim() || isLoading) return;
+    if (!textInput.trim() || isLoading || isDemo) return; // Disabled in demo mode
     
     addMessage('user', textInput);
 
@@ -1353,10 +1746,8 @@ const VoiceChatInterface = ({ onProjectGenerated }) => {
     }
   };
 
-return (
-
-    <PageWrapper>
-      <div className="voice-chat-page">
+const MainContent = () => (
+  <div className="voice-chat-page" style={isDemo ? { background: 'transparent', padding: '20px' } : {}}>
         {/* --- Floating Settings Panel (remains hidden) --- */}
         <div className={`floating-settings ${showTTSSettings ? 'visible' : ''}`}>
           <div className="settings-panel">
@@ -1379,23 +1770,144 @@ return (
           <div className="main-content-area">
             {/* NEW: Hero/Chat Block - Top Section */}
             <div className="hero-chat-block">
-              {/* Hero Heading */}
-              <div className="hero-heading-section">
-                <h1 className="hero-main-title">Build applications with XVERTA</h1>
-                <p className="hero-subtitle">Create, iterate, and launch your next application by talking with XVERTA.</p>
-              </div>
+              {/* Hero Heading - Only show when NOT in demo mode */}
+              {!isDemo && (
+                <div className="hero-heading-section">
+                  <h1 className="hero-main-title">Build applications with XVERTA</h1>
+                  <p className="hero-subtitle">Create, iterate, and launch your next application by talking with XVERTA.</p>
+                </div>
+              )}
 
               <div className="centered-content-block">
                 {/* NEW: Top Chatbox Component */}
-                <div className="top-chatbox-component">
+                <div className="top-chatbox-component" style={{ position: 'relative' }}>
                 {/* Chat Messages Display Area */}
-                <div className="chatbox-messages-area">
-                  <div ref={chatContainerRef} className="conversation-messages">
+                <div ref={chatContainerRef} className="chatbox-messages-area" onScroll={handleScroll}>
+                  <div ref={chatContentRef} className="conversation-messages">
                     {conversation.map((message, index) => (
                       <div key={index} className={`message ${message.type} fade-in`}>
                         {message.type === 'ai' && <div className="ai-avatar"></div>}
                         <div className={`message-bubble`}>
-                          <div className="whitespace-pre-wrap">{message.content}</div>
+                          {message.isConversion ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                              <div className="whitespace-pre-wrap">
+                                Okay, I've generated the first draft of your project. To view the live preview, 
+                                save your project, and start editing, please create a free account.
+                              </div>
+                              <div style={{ display: 'flex', gap: '12px', marginTop: '8px' }}>
+                                <button
+                                  onClick={() => {
+                                    // Session ID is already saved, just navigate
+                                    navigate('/signup');
+                                  }}
+                                  style={{
+                                    padding: '12px 24px',
+                                    background: 'rgba(255, 255, 255, 0.1)',
+                                    color: '#ffffff',
+                                    border: '1px solid rgba(255, 255, 255, 0.2)',
+                                    borderRadius: '8px',
+                                    fontSize: '14px',
+                                    fontWeight: '600',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.2s ease'
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    e.target.style.background = 'rgba(255, 255, 255, 0.15)';
+                                    e.target.style.borderColor = 'rgba(255, 255, 255, 0.3)';
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    e.target.style.background = 'rgba(255, 255, 255, 0.1)';
+                                    e.target.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+                                  }}
+                                >
+                                  Create Free Account
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    // Session ID is already saved, just navigate
+                                    navigate('/login');
+                                  }}
+                                  style={{
+                                    padding: '12px 24px',
+                                    background: 'rgba(255, 255, 255, 0.1)',
+                                    color: '#ffffff',
+                                    border: '1px solid rgba(255, 255, 255, 0.2)',
+                                    borderRadius: '8px',
+                                    fontSize: '14px',
+                                    fontWeight: '600',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.2s ease'
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    e.target.style.background = 'rgba(255, 255, 255, 0.15)';
+                                    e.target.style.borderColor = 'rgba(255, 255, 255, 0.3)';
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    e.target.style.background = 'rgba(255, 255, 255, 0.1)';
+                                    e.target.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+                                  }}
+                                >
+                                  Login
+                                </button>
+                              </div>
+                            </div>
+                          ) : message.isConfirmation ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                              <div className="whitespace-pre-wrap">{message.content}</div>
+                              <div style={{ display: 'flex', gap: '12px', marginTop: '8px' }}>
+                                <button
+                                  onClick={() => handleDemoConfirmation(true)}
+                                  style={{
+                                    padding: '12px 24px',
+                                    background: 'rgba(255, 255, 255, 0.1)',
+                                    color: '#ffffff',
+                                    border: '1px solid rgba(255, 255, 255, 0.2)',
+                                    borderRadius: '8px',
+                                    fontSize: '14px',
+                                    fontWeight: '600',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.2s ease'
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    e.target.style.background = 'rgba(255, 255, 255, 0.15)';
+                                    e.target.style.borderColor = 'rgba(255, 255, 255, 0.3)';
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    e.target.style.background = 'rgba(255, 255, 255, 0.1)';
+                                    e.target.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+                                  }}
+                                >
+                                  Yes
+                                </button>
+                                <button
+                                  onClick={() => handleDemoConfirmation(false)}
+                                  style={{
+                                    padding: '12px 24px',
+                                    background: 'rgba(255, 255, 255, 0.1)',
+                                    color: '#ffffff',
+                                    border: '1px solid rgba(255, 255, 255, 0.2)',
+                                    borderRadius: '8px',
+                                    fontSize: '14px',
+                                    fontWeight: '600',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.2s ease'
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    e.target.style.background = 'rgba(255, 255, 255, 0.15)';
+                                    e.target.style.borderColor = 'rgba(255, 255, 255, 0.3)';
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    e.target.style.background = 'rgba(255, 255, 255, 0.1)';
+                                    e.target.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+                                  }}
+                                >
+                                  No
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="whitespace-pre-wrap">{message.content}</div>
+                          )}
                           <div className="message-time">
                             {message.timestamp.toLocaleTimeString([], {
                               hour: '2-digit',
@@ -1452,13 +1964,13 @@ return (
                         value={textInput}
                         onChange={(e) => setTextInput(e.target.value)}
                         onKeyPress={(e) => e.key === 'Enter' && sendTextMessage()}
-                        placeholder={getPlaceholder()}
+                        placeholder={isDemo ? 'Click a suggestion above to try the demo' : getPlaceholder()}
                         className="hero-text-input"
-                        disabled={isLoading}
+                        disabled={isLoading || isDemo}
                       />
                       <button
                         onClick={sendTextMessage}
-                        disabled={!textInput.trim() || isLoading}
+                        disabled={!textInput.trim() || isLoading || isDemo}
                         className="hero-send-btn"
                         title="Send Message"
                       >
@@ -1493,8 +2005,16 @@ return (
             <div className="project-block">
               <div className="project-block-inner">
                 <div className="below-chatbox-content">
-                {projectHistory && projectHistory.length > 0 && (
+                {/* Show real project history (not in demo mode) */}
+                {!isDemo && (
                   <div className="jump-back-in-section">
+                    {isLoadingHistory ? (
+                      <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                        <Loader size={32} className="spinning" />
+                        <p style={{ marginTop: '16px' }}>Loading projects...</p>
+                      </div>
+                    ) : projectHistory && projectHistory.length > 0 ? (
+                      <>
                     {/* Interactive Header Bar */}
                     <div className="jump-back-in-header">
                       <h2 className="empty-state-section-title">Jump Right Back In</h2>
@@ -1529,6 +2049,7 @@ return (
                     </div>
                     
                     <div className="project-cards-grid">
+                      {/* Show real project history */}
                       {projectHistory.slice(0, 6).map((project, index) => (
                         <div key={project.slug || index} className="project-card">
                           <div className="project-card-header">
@@ -1568,6 +2089,12 @@ return (
                         </div>
                       ))}
                     </div>
+                    </>
+                    ) : (
+                      <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                        <p>No projects yet. Start building your first app!</p>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1578,6 +2105,13 @@ return (
           </div>
         </div>
       </div>
+  );
+
+  return isDemo ? <MainContent /> : (
+    <PageWrapper>
+      <MainContent />
     </PageWrapper>
   );
-};export default VoiceChatInterface;
+};
+
+export default VoiceChatInterface;

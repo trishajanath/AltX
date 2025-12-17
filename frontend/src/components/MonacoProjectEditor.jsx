@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import MonacoEditor from '@monaco-editor/react';
+import { Mic, Send } from 'lucide-react';
+import { apiUrl } from '../config/api';
+import PageWrapper from './PageWrapper';
 
 // --- NEW: Add Google Font 'Inter' for a professional UI ---
 const fontLink = document.createElement('link');
@@ -28,12 +31,6 @@ if (!document.head.querySelector('[data-monaco-animations]')) {
 }
 
 // --- NEW: SVG Icons for a cleaner UI ---
-const SendIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-    <path d="M3.478 2.405A.75.75 0 002.25 3.126l18 9a.75.75 0 000 1.348l-18 9a.75.75 0 00-1.228-.721l4.588-6.076a1.68 1.68 0 000-2.31l-4.588-6.076z" />
-  </svg>
-);
-
 const BackIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
     <path fillRule="evenodd" d="M7.72 12.53a.75.75 0 010-1.06l7.5-7.5a.75.75 0 111.06 1.06L9.31 12l6.97 6.97a.75.75 0 11-1.06 1.06l-7.5-7.5z" clipRule="evenodd" />
@@ -45,14 +42,6 @@ const FwdIcon = () => (
     <path fillRule="evenodd" d="M16.28 11.47a.75.75 0 010 1.06l-7.5 7.5a.75.75 0 01-1.06-1.06L14.69 12 7.72 5.03a.75.75 0 011.06-1.06l7.5 7.5z" clipRule="evenodd" />
   </svg>
 );
-
-const MicIcon = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-    <path d="M19 10v2a7 7 0 0 1-14 0v-2H3v2a9 9 0 0 0 8 8.94V23h2v-2.06A9 9 0 0 0 21 12v-2h-2z" />
-  </svg>
-);
-
 
 // Inline styles - Refactored for a professional black & white theme
 const styles = {
@@ -82,6 +71,23 @@ const styles = {
     alignItems: 'center',
     height: '48px',
     flexShrink: 0,
+  },
+  statusIndicator: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    fontSize: '12px',
+    fontWeight: 500,
+  },
+  statusDot: {
+    width: '8px',
+    height: '8px',
+    borderRadius: '50%',
+    backgroundColor: '#00ff00',
+  },
+  statusDotBuilding: {
+    backgroundColor: '#ffaa00',
+    animation: 'pulse 1.5s infinite',
   },
   editorTitle: {
     display: 'flex',
@@ -172,14 +178,16 @@ const styles = {
     width: '400px',
     minWidth: '300px',
     maxWidth: '500px',
-    background: '#0a0a0a',
-    borderRight: '1px solid #333333',
+    background: 'rgba(255, 255, 255, 0.02)',
+    backdropFilter: 'blur(20px)',
+    WebkitBackdropFilter: 'blur(20px)',
+    borderRight: '1px solid rgba(255, 255, 255, 0.1)',
     display: 'flex',
     flexDirection: 'column',
     resize: 'horizontal',
     overflow: 'hidden',
     height: '100%',
-    minHeight: 0
+    minHeight: 0,
   },
   
   // Right panel (preview or code)
@@ -271,57 +279,64 @@ const styles = {
   chatMessages: {
     flex: 1,
     overflowY: 'auto',
-    padding: '20px 16px',
-    gap: '12px',
+    overflowX: 'hidden',
+    padding: '24px 32px',
+    gap: '24px',
     display: 'flex',
     flexDirection: 'column',
-    scrollbarWidth: 'thin',
     scrollBehavior: 'smooth',
     maxHeight: '100%',
-    scrollbarColor: '#333333 #111111'
+    background: 'transparent',
+    scrollbarWidth: 'none', /* Firefox */
+    msOverflowStyle: 'none', /* IE and Edge */
   },
   
   chatMessage: {
+    display: 'flex',
+    gap: '12px',
+    alignItems: 'flex-start',
     maxWidth: '85%',
-    padding: '16px 20px',
-    margin: '8px 0',
-    borderRadius: '16px',
+    padding: '14px 20px',
+    borderRadius: '20px',
     fontSize: '14px',
     lineHeight: 1.6,
     whiteSpace: 'pre-wrap',
     fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
     fontWeight: '400',
     wordBreak: 'break-word',
-    boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
     position: 'relative',
+    boxShadow: '0 1px 3px rgba(0, 0, 0, 0.3)',
   },
   
-  // --- UPDATED: Enhanced professional chat bubbles ---
+  // --- UPDATED: Match VoiceChatInterface bubble styles ---
   chatMessageUser: {
-    background: '#ffffff',
-    color: '#1a1a1a',
+    background: 'rgba(255, 255, 255, 0.08)',
+    color: '#ffffff',
     alignSelf: 'flex-end',
     marginLeft: 'auto',
-    border: '1px solid #e5e7eb',
-    fontWeight: '500',
+    border: '1px solid rgba(255, 255, 255, 0.1)',
+    borderRadius: '20px 20px 4px 20px',
+    fontWeight: '400',
   },
   
   chatMessageAssistant: {
-    background: '#111111',
-    border: '1px solid #333333',
-    color: '#f9fafb',
+    background: 'rgba(255, 255, 255, 0.03)',
+    border: '1px solid rgba(255, 255, 255, 0.06)',
+    color: '#ffffff',
     alignSelf: 'flex-start',
+    borderRadius: '20px 20px 20px 4px',
     fontWeight: '400',
   },
   
   chatInputContainer: {
-    padding: '20px 16px',
-    borderTop: '1px solid #333333',
+    padding: '16px 32px 24px 32px',
+    borderTop: '1px solid rgba(255, 255, 255, 0.15)',
     display: 'flex',
     gap: '12px',
-    background: '#0a0a0a',
+    background: 'rgba(255, 255, 255, 0.03)',
+    backdropFilter: 'blur(20px)',
     alignItems: 'center',
-    boxShadow: '0 -1px 0 rgba(255,255,255,0.06)'
+    boxShadow: '0 -4px 12px rgba(0, 0, 0, 0.2)',
   },
   
   chatInput: {
@@ -341,6 +356,30 @@ const styles = {
     lineHeight: 1.5,
     transition: 'all 0.2s ease',
     boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
+  },
+  
+  contextPill: {
+    position: 'absolute',
+    top: '-32px',
+    left: '0',
+    background: 'rgba(0, 123, 255, 0.15)',
+    border: '1px solid rgba(0, 123, 255, 0.4)',
+    borderRadius: '16px',
+    padding: '6px 14px',
+    fontSize: '12px',
+    color: '#4da3ff',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    animation: 'fadeIn 0.2s ease',
+    fontWeight: 500,
+  },
+  contextPillClose: {
+    cursor: 'pointer',
+    marginLeft: '4px',
+    opacity: 0.8,
+    fontSize: '14px',
+    transition: 'opacity 0.2s',
   },
   
   micButton: {
@@ -514,6 +553,7 @@ const MonacoProjectEditor = () => {
   const [isMuted, setIsMuted] = useState(false);
   const [layoutMode, setLayoutMode] = useState('preview'); // 'preview' or 'code'
   const [viewMode, setViewMode] = useState('desktop'); // 'desktop' or 'mobile'
+  const [selectedElement, setSelectedElement] = useState(null); // Selected element in preview for editing
   const [viewHistory, setViewHistory] = useState([]);
   const [currentViewIndex, setCurrentViewIndex] = useState(-1);
   const [pendingChanges, setPendingChanges] = useState(false);
@@ -590,6 +630,15 @@ You can ask me to:
 Just tell me what you'd like to do.`
       };
       setChatMessages([welcomeMessage]);
+      
+      // Speak welcome message
+      if (!isMuted) {
+        const welcomeText = "Welcome to your AI product assistant! I'm here to help you build, design, and improve your project. You can ask me to change the look and feel, add new sections, find and fix issues, or improve this page. Just tell me what you'd like to do.";
+        setTimeout(() => {
+          speakText(welcomeText);
+        }, 1500); // Delay to ensure audio context is ready
+      }
+      
       // Cleanup WebSocket when project changes or component unmounts
       return () => {
         try {
@@ -760,7 +809,7 @@ Just tell me what you'd like to do.`
         };
         
         // Call the new Gemini auto-fix endpoint
-        const response = await fetch('http://localhost:8000/api/gemini-fix-console-error', {
+        const response = await fetch('https://api.xverta.com/api/gemini-fix-console-error', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -972,9 +1021,9 @@ Click the "Fix Issues" button or ask me to "fix the issues" and I'll try to reso
   }, [chatMessages, isAiThinking]);
 
   const initializeProject = async () => {
-    // Load file tree
+    // Load file tree (S3-enabled endpoint)
     try {
-      const response = await fetch(`http://localhost:8000/api/project-file-tree?project_name=${encodeURIComponent(project.name)}`);
+      const response = await fetch(apiUrl(`api/project-file-tree?project_name=${encodeURIComponent(project.name)}&user_id=anonymous`));
       const data = await response.json();
       if (data.success) {
         setFileTree(data.file_tree || []);
@@ -1001,7 +1050,7 @@ Click the "Fix Issues" button or ask me to "fix the issues" and I'll try to reso
         return;
       }
 
-      const ws = new WebSocket(`ws://localhost:8000/ws/project/${project.name}`);
+      const ws = new WebSocket(`wss://api.xverta.com/ws/project/${project.name}`);
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -1100,7 +1149,7 @@ Click the "Fix Issues" button or ask me to "fix the issues" and I'll try to reso
   const runProject = async () => {
     setIsBuilding(true);
     try {
-      const response = await fetch('http://localhost:8000/api/run-project', {
+      const response = await fetch('https://api.xverta.com/api/run-project', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1139,7 +1188,7 @@ Click the "Fix Issues" button or ask me to "fix the issues" and I'll try to reso
     
     try {
       // First try the traditional auto-fix endpoint
-      const response = await fetch(`http://localhost:8000/api/auto-fix-project-errors?project_name=${encodeURIComponent(project.name)}`, {
+      const response = await fetch(apiUrl(`api/auto-fix-project-errors?project_name=${encodeURIComponent(project.name)}`), {
         method: 'POST'
       });
       
@@ -1221,7 +1270,7 @@ Please try describing the issue manually.`
       error_type: 'manual_fix_request'
     };
     
-    const geminiResponse = await fetch('http://localhost:8000/api/gemini-fix-console-error', {
+    const geminiResponse = await fetch('https://api.xverta.com/api/gemini-fix-console-error', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1263,7 +1312,7 @@ Starting your project again...`
 
   const loadFileContent = async (filePath) => {
     try {
-      const response = await fetch(`http://localhost:8000/api/project-file-content?project_name=${encodeURIComponent(project.name)}&file_path=${encodeURIComponent(filePath)}`);
+      const response = await fetch(apiUrl(`api/project-file-content?project_name=${encodeURIComponent(project.name)}&file_path=${encodeURIComponent(filePath)}&user_id=anonymous`));
       const data = await response.json();
       
       if (data.success) {
@@ -1353,7 +1402,7 @@ Starting your project again...`
         formData.append('audio', audioBlob, 'recording.webm');
         
         try {
-          const response = await fetch('http://localhost:8000/api/process-speech', {
+          const response = await fetch('https://api.xverta.com/api/process-speech', {
             method: 'POST',
             body: formData
           });
@@ -1372,7 +1421,7 @@ Starting your project again...`
             setIsAiThinking(true);
             
             try {
-              const aiResponse = await fetch(`http://localhost:8000/api/ai-project-assistant`, {
+              const aiResponse = await fetch(apiUrl('api/ai-project-assistant'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
@@ -1477,7 +1526,7 @@ The changes are live in your preview.`
     
     try {
       // Try Chatterbox TTS first
-      const response = await fetch('http://localhost:8000/api/synthesize-chatterbox', {
+      const response = await fetch('https://api.xverta.com/api/synthesize-chatterbox', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text, language: 'en' })
@@ -1521,9 +1570,15 @@ The changes are live in your preview.`
   const sendChatMessage = async () => {
     if (!chatInput.trim() || isAiThinking) return;
     
-    const userMessage = { role: 'user', content: chatInput };
+    // Prepare message with element context if available
+    let messageContent = chatInput;
+    if (selectedElement) {
+      messageContent = `Change the "${selectedElement}" element: ${chatInput}`;
+    }
+    
+    const userMessage = { role: 'user', content: chatInput }; // Show original user input in chat
     setChatMessages(prev => [...prev, userMessage]);
-    const messageToSend = chatInput;
+    const messageToSend = messageContent; // Send full context to AI
     setChatInput('');
     setIsAiThinking(true);
     
@@ -1549,7 +1604,7 @@ The changes are live in your preview.`
     }
     
     try {
-      const response = await fetch('http://localhost:8000/api/ai-project-assistant', {
+      const response = await fetch('https://api.xverta.com/api/ai-project-assistant', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1573,6 +1628,9 @@ The changes are live in your preview.`
         };
         setChatMessages(prev => [...prev, assistantMessage]);
         
+        // Set building state
+        setIsBuilding(true);
+        
         // AI speaks the response
         const spokenText = `Done! ${result.explanation || "I've made the requested changes!"}`;
         speakText(spokenText);
@@ -1585,14 +1643,21 @@ The changes are live in your preview.`
           description: result.files_modified && result.files_modified.length > 0 
             ? `Updated: ${result.files_modified.join(', ')}` 
             : undefined,
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          completed: true
         }]);
         
+        // Clear selected element after successful edit
+        setSelectedElement(null);
+        
         // Reload project files and preview
-        initializeProject();
+        await initializeProject();
         if (result.preview_url) {
           setPreviewUrl(result.preview_url);
         }
+        
+        // Clear building state after reload
+        setTimeout(() => setIsBuilding(false), 1000);
       } else {
         const errorMessage = {
           role: 'assistant',
@@ -1675,7 +1740,8 @@ The changes are live in your preview.`
   }
 
   return (
-    <div style={styles.monacoProjectEditor}>
+    <PageWrapper>
+      <div style={styles.monacoProjectEditor}>
       {/* Simplified Header - Just project name and status */}
       <div style={styles.editorHeader}>
         <div style={styles.editorTitle}>
@@ -1699,43 +1765,16 @@ The changes are live in your preview.`
           </button>
           <span style={styles.projectName}>{project.name}</span>
           
-          {isBuilding && (
-            <span style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              marginLeft: '16px',
-              fontSize: '14px',
-              color: '#ffffff'
-            }}>
-              <span style={{
-                width: '8px',
-                height: '8px',
-                borderRadius: '50%',
-                background: '#fbbf24',
-                animation: 'pulse 1.5s infinite'
-              }}></span>
-              Building...
+          {/* Status Indicator */}
+          <div style={styles.statusIndicator}>
+            <div style={{
+              ...styles.statusDot,
+              ...(isBuilding || isAiThinking ? styles.statusDotBuilding : {})
+            }} />
+            <span style={{ color: isBuilding || isAiThinking ? '#ffaa00' : '#00ff00' }}>
+              {isBuilding ? '● Building...' : isAiThinking ? '● Thinking...' : '● Live'}
             </span>
-          )}
-          {!isBuilding && isRunning && (
-            <span style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              marginLeft: '16px',
-              fontSize: '14px',
-              color: '#ffffff'
-            }}>
-              <span style={{
-                width: '8px',
-                height: '8px',
-                borderRadius: '50%',
-                background: '#10b981'
-              }}></span>
-              Live
-            </span>
-          )}
+          </div>
         </div>
         
         <div style={styles.editorActions}>
@@ -1862,7 +1901,23 @@ The changes are live in your preview.`
               <div ref={chatEndRef} style={{ height: '1px' }} />
             </div>
             
-            <div style={styles.chatInputContainer}>
+            <div style={{ ...styles.chatInputContainer, position: 'relative' }}>
+              {/* Context Pill for Selected Element */}
+              {selectedElement && (
+                <div style={styles.contextPill}>
+                  🎯 Editing: '{selectedElement}'
+                  <span 
+                    style={styles.contextPillClose}
+                    onClick={() => setSelectedElement(null)}
+                    onMouseEnter={(e) => e.target.style.opacity = '1'}
+                    onMouseLeave={(e) => e.target.style.opacity = '0.8'}
+                    title="Clear selection"
+                  >
+                    ✕
+                  </span>
+                </div>
+              )}
+              
               <button 
                 style={{
                   ...styles.micButton,
@@ -1872,32 +1927,38 @@ The changes are live in your preview.`
                 disabled={isAiThinking || isPlaying}
                 title={isRecording ? "Stop recording" : "Start recording"}
               >
-                <MicIcon />
+                <Mic size={20} />
               </button>
               <textarea
                 style={styles.chatInput}
-                placeholder={isRecording ? "Recording..." : "Type or speak your message..."}
+                placeholder={selectedElement ? `What would you like to change about the ${selectedElement}?` : isRecording ? "Recording..." : "Type or speak your message..."}
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
-                    sendChatMessage();
+                    if (isAiThinking) {
+                      setIsAiThinking(false);
+                    } else {
+                      sendChatMessage();
+                    }
                   }
                 }}
-                disabled={isAiThinking || isRecording}
+                disabled={isRecording}
                 rows={1}
               />
               <button 
                 style={{
                   ...styles.chatSendButton,
-                  opacity: (isAiThinking || !chatInput.trim()) ? 0.5 : 1,
-                  cursor: (isAiThinking || !chatInput.trim()) ? 'not-allowed' : 'pointer',
+                  ...(isAiThinking ? { background: '#ff4444' } : {}),
+                  opacity: (!isAiThinking && !chatInput.trim()) ? 0.5 : 1,
+                  cursor: (!isAiThinking && !chatInput.trim()) ? 'not-allowed' : 'pointer',
                 }}
-                onClick={sendChatMessage}
-                disabled={isAiThinking || !chatInput.trim()}
+                onClick={isAiThinking ? () => setIsAiThinking(false) : sendChatMessage}
+                disabled={!isAiThinking && !chatInput.trim()}
+                title={isAiThinking ? "Stop AI" : "Send message"}
               >
-                {isAiThinking ? '...' : <SendIcon />}
+                {isAiThinking ? '⏸' : <Send size={16} />}
               </button>
             </div>
               </>
@@ -2129,9 +2190,90 @@ The changes are live in your preview.`
                 justifyContent: 'center',
                 alignItems: 'center',
                 background: viewMode === 'mobile' ? '#f0f0f0' : '#ffffff',
-                padding: viewMode === 'mobile' ? '20px' : '0'
+                padding: viewMode === 'mobile' ? '20px' : '0',
+                position: 'relative'
               }}>
+                {isBuilding && (
+                  <div style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    background: 'rgba(0, 0, 0, 0.4)',
+                    zIndex: 10,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#ffffff',
+                    fontSize: '18px',
+                    fontWeight: 600
+                  }}>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ animation: 'pulse 1.5s infinite', marginBottom: '12px' }}>⚙️</div>
+                      Building...
+                    </div>
+                  </div>
+                )}
                 <iframe
+                  ref={(iframe) => {
+                    if (iframe && iframe.contentWindow) {
+                      // Inject element selection script
+                      iframe.onload = () => {
+                        try {
+                          const doc = iframe.contentDocument || iframe.contentWindow.document;
+                          const style = doc.createElement('style');
+                          style.textContent = `
+                            .editable-element-hover {
+                              outline: 2px solid rgba(0, 123, 255, 0.5) !important;
+                              cursor: pointer !important;
+                            }
+                            .editable-element-selected {
+                              outline: 3px solid #007bff !important;
+                              outline-offset: 2px !important;
+                            }
+                          `;
+                          doc.head.appendChild(style);
+                          
+                          // Add hover and click handlers
+                          doc.addEventListener('mouseover', (e) => {
+                            if (e.target !== doc.body && e.target !== doc.documentElement) {
+                              e.target.classList.add('editable-element-hover');
+                            }
+                          });
+                          
+                          doc.addEventListener('mouseout', (e) => {
+                            e.target.classList.remove('editable-element-hover');
+                          });
+                          
+                          doc.addEventListener('click', (e) => {
+                            if (e.target !== doc.body && e.target !== doc.documentElement) {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              
+                              // Remove previous selection
+                              doc.querySelectorAll('.editable-element-selected').forEach(el => {
+                                el.classList.remove('editable-element-selected');
+                              });
+                              
+                              // Add new selection
+                              e.target.classList.add('editable-element-selected');
+                              
+                              // Get element description
+                              const tagName = e.target.tagName.toLowerCase();
+                              const className = e.target.className ? `.${e.target.className.split(' ')[0]}` : '';
+                              const text = e.target.innerText?.substring(0, 30) || '';
+                              const elementDesc = text || `${tagName}${className}` || tagName;
+                              
+                              setSelectedElement(elementDesc);
+                            }
+                          });
+                        } catch (err) {
+                          console.warn('Could not inject selection script:', err);
+                        }
+                      };
+                    }
+                  }}
                   src={previewUrl}
                   style={{
                     width: viewMode === 'mobile' ? '375px' : '100%',
@@ -2309,6 +2451,7 @@ The changes are live in your preview.`
         </div>
       </div>
     </div>
+    </PageWrapper>
   );
 };
 

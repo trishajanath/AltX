@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Rocket, Shield, GitBranch, BrainCircuit, BarChart3 } from 'lucide-react';
+import { apiUrl } from '../config/api';
 import {
     Scene,
     OrthographicCamera,
@@ -267,23 +268,15 @@ const DashboardView = () => {
     const [recentApps, setRecentApps] = useState([]);
     const [loadingApps, setLoadingApps] = useState(true);
     
-    const deployedProjects = [
-        { name: 'project-sentinel.securai.dev', status: 'Live', vulnerabilities: 0, lastScan: '2h ago' },
-        { name: 'gamma-platform.securai.dev', status: 'Live', vulnerabilities: 2, lastScan: '8h ago' },
-        { name: 'marketing-site.com', status: 'Error', vulnerabilities: 5, lastScan: '1d ago' },
-    ];
+    const deployedProjects = [];
 
-    const recentScans = [
-        { repo: 'acme-corp/frontend', status: 'Clean', issues: 0, timestamp: '15m ago' },
-        { repo: 'acme-corp/api-gateway', status: 'Warnings', issues: 2, timestamp: '45m ago' },
-        { repo: 'acme-corp/user-database', status: 'Failed', issues: 1, timestamp: '1h ago' },
-    ];
+    const recentScans = [];
 
     // Fetch recent apps from backend
     useEffect(() => {
         const fetchRecentApps = async () => {
             try {
-                const response = await fetch('http://localhost:8000/api/project-history');
+                const response = await fetch(apiUrl('api/project-history'));
                 const data = await response.json();
                 
                 if (data.success && data.projects) {
@@ -326,14 +319,14 @@ const DashboardView = () => {
 
     return (
         <div className="dashboard-view">
-            <h1 className="page-title">Dashboard</h1>
-            <p className="page-subtitle">Welcome back, here's a summary of your projects.</p>
             <div className="dashboard-grid">
                 {/* Recent Apps Built with Voice Chat */}
-                <div className="card" onClick={() => navigate('/voice-chat')}>
+                <div className="card" style={{ gridColumn: 'span 1' }}>
                     <div className="card-header">
                         <h2>Recent Apps Built</h2>
-                        <button onClick={e => { e.stopPropagation(); navigate('/voice-chat'); }} className="btn-secondary">Build New</button>
+                        {recentApps.length > 0 && (
+                            <button onClick={e => { e.stopPropagation(); navigate('/voice-chat'); }} className="btn-secondary">Build New</button>
+                        )}
                     </div>
                     <div className="card-content">
                         {loadingApps ? (
@@ -380,84 +373,244 @@ const DashboardView = () => {
                                 </table>
                             </div>
                         ) : (
-                            <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-secondary)' }}>
-                                No apps built yet. Use Voice Chat Builder to create your first app!
+                            <div style={{ padding: '60px 20px', textAlign: 'center' }}>
+                                <div style={{ marginBottom: '1.5rem', color: 'var(--text-secondary)', fontSize: '1.1rem' }}>
+                                    No apps built yet
+                                </div>
+                                <button 
+                                    onClick={(e) => { e.stopPropagation(); navigate('/voice-chat'); }} 
+                                    className="btn-large-cta"
+                                    style={{
+                                        fontSize: '1.25rem',
+                                        padding: '1.5rem 3rem',
+                                        background: 'linear-gradient(135deg, var(--primary-green), rgba(0, 245, 195, 0.7))',
+                                        border: 'none',
+                                        borderRadius: '0.75rem',
+                                        color: '#000',
+                                        fontWeight: '700',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.3s ease',
+                                        boxShadow: '0 4px 20px rgba(0, 245, 195, 0.3)'
+                                    }}
+                                    onMouseEnter={(e) => {
+                                        e.currentTarget.style.transform = 'scale(1.05)';
+                                        e.currentTarget.style.boxShadow = '0 6px 30px rgba(0, 245, 195, 0.5)';
+                                    }}
+                                    onMouseLeave={(e) => {
+                                        e.currentTarget.style.transform = 'scale(1)';
+                                        e.currentTarget.style.boxShadow = '0 4px 20px rgba(0, 245, 195, 0.3)';
+                                    }}
+                                >
+                                    🚀 Build Your First App
+                                </button>
                             </div>
                         )}
                     </div>
                 </div>
 
                 {/* Deployed Projects Card */}
-                <div className="card" onClick={() => navigate('/deploy')}>
+                <div className="card">
                     <div className="card-header">
                         <h2>Deployed Projects</h2>
-                        <button onClick={e => { e.stopPropagation(); navigate('/deploy'); }} className="btn-secondary">Deploy New</button>
+                        {deployedProjects.length > 0 && (
+                            <button onClick={() => navigate('/deploy')} className="btn-secondary">Deploy New</button>
+                        )}
                     </div>
                     <div className="card-content">
-                        <div className="table-wrapper">
-                            <table className="data-table">
-                                <thead>
-                                    <tr>
-                                        <th>Domain</th>
-                                        <th>Status</th>
-                                        <th>Vulnerabilities</th>
-                                        <th>Last Scan</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {deployedProjects.map((proj, i) => (
-                                        <tr key={i}>
-                                            <td>{proj.name}</td>
-                                            <td>
-                                                <span className={`status-badge status-${proj.status.toLowerCase()}`}>
-                                                    {proj.status}
-                                                </span>
-                                            </td>
-                                            <td>
-                                                <span className={`vulnerability-count ${proj.vulnerabilities > 0 ? 'has-issues' : ''}`}>
-                                                    {proj.vulnerabilities}
-                                                </span>
-                                            </td>
-                                            <td>{proj.lastScan}</td>
+                        {deployedProjects.length > 0 ? (
+                            <div className="table-wrapper">
+                                <table className="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Domain</th>
+                                            <th>Status</th>
+                                            <th>Vulnerabilities</th>
+                                            <th>Last Scan</th>
                                         </tr>
-                                    ))}
-                                </tbody>
-                            </table>
+                                    </thead>
+                                    <tbody>
+                                        {deployedProjects.map((proj, i) => (
+                                            <tr key={i}>
+                                                <td>{proj.name}</td>
+                                                <td>
+                                                    <span className={`status-badge status-${proj.status.toLowerCase()}`}>
+                                                        {proj.status}
+                                                    </span>
+                                                </td>
+                                                <td>
+                                                    <span className={`vulnerability-count ${proj.vulnerabilities > 0 ? 'has-issues' : ''}`}>
+                                                        {proj.vulnerabilities}
+                                                    </span>
+                                                </td>
+                                                <td>{proj.lastScan}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        ) : (
+                            <div style={{ padding: '40px 20px', textAlign: 'center' }}>
+                                <div style={{ marginBottom: '1.5rem', color: 'var(--text-secondary)' }}>
+                                    No deployments yet. Deploy your apps to production with one click.
+                                </div>
+                                <button 
+                                    onClick={() => navigate('/deploy')} 
+                                    className="btn-large-cta"
+                                    style={{
+                                        fontSize: '1.1rem',
+                                        padding: '1.25rem 2.5rem',
+                                        background: 'linear-gradient(135deg, #9b59b6, #8e44ad)',
+                                        border: 'none',
+                                        borderRadius: '0.75rem',
+                                        color: '#fff',
+                                        fontWeight: '700',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.3s ease',
+                                        boxShadow: '0 4px 20px rgba(155, 89, 182, 0.3)'
+                                    }}
+                                    onMouseEnter={(e) => {
+                                        e.currentTarget.style.transform = 'scale(1.05)';
+                                        e.currentTarget.style.boxShadow = '0 6px 30px rgba(155, 89, 182, 0.5)';
+                                    }}
+                                    onMouseLeave={(e) => {
+                                        e.currentTarget.style.transform = 'scale(1)';
+                                        e.currentTarget.style.boxShadow = '0 4px 20px rgba(155, 89, 182, 0.3)';
+                                    }}
+                                >
+                                    Deploy Your First App
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {/* Combined Security & Analysis Card */}
+                <div className="card">
+                    <div className="card-header">
+                        <h2>Security & Analysis</h2>
+                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                            <button onClick={() => navigate('/security')} className="btn-secondary">View All</button>
+                            <button onClick={() => navigate('/repo-analysis')} className="btn-primary">Scan Repo</button>
                         </div>
                     </div>
+                    <div className="card-content">
+                        {recentScans.length > 0 ? (
+                            <>
+                                <div style={{ marginBottom: '1.5rem' }}>
+                                    <h3 style={{ fontSize: '0.875rem', fontWeight: '600', color: 'var(--text-secondary)', marginBottom: '1rem', textTransform: 'uppercase' }}>Recent Scans</h3>
+                                    <ul className="scan-list">
+                                        {recentScans.slice(0, 2).map((scan, i) => (
+                                            <li key={i} className="scan-item">
+                                                <div className="scan-info">
+                                                    <span className="scan-repo">{scan.repo}</span>
+                                                    <span className="scan-time">{scan.timestamp}</span>
+                                                </div>
+                                                <div className={`scan-status status-${scan.status.toLowerCase()}`}>
+                                                    {scan.status} ({scan.issues} issues)
+                                                </div>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                                <div style={{ padding: '1rem', background: 'rgba(0, 245, 195, 0.05)', borderRadius: '0.5rem', border: '1px solid rgba(0, 245, 195, 0.1)' }}>
+                                    <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>AI-powered analysis detects vulnerabilities, secrets, and dependency issues</p>
+                                    <button 
+                                        onClick={() => navigate('/repo-analysis')} 
+                                        className="btn-secondary"
+                                        style={{ width: '100%', justifyContent: 'center', display: 'flex' }}
+                                    >
+                                        Analyze New Repository →
+                                    </button>
+                                </div>
+                            </>
+                        ) : (
+                            <div style={{ padding: '40px 20px', textAlign: 'center' }}>
+                                <div style={{ marginBottom: '1.5rem', color: 'var(--text-secondary)' }}>
+                                    No security scans yet. Analyze your repositories to detect vulnerabilities, secrets, and dependency issues.
+                                </div>
+                                <button 
+                                    onClick={() => navigate('/repo-analysis')} 
+                                    className="btn-large-cta"
+                                    style={{
+                                        fontSize: '1.1rem',
+                                        padding: '1.25rem 2.5rem',
+                                        background: 'linear-gradient(135deg, var(--primary-green), rgba(0, 245, 195, 0.7))',
+                                        border: 'none',
+                                        borderRadius: '0.75rem',
+                                        color: '#000',
+                                        fontWeight: '700',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.3s ease',
+                                        boxShadow: '0 4px 20px rgba(0, 245, 195, 0.3)'
+                                    }}
+                                    onMouseEnter={(e) => {
+                                        e.currentTarget.style.transform = 'scale(1.05)';
+                                        e.currentTarget.style.boxShadow = '0 6px 30px rgba(0, 245, 195, 0.5)';
+                                    }}
+                                    onMouseLeave={(e) => {
+                                        e.currentTarget.style.transform = 'scale(1)';
+                                        e.currentTarget.style.boxShadow = '0 4px 20px rgba(0, 245, 195, 0.3)';
+                                    }}
+                                >
+                                    Scan Your First Repository
+                                </button>
+                            </div>
+                        )}
+                    </div>
                 </div>
 
-                {/* Recent Scans Card */}
-                <div className="card" onClick={() => navigate('/security')}>
+                {/* Account Usage Panel */}
+                <div className="card">
                     <div className="card-header">
-                        <h2>Recent Scans</h2>
-                        <button onClick={e => { e.stopPropagation(); navigate('/security'); }} className="btn-secondary">View All</button>
+                        <h2>Account Usage</h2>
+                        <button onClick={() => navigate('/settings')} className="btn-secondary">Upgrade</button>
                     </div>
                     <div className="card-content">
-                         <ul className="scan-list">
-                            {recentScans.map((scan, i) => (
-                                <li key={i} className="scan-item">
-                                    <div className="scan-info">
-                                        <span className="scan-repo">{scan.repo}</span>
-                                        <span className="scan-time">{scan.timestamp}</span>
-                                    </div>
-                                    <div className={`scan-status status-${scan.status.toLowerCase()}`}>
-                                        {scan.status} ({scan.issues} issues)
-                                    </div>
-                                </li>
-                            ))}
-                        </ul>
-                    </div>
-                </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                            {/* Apps Built */}
+                            <div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                                    <span style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Apps Built</span>
+                                    <span style={{ fontSize: '0.875rem', fontWeight: '600', color: 'var(--text-primary)' }}>{recentApps.length} / 10</span>
+                                </div>
+                                <div style={{ width: '100%', height: '8px', background: 'rgba(255, 255, 255, 0.1)', borderRadius: '4px', overflow: 'hidden' }}>
+                                    <div style={{ width: `${(recentApps.length / 10) * 100}%`, height: '100%', background: 'linear-gradient(90deg, var(--primary-green), rgba(0, 245, 195, 0.7))', transition: 'width 0.3s ease' }} />
+                                </div>
+                            </div>
+                            
+                            {/* Security Scans */}
+                            <div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                                    <span style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Security Scans</span>
+                                    <span style={{ fontSize: '0.875rem', fontWeight: '600', color: 'var(--text-primary)' }}>{recentScans.length} / 25</span>
+                                </div>
+                                <div style={{ width: '100%', height: '8px', background: 'rgba(255, 255, 255, 0.1)', borderRadius: '4px', overflow: 'hidden' }}>
+                                    <div style={{ width: `${(recentScans.length / 25) * 100}%`, height: '100%', background: 'linear-gradient(90deg, #3498db, #2980b9)', transition: 'width 0.3s ease' }} />
+                                </div>
+                            </div>
+                            
+                            {/* Deployments */}
+                            <div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                                    <span style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Active Deployments</span>
+                                    <span style={{ fontSize: '0.875rem', fontWeight: '600', color: 'var(--text-primary)' }}>{deployedProjects.length} / 5</span>
+                                </div>
+                                <div style={{ width: '100%', height: '8px', background: 'rgba(255, 255, 255, 0.1)', borderRadius: '4px', overflow: 'hidden' }}>
+                                    <div style={{ width: `${(deployedProjects.length / 5) * 100}%`, height: '100%', background: 'linear-gradient(90deg, #9b59b6, #8e44ad)', transition: 'width 0.3s ease' }} />
+                                </div>
+                            </div>
 
-                {/* Repo Analysis Card */}
-                <div className="card" onClick={() => navigate('/repo-analysis')}>
-                    <div className="card-header">
-                        <h2>Repository Analysis</h2>
-                        <button onClick={e => { e.stopPropagation(); navigate('/repo-analysis'); }} className="btn-secondary">Scan Repo</button>
-                    </div>
-                    <div className="card-content">
-                        <p>Analyze your codebase for vulnerabilities, secrets, and dependency issues using AI-powered static analysis.</p>
+                            {/* API Calls */}
+                            <div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                                    <span style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>API Calls (Month)</span>
+                                    <span style={{ fontSize: '0.875rem', fontWeight: '600', color: 'var(--text-primary)' }}>1,247 / 5,000</span>
+                                </div>
+                                <div style={{ width: '100%', height: '8px', background: 'rgba(255, 255, 255, 0.1)', borderRadius: '4px', overflow: 'hidden' }}>
+                                    <div style={{ width: '24.94%', height: '100%', background: 'linear-gradient(90deg, #e74c3c, #c0392b)', transition: 'width 0.3s ease' }} />
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -524,6 +677,14 @@ export default function HomePage() {
                     transition: transform 0.2s ease, box-shadow 0.2s ease;
                     cursor: pointer;
                 }
+                .card:first-child {
+                    grid-column: 1 / -1;
+                }
+                @media (min-width: 1280px) {
+                    .card:first-child {
+                        grid-column: span 2;
+                    }
+                }
                 .card:hover {
                     transform: translateY(-5px);
                     box-shadow: 0 8px 32px 0 rgba(255, 255, 255, 0.1);
@@ -557,10 +718,21 @@ export default function HomePage() {
 
                 /* --- Dashboard Specific --- */
                 .dashboard-grid {
-                    display: grid; grid-template-columns: 1fr; gap: 1.5rem;
+                    display: grid; 
+                    grid-template-columns: 1fr; 
+                    gap: 1.5rem;
                 }
-                @media (min-width: 1024px) {
-                    .dashboard-grid { grid-template-columns: 2fr 1fr; gap: 2rem; }
+                @media (min-width: 768px) {
+                    .dashboard-grid { 
+                        grid-template-columns: repeat(2, 1fr); 
+                        gap: 1.5rem; 
+                    }
+                }
+                @media (min-width: 1280px) {
+                    .dashboard-grid { 
+                        grid-template-columns: repeat(3, 1fr); 
+                        gap: 2rem; 
+                    }
                 }
                 .table-wrapper { overflow-x: auto; }
                 .data-table { width: 100%; border-collapse: collapse; min-width: 500px; }

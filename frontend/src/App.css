@@ -6,9 +6,8 @@
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
-  background: linear-gradient(-45deg, #000000, #0a0a0a, #111111, #050505);
-  background-size: 400% 400%;
-  animation: animatedGradient 25s ease infinite;
+  background: transparent;
+  background-color: #000000;
   color: #fafafa;
   min-height: 100vh;
   overflow-x: hidden;
@@ -20,6 +19,7 @@ body {
   min-height: 100vh;
   position: relative;
   z-index: 1;
+  background: transparent;
 }
 
 /* Navigation */

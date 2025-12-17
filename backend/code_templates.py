@@ -442,7 +442,7 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],
+    allow_origins=["https://xverta.com", "https://www.xverta.com"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -470,9 +470,9 @@ def health():
 # Server runner
 if __name__ == "__main__":
     print(f"🚀 Starting ${project_name} API Server...")
-    print("📖 API Documentation: http://localhost:8001/docs")
-    print("🩺 Health Check: http://localhost:8001/health")
-    print("🛒 Products: http://localhost:8001/api/v1/products")
+    print("📖 API Documentation: https://api.xverta.com/docs")
+    print("🩺 Health Check: https://api.xverta.com/health")
+    print("🛒 Products: https://api.xverta.com/api/products")
     
     uvicorn.run(
         app,
@@ -562,7 +562,7 @@ class ErrorBoundary extends React.Component {
 const useApi = () => {
   const apiFetch = useCallback(async (url, options = {}) => {
     try {
-      const response = await fetch(`http://localhost:8001/api/v1$${url}`, {
+      const response = await fetch(`https://api.xverta.com/api$${url}`, {
         headers: { 'Content-Type': 'application/json' },
         ...options,
       });

@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
+import { apiUrl } from '../config/api';
 import PageWrapper from './PageWrapper';
 
 const SignupPage = () => {
     const navigate = useNavigate();
+    const { login } = useAuth();
     // Store user info if redirected from Google OAuth
     useEffect(() => {
         const params = new URLSearchParams(window.location.search);
@@ -19,18 +22,16 @@ const SignupPage = () => {
     }, [navigate]);
     const [formData, setFormData] = useState({
         email: '',
+        username: '',
         password: '',
-        confirmPassword: '',
-        firstName: '',
-        lastName: ''
+        confirmPassword: ''
     });
     
     const [validation, setValidation] = useState({
         email: { isValid: null, message: '' },
+        username: { isValid: null, message: '' },
         password: { isValid: null, message: '', strength: 0 },
-        confirmPassword: { isValid: null, message: '' },
-        firstName: { isValid: null, message: '' },
-        lastName: { isValid: null, message: '' }
+        confirmPassword: { isValid: null, message: '' }
     });
     
     const [showPassword, setShowPassword] = useState(false);
@@ -89,10 +90,10 @@ const SignupPage = () => {
 
     const validateName = (name) => {
         if (!name) return { isValid: null, message: '' };
-        if (name.trim().length >= 2) {
+        if (name.trim().length >= 3) {
             return { isValid: true, message: '' };
         } else {
-            return { isValid: false, message: 'Must be at least 2 characters' };
+            return { isValid: false, message: 'Must be at least 3 characters' };
         }
     };
 
@@ -111,18 +112,15 @@ const SignupPage = () => {
             case 'email':
                 newValidation.email = validateEmail(value);
                 break;
+            case 'username':
+                newValidation.username = validateName(value);
+                break;
             case 'password':
                 newValidation.password = validatePassword(value);
                 newValidation.confirmPassword = validateConfirmPassword(value, formData.confirmPassword);
                 break;
             case 'confirmPassword':
                 newValidation.confirmPassword = validateConfirmPassword(formData.password, value);
-                break;
-            case 'firstName':
-                newValidation.firstName = validateName(value);
-                break;
-            case 'lastName':
-                newValidation.lastName = validateName(value);
                 break;
             default:
                 break;
@@ -131,17 +129,118 @@ const SignupPage = () => {
         setValidation(newValidation);
     };
 
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
+        
+        // Validate all fields before submitting
+        if (!validation.email.isValid || !validation.username.isValid || 
+            !validation.password.isValid || !validation.confirmPassword.isValid) {
+            setError('Please fix all validation errors before submitting');
+            return;
+        }
+        
         setLoading(true);
-        setTimeout(() => {
+        setError('');
+        
+        try {
+            // Call MongoDB auth signup endpoint
+            const response = await fetch(apiUrl('api/auth/signup'), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    email: formData.email,
+                    username: formData.username,
+                    password: formData.password
+                })
+            });
+            
+            const data = await response.json();
+            
+            if (response.ok && data.success) {
+                // Use AuthContext to store authentication data
+                login(data.user, data.access_token);
+                
+                console.log('✅ Signup successful:', data.user);
+                
+                // Check for pending demo project from S3
+                const sessionId = localStorage.getItem('demoSessionId');
+                if (sessionId) {
+                    try {
+                        // Retrieve project from S3
+                        const response = await fetch(apiUrl(`api/demo/get-pending-project/${sessionId}`));
+                        const result = await response.json();
+                        
+                        if (!result.success || !result.project) {
+                            console.log('ℹ️ No pending demo project found');
+                        } else {
+                            const projectData = result.project;
+                            console.log('📦 Creating pending demo project:', projectData);
+                        
+                            // Create the project via API
+                            const projectResponse = await fetch(apiUrl('api/build-with-ai'), {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'Authorization': `Bearer ${data.access_token}`
+                                },
+                                body: JSON.stringify({
+                                    project_name: projectData.slug,
+                                    idea: `Create a ${projectData.name}`,
+                                    tech_stack: ['React', 'TailwindCSS'],
+                                    project_type: 'web app',
+                                    features: [],
+                                    requirements: {
+                                        description: `Create a modern ${projectData.name}`,
+                                        type: 'web app'
+                                    }
+                                })
+                            });
+                        
+                            // Delete from S3
+                            await fetch(apiUrl(`api/demo/delete-pending-project/${sessionId}`), {
+                                method: 'DELETE'
+                            });
+                            localStorage.removeItem('demoSessionId');
+                        
+                            if (projectResponse.ok) {
+                                const projectResult = await projectResponse.json();
+                                if (projectResult.success) {
+                                    console.log('✅ Demo project created successfully');
+                                    // Redirect to the project editor
+                                    navigate(`/project/${projectData.slug}`);
+                                    return;
+                                }
+                            }
+                        }
+                    } catch (error) {
+                        console.error('❌ Failed to create demo project:', error);
+                        // Clean up session ID on error
+                        await fetch(apiUrl(`api/demo/delete-pending-project/${sessionId}`), {
+                            method: 'DELETE'
+                        });
+                        localStorage.removeItem('demoSessionId');
+                    }
+                }
+                
+                // Redirect to voice chat after successful signup
+                navigate('/voice-chat');
+            } else {
+                // Handle signup error
+                const errorMessage = data.detail || 'Signup failed. Please try again.';
+                console.error('❌ Signup failed:', errorMessage);
+                setError(errorMessage);
+            }
+        } catch (error) {
+            console.error('❌ Signup error:', error);
+            setError('Signup failed. Please check your connection and try again.');
+        } finally {
             setLoading(false);
-            // Here you would normally handle the signup logic
-            console.log('Signup data:', formData);
-            // Redirect to home page after successful signup
-            navigate('/home');
-        }, 1800);
+        }
     };
+    
+    const [error, setError] = useState('');
 
     const handleBackToLanding = () => {
         navigate('/');
@@ -654,67 +753,48 @@ const SignupPage = () => {
                         </div>
 
                         <form onSubmit={handleSubmit}>
-                            <div className="name-row">
-                                <div className="form-group">
-                                    <label className="form-label" htmlFor="firstName">First Name</label>
-                                    <div className="input-wrapper">
-                                        <input
-                                            type="text"
-                                            id="firstName"
-                                            name="firstName"
-                                            className={`form-input ${validation.firstName.isValid === true ? 'valid' : validation.firstName.isValid === false ? 'invalid' : ''}`}
-                                            placeholder="John"
-                                            value={formData.firstName}
-                                            onChange={handleChange}
-                                            required
-                                        />
-                                        {validation.firstName.isValid === true && (
-                                            <svg className="validation-icon valid" fill="currentColor" viewBox="0 0 20 20">
-                                                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/>
-                                            </svg>
-                                        )}
-                                        {validation.firstName.isValid === false && (
-                                            <svg className="validation-icon invalid" fill="currentColor" viewBox="0 0 20 20">
-                                                <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd"/>
-                                            </svg>
-                                        )}
-                                    </div>
-                                    {validation.firstName.message && (
-                                        <div className={`validation-message ${validation.firstName.isValid ? 'valid' : 'invalid'}`}>
-                                            {validation.firstName.message}
-                                        </div>
+                            {error && (
+                                <div style={{
+                                    padding: '12px',
+                                    marginBottom: '20px',
+                                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                                    border: '1px solid rgba(239, 68, 68, 0.3)',
+                                    borderRadius: '8px',
+                                    color: '#ef4444'
+                                }}>
+                                    {error}
+                                </div>
+                            )}
+                            
+                            <div className="form-group">
+                                <label className="form-label" htmlFor="username">Username</label>
+                                <div className="input-wrapper">
+                                    <input
+                                        type="text"
+                                        id="username"
+                                        name="username"
+                                        className={`form-input ${validation.username.isValid === true ? 'valid' : validation.username.isValid === false ? 'invalid' : ''}`}
+                                        placeholder="username"
+                                        value={formData.username}
+                                        onChange={handleChange}
+                                        required
+                                    />
+                                    {validation.username.isValid === true && (
+                                        <svg className="validation-icon valid" fill="currentColor" viewBox="0 0 20 20">
+                                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/>
+                                        </svg>
+                                    )}
+                                    {validation.username.isValid === false && (
+                                        <svg className="validation-icon invalid" fill="currentColor" viewBox="0 0 20 20">
+                                            <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd"/>
+                                        </svg>
                                     )}
                                 </div>
-                                <div className="form-group">
-                                    <label className="form-label" htmlFor="lastName">Last Name</label>
-                                    <div className="input-wrapper">
-                                        <input
-                                            type="text"
-                                            id="lastName"
-                                            name="lastName"
-                                            className={`form-input ${validation.lastName.isValid === true ? 'valid' : validation.lastName.isValid === false ? 'invalid' : ''}`}
-                                            placeholder="Doe"
-                                            value={formData.lastName}
-                                            onChange={handleChange}
-                                            required
-                                        />
-                                        {validation.lastName.isValid === true && (
-                                            <svg className="validation-icon valid" fill="currentColor" viewBox="0 0 20 20">
-                                                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/>
-                                            </svg>
-                                        )}
-                                        {validation.lastName.isValid === false && (
-                                            <svg className="validation-icon invalid" fill="currentColor" viewBox="0 0 20 20">
-                                                <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd"/>
-                                            </svg>
-                                        )}
+                                {validation.username.message && (
+                                    <div className={`validation-message ${validation.username.isValid ? 'valid' : 'invalid'}`}>
+                                        {validation.username.message}
                                     </div>
-                                    {validation.lastName.message && (
-                                        <div className={`validation-message ${validation.lastName.isValid ? 'valid' : 'invalid'}`}>
-                                            {validation.lastName.message}
-                                        </div>
-                                    )}
-                                </div>
+                                )}
                             </div>
 
                             <div className="form-group">
@@ -725,7 +805,7 @@ const SignupPage = () => {
                                         id="email"
                                         name="email"
                                         className={`form-input ${validation.email.isValid === true ? 'valid' : validation.email.isValid === false ? 'invalid' : ''}`}
-                                        placeholder="john.doe@example.com"
+                                        placeholder="email@example.com"
                                         value={formData.email}
                                         onChange={handleChange}
                                         required
@@ -756,11 +836,11 @@ const SignupPage = () => {
                                         id="password"
                                         name="password"
                                         className={`form-input ${validation.password.isValid === true ? 'valid' : validation.password.isValid === false ? 'invalid' : ''}`}
-                                        placeholder="••••••••"
+                                        placeholder="•••••••••••••"
                                         value={formData.password}
                                         onChange={handleChange}
                                         required
-                                        autocomplete="new-password"
+                                        autoComplete="new-password"
                                     />
                                     <button
                                         type="button"
@@ -803,11 +883,11 @@ const SignupPage = () => {
                                         id="confirmPassword"
                                         name="confirmPassword"
                                         className={`form-input ${validation.confirmPassword.isValid === true ? 'valid' : validation.confirmPassword.isValid === false ? 'invalid' : ''}`}
-                                        placeholder="••••••••"
+                                        placeholder="•••••••••••••"
                                         value={formData.confirmPassword}
                                         onChange={handleChange}
                                         required
-                                        autocomplete="new-password"
+                                        autoComplete="new-password"
                                     />
                                     <button
                                         type="button"
@@ -859,7 +939,7 @@ const SignupPage = () => {
                         <div className="social-login">
                             <button
                                 className="social-button"
-                                onClick={() => window.location.href = 'http://localhost:8000/auth/google/login'}
+                                onClick={() => window.location.href = 'https://api.xverta.com/auth/google/login'}
                             >
                                 <svg className="social-icon" viewBox="0 0 24 24" fill="none">
                                     <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
@@ -872,7 +952,7 @@ const SignupPage = () => {
 
                             <button
                                 className="social-button"
-                                onClick={() => window.location.href = "http://localhost:8000/auth/github/login"}
+                                onClick={() => window.location.href = "https://api.xverta.com/auth/github/login"}
                             >
                                 <svg className="social-icon" viewBox="0 0 24 24" fill="currentColor">
                                     <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>

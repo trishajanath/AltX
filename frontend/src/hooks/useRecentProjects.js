@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { apiUrl } from '../config/api';
 
 export const useRecentProjects = () => {
   const [projects, setProjects] = useState([]);
@@ -10,19 +11,7 @@ export const useRecentProjects = () => {
       try {
         setLoading(true);
         
-        // Try multiple possible backend URLs
-        const urls = [
-          '/api/project-history',
-          'http://localhost:8000/api/project-history',
-          'http://localhost:8001/api/project-history'
-        ];
-        
-        let response = null;
-        let lastError = null;
-        
-        for (const url of urls) {
-          try {
-            response = await fetch(url);
+        const response = await fetch(apiUrl('api/project-history'));
             if (response.ok) break;
           } catch (err) {
             lastError = err;

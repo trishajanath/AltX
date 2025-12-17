@@ -1,30 +1,23 @@
 # Core FastAPI and Web Framework
 fastapi==0.116.1
 uvicorn==0.35.0
-requests==2.32.3
-beautifulsoup4==4.13.4
+gunicorn==23.0.0
+starlette
+websockets
 pydantic==2.9.2
+python-multipart
+
+# HTTP Clients and Web Scraping
+requests==2.32.3
 httpx==0.28.1
+beautifulsoup4==4.13.4
+
 # AI and Language Models
 google-generativeai
+torch
+torchaudio
 
-# Environment and Configuration
-python-dotenv==1.1.1
-
-# GitHub Integration
-PyGithub==2.6.1
-
-# Security Scanning Tools
-bandit==1.8.6
-safety==3.3.0
-
-# Network and DNS
-dnspython==2.7.0
-
-# Git Operations
-GitPython==3.1.45
-
-# Langchain and related
+# Langchain and RAG
 langchain
 langchain-community
 langchain-chroma
@@ -33,12 +26,47 @@ langchain-google-genai
 
 # NLP and ML
 sentence-transformers==5.0.0
+
+# Database and Storage
+pymongo
+motor
+boto3
+botocore
+
+# Authentication and Security
+bcrypt
+python-jose[cryptography]
+passlib[bcrypt]
+sqlalchemy
+
+# GitHub and Git Integration
+PyGithub==2.6.1
+GitPython==3.1.45
+
+# Security Scanning Tools
+bandit==1.8.6
+safety==3.3.0
+
+# Audio Processing (for voice features)
+pyaudio
+google-cloud-speech
+google-cloud-texttospeech
+
+# Web Automation and Testing
+playwright==1.44.0
+docker==7.0.0
+
+# Network and DNS
+dnspython==2.7.0
+
+# Environment and Configuration
+python-dotenv==1.1.1
+
+# Utilities
 regex==2025.9.1
 
-# Testing and Linting
+# Development and Testing
 pytest==8.2.2
 pytest-asyncio==0.23.7
 black==24.4.2
 flake8==7.0.0
-docker==7.0.0
-playwright==1.44.0

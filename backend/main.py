@@ -9,7 +9,7 @@ import tempfile
 import stat
 import platform
 from fastapi import Request, Header, FastAPI, HTTPException, Body
-from fastapi.responses import RedirectResponse, HTMLResponse
+from fastapi.responses import RedirectResponse, HTMLResponse, Response
 import hmac
 import hashlib
 import subprocess
@@ -105,21 +105,142 @@ except ImportError:
 from scanner.secrets_detector import scan_secrets
 from scanner.static_python import run_bandit
 
-# --- Voice Chat Integration ---
-from voice_chat_api import router as voice_chat_router
+# Import job manager for async processing (safe - no routes)
+from job_manager import job_manager, JobStatus
+
+# Import authentication modules (safe - no routes)
+from database import UserModel
+from auth import (
+    hash_password, 
+    verify_password, 
+    create_access_token, 
+    verify_token,
+    validate_email,
+    validate_password,
+    validate_username
+)
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import Depends
 
 app = FastAPI()
 
-# CORS config
+# ==========================================
+# OPTIONS HANDLER - INSTANT PREFLIGHT RESPONSE (MUST COME FIRST)
+# ==========================================
+
+
+# ==========================================
+# CORS MIDDLEWARE - SINGLE LAYER ONLY (NO STACKING)
+# ==========================================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://www.xverta.com",
+        "https://xverta.com",
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://localhost:5174",
+    ],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Include voice chat router
+# Security scheme
+security = HTTPBearer()
+
+# ==========================================
+# IMPORT ROUTERS AFTER CORS
+# ==========================================
+from voice_chat_api import router as voice_chat_router
+
+# Include voice chat router AFTER CORS
 app.include_router(voice_chat_router)
+
+# Startup event to initialize job worker
+@app.on_event("startup")
+async def startup_event():
+    """Start background job processor"""
+    await job_manager.start_worker()
+    print("✅ Job manager worker started")
+
+# Job management endpoints
+@app.post("/api/jobs/create")
+async def create_job_endpoint(
+    request: dict = Body(...),
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """Create a new async job (e.g., project generation)"""
+    try:
+        # Verify token and get user
+        token = credentials.credentials
+        payload = verify_token(token)
+        if not payload:
+            raise HTTPException(status_code=401, detail="Invalid or expired token")
+        
+        user_email = payload.get("sub")
+        job_type = request.get("job_type")
+        params = request.get("params", {})
+        
+        if not job_type:
+            raise HTTPException(status_code=400, detail="job_type is required")
+        
+        # Create job
+        job_id = job_manager.create_job(job_type, params, user_email)
+        
+        return {
+            "success": True,
+            "job_id": job_id,
+            "message": "Job created and queued for processing"
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Create job error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/jobs/{job_id}")
+async def get_job_status(
+    job_id: str,
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """Get job status and results"""
+    try:
+        # Verify token
+        token = credentials.credentials
+        payload = verify_token(token)
+        if not payload:
+            raise HTTPException(status_code=401, detail="Invalid or expired token")
+        
+        # Get job
+        job = job_manager.get_job(job_id)
+        if not job:
+            # Job not found - may have been lost due to server restart
+            return {
+                "success": False,
+                "error": "Job not found - server may have restarted. Please try creating your project again.",
+                "job": {
+                    "status": "not_found",
+                    "message": "This job is no longer available"
+                }
+            }
+        
+        # Verify user owns this job
+        user_email = payload.get("sub")
+        if job.user_email != user_email:
+            raise HTTPException(status_code=403, detail="Not authorized to view this job")
+        
+        return {
+            "success": True,
+            "job": job.to_dict()
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Get job error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # --- Storage Classes for Scan Results ---
 class WebsiteScan:
@@ -155,6 +276,11 @@ class ConsoleErrorRequest(BaseModel):
     stack_trace: Optional[str] = None
     error_type: Optional[str] = None
 
+class SignupRequest(BaseModel):
+    email: str
+    username: str
+    password: str
+
 class LoginRequest(BaseModel):
     email: str
     password: str
@@ -163,6 +289,14 @@ class LoginResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: Dict[str, Any]
+
+class UserResponse(BaseModel):
+    id: str
+    email: str
+    username: str
+    is_active: bool
+    is_verified: bool
+    created_at: datetime
 
 from fastapi import Query, WebSocket, WebSocketDisconnect
 from fastapi.websockets import WebSocketState
@@ -178,9 +312,301 @@ def normalize_project_slug(project_name: str) -> str:
     Only replaces spaces with hyphens, preserves slashes for nested projects.
     """
     return project_name.replace(" ", "-")
+
+# Authentication helper - get current user from JWT token
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
+    """
+    Dependency to get current authenticated user from JWT token.
+    Raises HTTPException if token is invalid or user not found.
+    """
+    token = credentials.credentials
+    payload = verify_token(token)
+    
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+    
+    user_model = UserModel()
+    user = user_model.get_user_by_id(user_id)
+    
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    
+    if not user.get("is_active", False):
+        raise HTTPException(status_code=403, detail="User account is deactivated")
+    
+    return user
+
+# Optional authentication - returns None if no token or invalid
+async def get_current_user_optional(credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False))) -> Optional[dict]:
+    """
+    Optional dependency to get current user. Returns None if not authenticated.
+    """
+    if not credentials:
+        return None
+    
+    try:
+        return await get_current_user(credentials)
+    except HTTPException:
+        return None
+
+
+# ==================== AUTHENTICATION ENDPOINTS ====================
+
+@app.post("/api/auth/signup")
+async def signup(request: SignupRequest):
+    """
+    Register a new user account.
+    """
+    try:
+        # Validate email format
+        if not validate_email(request.email):
+            raise HTTPException(status_code=400, detail="Invalid email format")
+        
+        # Validate username
+        is_valid, error_msg = validate_username(request.username)
+        if not is_valid:
+            raise HTTPException(status_code=400, detail=error_msg)
+        
+        # Validate password strength
+        is_valid, error_msg = validate_password(request.password)
+        if not is_valid:
+            raise HTTPException(status_code=400, detail=error_msg)
+        
+        # Hash password
+        hashed_password = hash_password(request.password)
+        
+        # Create user
+        user_model = UserModel()
+        try:
+            user = user_model.create_user(
+                email=request.email,
+                username=request.username,
+                hashed_password=hashed_password
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        
+        # Create access token
+        access_token = create_access_token(data={"sub": user["_id"]})
+        
+        # Remove sensitive data
+        user.pop("hashed_password", None)
+        
+        return {
+            "success": True,
+            "access_token": access_token,
+            "token_type": "bearer",
+            "user": {
+                "id": user["_id"],
+                "email": user["email"],
+                "username": user["username"],
+                "is_verified": user.get("is_verified", False),
+                "created_at": user.get("created_at")
+            }
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Signup error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create account")
+
+
+@app.post("/api/auth/login")
+async def login(request: LoginRequest):
+    """
+    Login with email and password.
+    """
+    try:
+        # Get user by email
+        user_model = UserModel()
+        user = user_model.get_user_by_email(request.email)
+        
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+        
+        # Verify password
+        if not verify_password(request.password, user["hashed_password"]):
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+        
+        # Check if user is active
+        if not user.get("is_active", False):
+            raise HTTPException(status_code=403, detail="Account is deactivated")
+        
+        # Create access token
+        access_token = create_access_token(data={"sub": user["_id"]})
+        
+        # Remove sensitive data
+        user.pop("hashed_password", None)
+        
+        return {
+            "success": True,
+            "access_token": access_token,
+            "token_type": "bearer",
+            "user": {
+                "id": user["_id"],
+                "email": user["email"],
+                "username": user["username"],
+                "is_verified": user.get("is_verified", False),
+                "created_at": user.get("created_at")
+            }
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Login error: {e}")
+        raise HTTPException(status_code=500, detail="Login failed")
+
+
+@app.get("/api/auth/me")
+async def get_current_user_info(current_user: dict = Depends(get_current_user)):
+    """
+    Get current authenticated user information.
+    """
+    current_user.pop("hashed_password", None)
+    return {
+        "success": True,
+        "user": {
+            "id": current_user["_id"],
+            "email": current_user["email"],
+            "username": current_user["username"],
+            "is_verified": current_user.get("is_verified", False),
+            "is_active": current_user.get("is_active", True),
+            "created_at": current_user.get("created_at"),
+            "updated_at": current_user.get("updated_at")
+        }
+    }
+
+
+@app.post("/api/auth/logout")
+async def logout(current_user: dict = Depends(get_current_user)):
+    """
+    Logout (client should delete the token).
+    """
+    return {
+        "success": True,
+        "message": "Logged out successfully"
+    }
+
+
+# ==================== PENDING DEMO PROJECT ENDPOINTS ====================
+
+@app.post("/api/demo/save-pending-project")
+async def save_pending_demo_project(request: Request):
+    """
+    Save pending demo project details to S3 for post-login creation
+    """
+    try:
+        data = await request.json()
+        project_data = data.get('project')
+        session_id = data.get('session_id')
+        
+        if not project_data or not session_id:
+            raise HTTPException(status_code=400, detail="Missing project data or session_id")
+        
+        from s3_storage import s3_client, S3_BUCKET_NAME
+        
+        # Save to S3 with session-based key
+        s3_key = f"pending-demos/{session_id}/project.json"
+        
+        s3_client.put_object(
+            Bucket=S3_BUCKET_NAME,
+            Key=s3_key,
+            Body=json.dumps(project_data).encode('utf-8'),
+            ContentType='application/json',
+            Metadata={
+                'session_id': session_id,
+                'created_at': datetime.utcnow().isoformat()
+            }
+        )
+        
+        return {
+            "success": True,
+            "session_id": session_id,
+            "message": "Pending project saved successfully"
+        }
+        
+    except Exception as e:
+        print(f"❌ Error saving pending demo project: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/demo/get-pending-project/{session_id}")
+async def get_pending_demo_project(session_id: str):
+    """
+    Retrieve pending demo project details from S3
+    """
+    try:
+        from s3_storage import s3_client, S3_BUCKET_NAME
+        
+        s3_key = f"pending-demos/{session_id}/project.json"
+        
+        try:
+            response = s3_client.get_object(
+                Bucket=S3_BUCKET_NAME,
+                Key=s3_key
+            )
+            
+            project_data = json.loads(response['Body'].read().decode('utf-8'))
+            
+            return {
+                "success": True,
+                "project": project_data
+            }
+            
+        except s3_client.exceptions.NoSuchKey:
+            return {
+                "success": False,
+                "message": "No pending project found"
+            }
+        
+    except Exception as e:
+        print(f"❌ Error retrieving pending demo project: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/demo/delete-pending-project/{session_id}")
+async def delete_pending_demo_project(session_id: str):
+    """
+    Delete pending demo project from S3 after it's been created
+    """
+    try:
+        from s3_storage import s3_client, S3_BUCKET_NAME
+        
+        s3_key = f"pending-demos/{session_id}/project.json"
+        
+        s3_client.delete_object(
+            Bucket=S3_BUCKET_NAME,
+            Key=s3_key
+        )
+        
+        return {
+            "success": True,
+            "message": "Pending project deleted successfully"
+        }
+        
+    except Exception as e:
+        print(f"❌ Error deleting pending demo project: {str(e)}")
+        # Don't raise error - deletion failure is not critical
+        return {
+            "success": False,
+            "message": "Failed to delete pending project"
+        }
+
+
+# ==================== END AUTHENTICATION ENDPOINTS ====================
+
 import threading
 import uuid
 # --- Project File Tree Endpoint ---
+# ❌ DEPRECATED - LOCAL STORAGE ONLY (EC2 INCOMPATIBLE)
+# Use /api/project-file-tree instead (line 4315+) - S3-enabled
+# This endpoint is kept for backward compatibility only
 @app.get("/project-file-tree")
 async def get_project_file_tree(project_name: str = Query(...)):
     """
@@ -240,7 +666,9 @@ async def get_project_file_tree(project_name: str = Query(...)):
         print(f"Error getting project tree: {e}")
         return {"success": False, "error": str(e)}
 
-# --- Project File Content Endpoint ---
+# ❌ DEPRECATED - LOCAL STORAGE ONLY (EC2 INCOMPATIBLE)
+# Use /api/project-file-content instead (line 4450+) - S3-enabled
+# This endpoint is kept for backward compatibility only
 @app.get("/project-file-content")
 async def get_project_file_content(project_name: str = Query(...), file_path: str = Query(...)):
     """
@@ -291,7 +719,7 @@ async def get_project_preview_url(project_name: str = Query(...)):
     In production, this should point to the actual deployed preview.
     """
     # Demo: return a placeholder preview URL
-    url = f"https://demo.altx.app/{project_name.lower().replace(' ', '-')}-preview"
+    url = f"https://demo.xverta.app/{project_name.lower().replace(' ', '-')}-preview"
     return {"success": True, "url": url}
 
 # --- WebSocket Connection Manager ---
@@ -513,6 +941,7 @@ async def create_project_structure(request: dict = Body(...)):
         tech_stack = request.get("tech_stack", [])
         project_type = request.get("project_type", "web app")
         features = request.get("features", [])
+        user_id = request.get("user_id", "anonymous")  # Get user_id for S3 multi-tenancy
         requirements = request.get("requirements", {})
         
         # Send progress updates via WebSocket
@@ -524,13 +953,8 @@ async def create_project_structure(request: dict = Body(...)):
         
         # Generate project name slug
         project_slug = project_name.lower().replace(" ", "-").replace("_", "-")
-        projects_dir = Path("generated_projects")
-        projects_dir.mkdir(exist_ok=True)
-        project_path = projects_dir / project_slug
-        
-        # Remove existing project if it exists
-        if project_path.exists():
-            shutil.rmtree(project_path)
+        # NO LOCAL STORAGE - S3-only architecture (EC2 compatible)
+        project_path = Path("generated_projects") / project_slug  # Used only for path structure, not created
         
         # Determine tech stack based on AI analysis of the idea
         detected_stack = await analyze_tech_stack_for_idea(idea)
@@ -544,13 +968,27 @@ async def create_project_structure(request: dict = Body(...)):
             "requirements": requirements
         }
         
+        # Generate files and upload to S3 in real-time
+        await manager.send_to_project(project_name, {
+            "type": "terminal_output", 
+            "message": f"☁️ Generating project directly to S3...",
+            "level": "info"
+        })
+        
         files_created = await create_complete_project_structure(
-            project_path, full_spec, project_slug, detected_stack
+            project_path, full_spec, project_slug, detected_stack, user_id
         )
         
         await manager.send_to_project(project_name, {
             "type": "terminal_output", 
             "message": f"✅ Created {len(files_created)} files",
+            "level": "success"
+        })
+        
+        # Files already uploaded to S3 during generation (direct S3 writes)
+        await manager.send_to_project(project_name, {
+            "type": "terminal_output",
+            "message": f"☁️ All {len(files_created)} files already in cloud storage (S3)",
             "level": "success"
         })
         
@@ -597,7 +1035,7 @@ async def analyze_tech_stack_for_idea(idea: str) -> List[str]:
     
     return base_stack + additional_features[:4]  # Limit to 8 total items
 
-async def create_complete_project_structure(project_path: Path, project_spec: dict, project_name: str, tech_stack: List[str]) -> List[str]:
+async def create_complete_project_structure(project_path: Path, project_spec: dict, project_name: str, tech_stack: List[str], user_id: str = "anonymous") -> List[str]:
     """Create complete project with OPTIMIZED Pure AI generation - 100% AI code, NO templates, FAST"""
     
     # Extract details from project_spec
@@ -616,14 +1054,20 @@ async def create_complete_project_structure(project_path: Path, project_spec: di
         # Use OPTIMIZED Pure AI Generator - NO templates, FAST AI generation
         if os.getenv("GOOGLE_API_KEY"):
             from pure_ai_generator import PureAIGenerator
+            from s3_storage import upload_project_to_s3
             
             await manager.send_to_project(project_name, {
                 "type": "terminal_output",
-                "message": "🧠 FAST AI: Creating 100% custom implementation...",
+                "message": "☁️ CLOUD MODE: Generating directly to S3 (no local storage)...",
                 "level": "info"
             })
             
-            generator = PureAIGenerator()
+            # Initialize generator with S3 uploader for direct cloud generation
+            generator = PureAIGenerator(
+                s3_uploader=upload_project_to_s3,
+                user_id=user_id
+            )
+            
             files_created = await generator.generate_project_structure(
                 project_path, 
                 project_spec, 
@@ -633,9 +1077,9 @@ async def create_complete_project_structure(project_path: Path, project_spec: di
             
             await manager.send_to_project(project_name, {
                 "type": "file_creation_complete", 
-                "message": f"🎉 Pure AI Complete! Generated {len(files_created)} files of 100% custom AI code",
+                "message": f"☁️ Cloud Generation Complete! Generated {len(files_created)} files directly to S3",
                 "files_created": files_created,
-                "generation_method": "optimized-pure-ai"
+                "generation_method": "s3-direct-ai"
             })
             
             return files_created
@@ -658,50 +1102,44 @@ async def create_complete_project_structure(project_path: Path, project_spec: di
 
 # --- Sandboxed Preview Endpoint ---
 @app.get("/api/sandbox-preview/{project_name:path}")
-async def get_sandbox_preview(project_name: str):
-    """Generate a sandboxed HTML preview that runs React code directly in the browser"""
+async def get_sandbox_preview(project_name: str, current_user: Optional[dict] = Depends(get_current_user_optional)):
+    """Generate a sandboxed HTML preview from S3-stored files (S3-ONLY, EC2 COMPATIBLE)"""
     try:
+        # Get user_id from authenticated user or default to anonymous
+        user_id = current_user.get('_id') if current_user else 'anonymous'
+        
         print(f"🔍 Sandbox preview requested for: '{project_name}'")
         project_slug = normalize_project_slug(project_name)
         print(f"🔍 Normalized to slug: '{project_slug}'")
-        projects_dir = Path("generated_projects")
-        project_path = projects_dir / project_slug
-        print(f"🔍 Full project path: '{project_path}'")
-        frontend_path = project_path / "frontend"
         
-        if not frontend_path.exists():
-            raise HTTPException(status_code=404, detail="Project frontend not found")
+        # Load project from S3 (NO LOCAL FALLBACK)
+        project_data = get_project_from_s3(project_slug=project_slug, user_id=user_id)
         
-        # Read the main files
+        if not project_data or not project_data.get('files'):
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Project '{project_slug}' not found in cloud storage"
+            )
+        
+        print(f"✅ Loading project from S3: {len(project_data['files'])} files")
         files_content = {}
         
-        # Essential files to bundle
-        essential_files = [
-            "src/App.jsx",
-            "src/main.jsx", 
-            "src/index.css",
-            "package.json"
-        ]
+        # Extract frontend files
+        for file in project_data['files']:
+            file_path = file['path']
+            if file_path.startswith('frontend/'):
+                # Remove 'frontend/' prefix
+                relative_path = file_path[9:]
+                files_content[relative_path] = file['content']
         
-        # Read additional component files
-        src_components_path = frontend_path / "src" / "components"
-        if src_components_path.exists():
-            for comp_file in src_components_path.glob("*.jsx"):
-                essential_files.append(f"src/components/{comp_file.name}")
-        
-        for file_path in essential_files:
-            full_path = frontend_path / file_path
-            if full_path.exists():
-                try:
-                    content = full_path.read_text(encoding='utf-8')
-                    files_content[file_path] = content
-                except Exception as e:
-                    print(f"Error reading {file_path}: {e}")
-                    files_content[file_path] = f"// Error reading file: {e}"
+        if not files_content:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No frontend files found for project '{project_slug}'"
+            )
         
         # Generate the sandbox HTML
         sandbox_html = generate_sandbox_html(files_content, project_name)
-        
         return HTMLResponse(content=sandbox_html)
         
     except Exception as e:
@@ -710,7 +1148,7 @@ async def get_sandbox_preview(project_name: str):
             <body style="font-family: Arial; padding: 20px; background: #1e1e1e; color: #fff;">
                 <h2>Preview Error</h2>
                 <p>Failed to generate preview: {str(e)}</p>
-                <p>Make sure your project has been built successfully.</p>
+                <p>Project: {project_name}</p>
             </body>
         </html>
         """
@@ -1430,120 +1868,63 @@ def fix_jsx_content_for_sandbox(content: str, component_name: str, project_name:
     
     return content
 
-# --- Lovable-style Orchestrator: Build With AI ---
+# --- Lovable-style Orchestrator: Build With AI (ASYNC VERSION) ---
 @app.post("/api/build-with-ai")
-async def build_with_ai(request: dict = Body(...)):
-    """One-click flow: create -> install -> validate/fix -> run -> preview"""
+async def build_with_ai(
+    request: dict = Body(...),
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """
+    Create an async job for project generation.
+    Returns immediately with job_id for polling.
+    """
     try:
+        # Verify token and get user
+        token = credentials.credentials
+        payload = verify_token(token)
+        if not payload:
+            raise HTTPException(status_code=401, detail="Invalid or expired token")
+        
+        user_email = payload.get("sub")
+        
+        # Extract parameters
         project_name = request.get("project_name")
         idea = request.get("idea") or ""
         tech_stack = request.get("tech_stack", [])
         project_type = request.get("project_type", "web app")
         features = request.get("features", [])
         requirements = request.get("requirements", {})
+        customizations = request.get("customizations", {})
 
         if not project_name:
             raise HTTPException(status_code=400, detail="project_name is required")
-
-        # 1) Create structure with full project details
-        await manager.send_to_project(project_name, {
-            "type": "status",
-            "phase": "create",
-            "message": "Creating project structure with AI..."
-        })
-
-        create_resp = await create_project_structure({
-            "project_name": project_name,
-            "idea": idea,
-            "tech_stack": tech_stack,
-            "project_type": project_type,
-            "features": features,
-            "requirements": requirements
-        })
-        if not create_resp.get("success"):
-            return create_resp
-
-        project_slug = project_name.lower().replace(" ", "-")
-        projects_dir = Path("generated_projects")
-        project_path = projects_dir / project_slug
-
-        # 2) Install dependencies (frontend/backend if present)
-        await manager.send_to_project(project_name, {
-            "type": "status",
-            "phase": "install",
-            "message": "Installing dependencies..."
-        })
-
-        await install_dependencies_endpoint({
-            "project_name": project_name,
-            "tech_stack": tech_stack
-        })
-
-        # 3) Validate and auto-fix in a short loop
-        await manager.send_to_project(project_name, {
-            "type": "status",
-            "phase": "validate",
-            "message": "Validating project for errors..."
-        })
-
-        # First pass validation
-        await validate_and_fix_project_files(project_path, project_name)
-        check1 = await check_project_errors(project_name)
-        if not check1.get("success"):
-            return check1
-
-        errors = check1.get("errors", [])
-        if errors:
-            await manager.send_to_project(project_name, {
-                "type": "status",
-                "phase": "fix",
-                "message": f"Auto-fixing {len(errors)} issues..."
-            })
-            await auto_fix_errors({
+        
+        # Create async job
+        job_id = job_manager.create_job(
+            job_type="project_generation",
+            params={
                 "project_name": project_name,
-                "errors": errors,
-                "tech_stack": tech_stack
-            })
-            # Re-validate once more
-            check2 = await check_project_errors(project_name)
-            errors = check2.get("errors", []) if check2.get("success") else errors
-
-        # 4) Run project (frontend + optional backend)
-        await manager.send_to_project(project_name, {
-            "type": "status",
-            "phase": "run",
-            "message": "Starting development servers..."
-        })
-
-        run_resp = await run_project({
-            "project_name": project_name,
-            "tech_stack": tech_stack
-        })
-
-        preview_url = run_resp.get("preview_url") if isinstance(run_resp, dict) else None
-        if preview_url:
-            await manager.send_to_project(project_name, {
-                "type": "preview_ready",
-                "url": preview_url
-            })
-
-        # 5) Final status
-        await manager.send_to_project(project_name, {
-            "type": "status",
-            "phase": "ready",
-            "message": "✅ Build complete. Live preview is ready.",
-            "preview_url": preview_url,
-            "errors_remaining": errors
-        })
-
+                "idea": idea,
+                "tech_stack": tech_stack,
+                "project_type": project_type,
+                "features": features,
+                "requirements": requirements,
+                "customizations": customizations
+            },
+            user_email=user_email
+        )
+        
         return {
             "success": True,
-            "preview_url": preview_url,
-            "errors": errors
+            "job_id": job_id,
+            "message": "Project generation started. Poll /api/jobs/{job_id} for progress."
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        print(f"❌ Build with AI error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # --- AI Chat Endpoint ---
 @app.post("/api/chat")
@@ -1723,6 +2104,9 @@ export default {component_name};"""
     return content
 
 # --- AI Project Assistant Endpoint ---
+# ⚠️ LEGACY - LOCAL STORAGE ONLY (EC2 INCOMPATIBLE)
+# Use /api/ai-customize-project instead (line 2869+) - S3-enabled
+# This endpoint uses 200+ lines of local file operations and is rarely used
 @app.post("/api/ai-project-assistant")
 async def ai_project_assistant(request: dict = Body(...)):
     """Process natural language requests to modify and improve project files."""
@@ -2056,8 +2440,8 @@ ANALYZING PROJECT FILES FOR SPECIFIC FIXES..."""
                         analysis_points.append("Remove duplicate ErrorBoundary class declarations")
                     if "...props" in app_content and "props &&" not in app_content:
                         analysis_points.append("Spread operator used without checking if props exists")
-                    if "localhost:8000/api" in app_content and "/v1" not in app_content:
-                        analysis_points.append("API endpoints missing /v1 prefix")
+                    if "localhost" in app_content or "127.0.0.1" in app_content:
+                        analysis_points.append("Using localhost URLs - should use production API URLs")
                     if "fetch(" in app_content and ".then" not in app_content and "await" not in app_content:
                         analysis_points.append("Fetch calls need proper async/await or .then handling")
                         
@@ -2848,11 +3232,12 @@ RESPOND WITH ONLY JSON NOW:"""
 # --- AI Customization Endpoint ---
 @app.post("/api/ai-customize-project")
 async def ai_customize_project(request: dict = Body(...)):
-    """Handle user customization requests like changing colors, text, layouts, etc."""
+    """Handle user customization requests - reads from and writes to S3"""
     try:
         project_name = request.get("project_name")
         file_path = request.get("file_path")
         customization_request = request.get("customization_request")
+        user_id = request.get("user_id", "anonymous")
         
         if not project_name:
             raise HTTPException(status_code=400, detail="project_name is required")
@@ -2861,26 +3246,42 @@ async def ai_customize_project(request: dict = Body(...)):
         if not customization_request:
             raise HTTPException(status_code=400, detail="customization_request is required")
         
-        # Resolve project path - handle paths with slashes
         project_slug = project_name.replace(" ", "-")
-        projects_dir = Path("generated_projects")
-        project_path = projects_dir / project_slug
+        file_path_clean = file_path.lstrip("/")
         
-        if not project_path.exists():
-            return {"success": False, "error": "Project not found"}
-        
-        # Resolve full file path
-        full_file_path = project_path / file_path.lstrip("/")
-        
-        if not full_file_path.exists():
-            return {"success": False, "error": f"File not found: {file_path}"}
-        
-        # Read current file content
+        # Get current file content from S3 first
+        current_content = None
         try:
-            with open(full_file_path, 'r', encoding='utf-8') as f:
-                current_content = f.read()
-        except Exception as e:
-            return {"success": False, "error": f"Failed to read file: {str(e)}"}
+            project_data = get_project_from_s3(project_slug=project_slug, user_id=user_id)
+            
+            if project_data and project_data.get('files'):
+                for file_info in project_data['files']:
+                    if file_info['path'] == file_path_clean:
+                        current_content = file_info['content']
+                        print(f"📄 AI reading from S3: {file_path_clean}")
+                        break
+        except Exception as s3_error:
+            print(f"⚠️ S3 read error: {s3_error}")
+        
+        # Fallback to local if S3 fails
+        if current_content is None:
+            projects_dir = Path("generated_projects")
+            project_path = projects_dir / project_slug
+            
+            if not project_path.exists():
+                return {"success": False, "error": "Project not found"}
+            
+            full_file_path = project_path / file_path_clean
+            
+            if not full_file_path.exists():
+                return {"success": False, "error": f"File not found: {file_path}"}
+            
+            try:
+                with open(full_file_path, 'r', encoding='utf-8') as f:
+                    current_content = f.read()
+                print(f"📄 AI reading from local: {file_path_clean}")
+            except Exception as e:
+                return {"success": False, "error": f"Failed to read file: {str(e)}"}
         
         # Prepare project context
         project_context = {
@@ -2888,12 +3289,6 @@ async def ai_customize_project(request: dict = Body(...)):
             "type": "Web Application",
             "framework": "React"
         }
-        
-        # Try to detect framework from file structure
-        if (project_path / "frontend" / "package.json").exists():
-            project_context["framework"] = "React"
-        elif (project_path / "backend" / "main.py").exists():
-            project_context["framework"] = "FastAPI + React"
         
         # Send status update
         await manager.send_to_project(project_name, {
@@ -2907,40 +3302,84 @@ async def ai_customize_project(request: dict = Body(...)):
         
         result = get_user_customization_response(
             file_content=current_content,
-            file_path=file_path,
+            file_path=file_path_clean,
             user_request=customization_request,
             project_context=project_context,
             model_type='smart'
         )
         
         if result["success"]:
-            # Apply the changes to the file
+            modified_content = result["modified_content"]
+            
+            # Save to S3 first
             try:
+                # Get all project files from S3
+                project_data = get_project_from_s3(project_slug=project_slug, user_id=user_id)
+                
+                if project_data and project_data.get('files'):
+                    # Update the modified file in the list
+                    files_to_upload = []
+                    file_updated = False
+                    
+                    for file_info in project_data['files']:
+                        if file_info['path'] == file_path_clean:
+                            files_to_upload.append({
+                                'path': file_path_clean,
+                                'content': modified_content
+                            })
+                            file_updated = True
+                        else:
+                            files_to_upload.append(file_info)
+                    
+                    # If file wasn't in S3, add it
+                    if not file_updated:
+                        files_to_upload.append({
+                            'path': file_path_clean,
+                            'content': modified_content
+                        })
+                    
+                    # Upload updated project to S3
+                    upload_result = upload_project_to_s3(
+                        project_slug=project_slug,
+                        files=files_to_upload,
+                        user_id=user_id
+                    )
+                    print(f"✅ AI saved to S3: {file_path_clean}")
+            except Exception as s3_error:
+                print(f"⚠️ S3 write error: {s3_error}")
+            
+            # Also save locally for development
+            try:
+                projects_dir = Path("generated_projects")
+                project_path = projects_dir / project_slug
+                full_file_path = project_path / file_path_clean
+                
+                full_file_path.parent.mkdir(parents=True, exist_ok=True)
                 with open(full_file_path, 'w', encoding='utf-8') as f:
-                    f.write(result["modified_content"])
-                
-                # Send success notification
-                await manager.send_to_project(project_name, {
-                    "type": "status",
-                    "phase": "complete",
-                    "message": f"✅ Successfully customized {file_path}",
-                    "details": {
-                        "changes_made": result["changes_made"],
-                        "explanation": result["explanation"]
-                    }
-                })
-                
-                return {
-                    "success": True,
-                    "message": "Customization applied successfully",
-                    "file_path": file_path,
+                    f.write(modified_content)
+                print(f"✅ AI saved to local: {file_path_clean}")
+            except Exception as local_error:
+                print(f"⚠️ Local write error: {local_error}")
+            
+            # Send success notification
+            await manager.send_to_project(project_name, {
+                "type": "status",
+                "phase": "complete",
+                "message": f"✅ Successfully customized {file_path}",
+                "details": {
                     "changes_made": result["changes_made"],
-                    "explanation": result["explanation"],
-                    "file_type": result.get("file_type", "unknown")
+                    "explanation": result["explanation"]
                 }
-                
-            except Exception as e:
-                return {"success": False, "error": f"Failed to save changes: {str(e)}"}
+            })
+            
+            return {
+                "success": True,
+                "message": "Customization applied successfully",
+                "file_path": file_path_clean,
+                "changes_made": result["changes_made"],
+                "explanation": result["explanation"],
+                "file_type": result.get("file_type", "unknown")
+            }
         else:
             # Send error notification
             await manager.send_to_project(project_name, {
@@ -2963,89 +3402,92 @@ async def ai_customize_project(request: dict = Body(...)):
 # --- AI Apply Changes Endpoint ---
 @app.post("/api/ai-apply-changes")
 async def ai_apply_changes(request: dict = Body(...)):
-    """Apply AI-suggested changes to project files, validate, and optionally rerun."""
+    """Apply AI-suggested changes to project files in S3"""
     try:
         project_name = request.get("project_name")
         edits = request.get("edits", [])  # List[{file_path, content}]
         re_run = bool(request.get("re_run", False))
         tech_stack = request.get("tech_stack", [])
+        user_id = request.get("user_id", "anonymous")
 
         if not project_name:
             raise HTTPException(status_code=400, detail="project_name is required")
         if not isinstance(edits, list) or not edits:
             raise HTTPException(status_code=400, detail="No edits provided")
 
-        # Resolve project path
+        # Get project slug
         project_slug = project_name.lower().replace(" ", "-")
-        projects_dir = Path("generated_projects")
-        project_path = projects_dir / project_slug
-        if not project_path.exists():
-            return {"success": False, "error": "Project not found"}
 
-        # Apply edits safely
+        # Prepare files for S3 upload
+        files_to_upload = []
         files_modified = []
+        
         for edit in edits:
             file_path = (edit.get("file_path") or "").lstrip("/")
             content = edit.get("content", "")
             if not file_path:
                 continue
-            target = project_path / file_path
-            # Ensure path is within project
-            try:
-                target.resolve().relative_to(project_path.resolve())
-            except Exception:
-                continue
-            target.parent.mkdir(parents=True, exist_ok=True)
-            cleaned = _clean_ai_generated_content(content, target.name)
-            with open(target, 'w', encoding='utf-8', newline='\n') as f:
-                f.write(cleaned)
+            
+            # Clean AI-generated content
+            filename = file_path.split('/')[-1]
+            cleaned = _clean_ai_generated_content(content, filename)
+            
+            files_to_upload.append({
+                'path': file_path,
+                'content': cleaned
+            })
             files_modified.append(file_path)
+            
             await manager.send_to_project(project_name, {
                 "type": "file_changed",
                 "file_path": file_path,
                 "message": f"✍️ Updated {file_path}"
             })
 
-        # Validate and fix critical files
+        # Batch upload to S3
+        try:
+            from s3_storage import upload_project_to_s3
+            
+            upload_project_to_s3(
+                project_slug=project_slug,
+                files=files_to_upload,
+                user_id=user_id
+            )
+            
+            print(f"☁️ Uploaded {len(files_to_upload)} AI-modified files to S3")
+            
+        except Exception as s3_error:
+            print(f"❌ S3 upload failed: {s3_error}")
+            return {"success": False, "error": f"Failed to save changes to S3: {str(s3_error)}"}
+
+        # Validate (optional - may need local files)
         await manager.send_to_project(project_name, {
             "type": "status",
             "phase": "validate",
-            "message": "Validating updates..."
+            "message": "✅ Changes applied to cloud storage"
         })
-        await validate_and_fix_project_files(project_path, project_name)
-        check = await check_project_errors(project_name)
-        remaining_errors = check.get("errors", []) if check.get("success") else []
 
-        # Optionally rerun project
+        # Optionally rerun project (may need local files for preview)
         preview_url = None
         if re_run:
             await manager.send_to_project(project_name, {
                 "type": "status",
                 "phase": "run",
-                "message": "Restarting development servers..."
+                "message": "⚠️ Preview requires local checkout (S3 files uploaded)"
             })
-            run_resp = await run_project({
-                "project_name": project_name,
-                "tech_stack": tech_stack
-            })
-            if isinstance(run_resp, dict):
-                preview_url = run_resp.get("preview_url")
-                if preview_url:
-                    await manager.send_to_project(project_name, {"type": "preview_ready", "url": preview_url})
 
         await manager.send_to_project(project_name, {
             "type": "status",
             "phase": "ready",
-            "message": "✅ Changes applied",
-            "preview_url": preview_url,
-            "errors_remaining": remaining_errors
+            "message": "✅ Changes applied to cloud storage",
+            "preview_url": preview_url
         })
 
         return {
             "success": True,
             "files_modified": files_modified,
             "preview_url": preview_url,
-            "errors": remaining_errors
+            "storage": "s3"
         }
 
     except HTTPException:
@@ -3232,42 +3674,45 @@ async def validate_and_fix_project_files(project_path: Path, project_name: str) 
 # --- File Save Endpoint ---
 @app.post("/api/save-project-file")
 async def save_project_file(request: dict = Body(...)):
-    """Save file content to the project"""
+    """Save file content to S3 and optionally local storage"""
     try:
         project_name = request.get("project_name")
         file_path = request.get("file_path")
         content = request.get("content")
+        user_id = request.get("user_id", "anonymous")
         
-        # Get project path - handle paths with slashes
+        # Get project slug
         project_slug = project_name.replace(" ", "-")
-        projects_dir = Path("generated_projects")
-        project_path = projects_dir / project_slug
-        
-        # Security check
-        full_file_path = project_path / file_path.lstrip('/')
-        try:
-            full_file_path.resolve().relative_to(project_path.resolve())
-        except ValueError:
-            return {"success": False, "error": "Invalid file path"}
-        
-        # Create directory if it doesn't exist
-        full_file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path_clean = file_path.lstrip('/')
         
         # Clean content before saving
-        cleaned_content = _clean_ai_generated_content(content, full_file_path.name)
+        filename = file_path_clean.split('/')[-1]
+        cleaned_content = _clean_ai_generated_content(content, filename)
         
-        # Save file
-        with open(full_file_path, 'w', encoding='utf-8') as f:
-            f.write(cleaned_content)
-        
-        # Notify via WebSocket
-        await manager.send_to_project(project_name, {
-            "type": "file_changed",
-            "file_path": file_path,
-            "message": f"File saved: {file_path}"
-        })
-        
-        return {"success": True}
+        # Upload to S3 (primary storage)
+        try:
+            from s3_storage import upload_project_to_s3
+            
+            upload_project_to_s3(
+                project_slug=project_slug,
+                files=[{'path': file_path_clean, 'content': cleaned_content}],
+                user_id=user_id
+            )
+            
+            print(f"☁️ Saved {file_path_clean} to S3")
+            
+            # Notify via WebSocket
+            await manager.send_to_project(project_name, {
+                "type": "file_changed",
+                "file_path": file_path,
+                "message": f"☁️ File saved to cloud: {file_path}"
+            })
+            
+            return {"success": True, "storage": "s3"}
+            
+        except Exception as s3_error:
+            print(f"❌ S3 save failed: {s3_error}")
+            return {"success": False, "error": f"Failed to save to S3: {str(s3_error)}"}
         
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -3399,7 +3844,7 @@ async def run_project(request: dict = Body(...)):
         })
         
         # Generate sandbox preview URL
-        sandbox_url = f"http://localhost:8000/api/sandbox-preview/{project_slug}"
+        sandbox_url = f"https://api.xverta.com/api/sandbox-preview/{project_slug}"
         
         # Validate that essential files exist
         essential_files = ["src/App.jsx", "src/main.jsx"]
@@ -4076,95 +4521,105 @@ async def execute_command(request: dict = Body(...)):
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-# --- Project History Endpoint ---
+# --- Project History Endpoint (S3-backed) ---
 @app.get("/api/project-history")
-async def get_project_history():
-    """Get list of all generated projects with metadata"""
+async def get_project_history(current_user: Optional[dict] = Depends(get_current_user_optional)):
+    """Get list of all generated projects with metadata from S3"""
     try:
-        projects_dir = Path("generated_projects")
+        # Get user_id from authenticated user or default to anonymous
+        user_id = current_user.get('_id') if current_user else 'anonymous'
         
-        if not projects_dir.exists():
+        # Get project slugs from S3
+        project_list = list_user_projects(user_id=user_id)
+        
+        if not project_list:
+            return {"success": True, "projects": []}
+        
+        # Extract slugs from the list of dicts
+        project_slugs = [p['slug'] for p in project_list if 'slug' in p]
+        
+        if not project_slugs:
             return {"success": True, "projects": []}
         
         projects = []
         
-        # Function to recursively find projects with frontend/backend folders
-        def find_projects(base_path, relative_path=""):
-            for item in base_path.iterdir():
-                if item.is_dir() and not item.name.startswith('.'):
-                    # Check if this folder has frontend or backend
-                    has_frontend = (item / "frontend").exists()
-                    has_backend = (item / "backend").exists()
-                    
-                    if has_frontend or has_backend:
-                        # This is a valid project
-                        project_slug = f"{relative_path}/{item.name}" if relative_path else item.name
-                        yield (item, project_slug)
-                    else:
-                        # Recurse into subdirectories (but only one level deep to avoid infinite loops)
-                        if not relative_path:  # Only go one level deep
-                            yield from find_projects(item, item.name)
-        
-        for project_folder, project_slug in find_projects(projects_dir):
+        for project_slug in project_slugs:
             try:
-                # Get project metadata
+                # Get project files from S3 to inspect metadata
+                project_data = get_project_from_s3(project_slug=project_slug, user_id=user_id)
+                
+                if not project_data:
+                    continue
+                
+                project_files = project_data.get('files', [])
+                
+                # Determine frontend/backend presence
+                has_frontend = any('frontend' in f['path'] for f in project_files)
+                has_backend = any('backend' in f['path'] for f in project_files)
+                
+                # Extract metadata from S3
+                metadata = project_data.get('metadata', {})
+                created_date = metadata.get('created_date', None)
+                
                 project_info = {
-                    "name": project_slug.replace("-", " ").replace("/", " ").title(),
+                    "name": project_data.get('name', project_slug.replace("-", " ").title()),
                     "slug": project_slug,
-                    "created_date": project_folder.stat().st_ctime,
-                    "modified_date": project_folder.stat().st_mtime,
-                    "preview_url": f"http://localhost:8000/api/sandbox-preview/{project_slug}",
+                    "created_date": created_date,
+                    "preview_url": f"https://api.xverta.com/api/sandbox-preview/{project_slug}",
                     "editor_url": f"/project/{project_slug}",
-                    "has_frontend": (project_folder / "frontend").exists(),
-                    "has_backend": (project_folder / "backend").exists(),
+                    "has_frontend": has_frontend,
+                    "has_backend": has_backend,
                     "tech_stack": []
                 }
                 
-                # Try to detect tech stack from package.json
-                package_json = project_folder / "frontend" / "package.json"
-                if package_json.exists():
+                # Detect tech stack from package.json if exists
+                package_json_file = next((f for f in project_files if f['path'] == 'frontend/package.json'), None)
+                if package_json_file:
                     try:
                         import json
-                        with open(package_json, 'r', encoding='utf-8') as f:
-                            pkg_data = json.load(f)
+                        pkg_data = json.loads(package_json_file['content'])
                         
                         dependencies = list(pkg_data.get("dependencies", {}).keys())
                         dev_dependencies = list(pkg_data.get("devDependencies", {}).keys())
                         
-                        # Detect React
                         if "react" in dependencies:
                             project_info["tech_stack"].append("React")
-                        
-                        # Detect Vite
                         if "vite" in dev_dependencies:
                             project_info["tech_stack"].append("Vite")
-                        
-                        # Detect other common packages
                         if "tailwindcss" in dependencies or "tailwindcss" in dev_dependencies:
                             project_info["tech_stack"].append("TailwindCSS")
-                            
                     except Exception:
                         pass
                 
-                # Check for backend tech stack
-                requirements_txt = project_folder / "backend" / "requirements.txt"
-                if requirements_txt.exists():
+                # Check for backend
+                if any(f['path'] == 'backend/requirements.txt' for f in project_files):
                     project_info["tech_stack"].append("FastAPI")
                     project_info["tech_stack"].append("Python")
                 
                 # Format created date
-                import datetime
-                created_dt = datetime.datetime.fromtimestamp(project_info["created_date"])
-                project_info["created_date_formatted"] = created_dt.strftime("%Y-%m-%d %H:%M")
+                if created_date:
+                    import datetime
+                    if isinstance(created_date, str):
+                        try:
+                            created_dt = datetime.datetime.fromisoformat(created_date.replace('Z', '+00:00'))
+                        except:
+                            created_dt = datetime.datetime.now()
+                    else:
+                        created_dt = datetime.datetime.fromtimestamp(created_date)
+                    
+                    project_info["created_date_formatted"] = created_dt.strftime("%Y-%m-%d %H:%M")
+                    project_info["created_date"] = created_dt.timestamp()
                 
                 projects.append(project_info)
                 
             except Exception as e:
                 print(f"Error processing project {project_slug}: {e}")
+                import traceback
+                traceback.print_exc()
                 continue
         
-        # Sort by creation date (newest first)
-        projects.sort(key=lambda x: x["created_date"], reverse=True)
+        # Sort by creation date (newest first), handle None values
+        projects.sort(key=lambda x: x.get("created_date") or 0, reverse=True)
         
         return {
             "success": True,
@@ -4173,26 +4628,84 @@ async def get_project_history():
         }
         
     except Exception as e:
-        print(f"Error fetching project history: {e}")
+        print(f"Error fetching project history from S3: {e}")
         return {"success": False, "error": str(e)}
 
 # --- Get Project File Tree Endpoint ---
 @app.get("/api/project-file-tree")
-async def get_project_file_tree(project_name: str = Query(...)):
-    """Get file tree structure for a project"""
+async def get_project_file_tree(project_name: str = Query(...), current_user: Optional[dict] = Depends(get_current_user_optional)):
+    """Get file tree structure for a project from S3 or local storage"""
     try:
-        # Handle both simple names and paths with slashes (e.g., "mobile/web-app")
-        # Preserve the path structure but normalize spaces to hyphens
+        # Get user_id from authenticated user or default to anonymous
+        user_id = current_user.get('_id') if current_user else 'anonymous'
+        
         project_slug = project_name.replace(" ", "-")
+        
+        # Try S3 first
+        try:
+            project_data = get_project_from_s3(project_slug=project_slug, user_id=user_id)
+            
+            if project_data and project_data.get('files'):
+                print(f"📁 Building file tree from S3: {len(project_data['files'])} files")
+                
+                # Build tree structure from S3 files
+                def build_tree_from_paths(file_paths):
+                    tree = []
+                    dir_map = {}
+                    
+                    for file_info in file_paths:
+                        path = file_info['path']
+                        parts = path.split('/')
+                        
+                        current_level = tree
+                        current_path = ""
+                        
+                        for i, part in enumerate(parts):
+                            current_path = '/'.join(parts[:i+1])
+                            
+                            if i == len(parts) - 1:  # File
+                                current_level.append({
+                                    "name": part,
+                                    "path": path,
+                                    "type": "file",
+                                    "size": len(file_info.get('content', ''))
+                                })
+                            else:  # Directory
+                                if current_path not in dir_map:
+                                    dir_entry = {
+                                        "name": part,
+                                        "path": current_path,
+                                        "type": "directory",
+                                        "children": []
+                                    }
+                                    current_level.append(dir_entry)
+                                    dir_map[current_path] = dir_entry
+                                
+                                current_level = dir_map[current_path]["children"]
+                    
+                    return tree
+                
+                file_tree = build_tree_from_paths(project_data['files'])
+                
+                return {
+                    "success": True,
+                    "file_tree": file_tree,
+                    "project_path": f"s3://projects/{user_id}/{project_slug}",
+                    "source": "s3"
+                }
+        except Exception as s3_error:
+            print(f"⚠️ S3 error, falling back to local: {s3_error}")
+        
+        # Fallback to local files
         projects_dir = Path("generated_projects")
         project_path = projects_dir / project_slug
         
         if not project_path.exists():
-            # Return an empty tree during early generation instead of an error
             return {
                 "success": True,
                 "file_tree": [],
-                "project_path": str(project_path)
+                "project_path": str(project_path),
+                "source": "none"
             }
         
         def build_file_tree(path: Path, base_path: Path = None):
@@ -4204,7 +4717,6 @@ async def get_project_file_tree(project_name: str = Query(...)):
             
             try:
                 for item in sorted(path.iterdir()):
-                    # Skip hidden files and common build directories
                     if item.name.startswith('.') or item.name in ['node_modules', '__pycache__', 'dist', 'build']:
                         continue
                     
@@ -4234,7 +4746,8 @@ async def get_project_file_tree(project_name: str = Query(...)):
         return {
             "success": True,
             "file_tree": file_tree,
-            "project_path": str(project_path)
+            "project_path": str(project_path),
+            "source": "local"
         }
         
     except Exception as e:
@@ -4258,12 +4771,37 @@ async def rate_limit_status():
 
 # --- Get Project File Content Endpoint ---
 @app.get("/api/project-file-content")
-async def get_project_file_content(project_name: str = Query(...), file_path: str = Query(...)):
-    """Get content of a specific file in the project"""
+async def get_project_file_content(project_name: str = Query(...), file_path: str = Query(...), current_user: Optional[dict] = Depends(get_current_user_optional)):
+    """Get content of a specific file from S3 or local storage"""
     try:
-        # Handle both simple names and paths with slashes (e.g., "mobile/web-app")
-        # Preserve the path structure but normalize spaces to hyphens
+        # Get user_id from authenticated user or default to anonymous
+        user_id = current_user.get('_id') if current_user else 'anonymous'
+        
         project_slug = project_name.replace(" ", "-")
+        file_path_clean = file_path.lstrip('/')
+        
+        # Try S3 first
+        try:
+            project_data = get_project_from_s3(project_slug=project_slug, user_id=user_id)
+            
+            if project_data and project_data.get('files'):
+                # Find the file in S3 data
+                for file_info in project_data['files']:
+                    if file_info['path'] == file_path_clean:
+                        print(f"📄 Reading file from S3: {file_path_clean}")
+                        return {
+                            "success": True,
+                            "content": file_info['content'],
+                            "file_path": file_path_clean,
+                            "size": len(file_info['content']),
+                            "source": "s3"
+                        }
+                
+                return {"success": False, "error": "File not found in S3"}
+        except Exception as s3_error:
+            print(f"⚠️ S3 error, falling back to local: {s3_error}")
+        
+        # Fallback to local files
         projects_dir = Path("generated_projects")
         project_path = projects_dir / project_slug
         
@@ -4271,7 +4809,7 @@ async def get_project_file_content(project_name: str = Query(...), file_path: st
             return {"success": False, "error": "Project not found"}
         
         # Security check
-        full_file_path = project_path / file_path.lstrip('/')
+        full_file_path = project_path / file_path_clean
         try:
             full_file_path.resolve().relative_to(project_path.resolve())
         except ValueError:
@@ -4288,15 +4826,16 @@ async def get_project_file_content(project_name: str = Query(...), file_path: st
             with open(full_file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
             
+            print(f"📄 Reading file from local: {file_path_clean}")
             return {
                 "success": True,
                 "content": content,
-                "file_path": file_path,
-                "size": full_file_path.stat().st_size
+                "file_path": file_path_clean,
+                "size": full_file_path.stat().st_size,
+                "source": "local"
             }
             
         except UnicodeDecodeError:
-            # Handle binary files
             return {
                 "success": False,
                 "error": "File is binary and cannot be displayed as text"
@@ -5181,7 +5720,7 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001"],
+    allow_origins=["https://xverta.com", "https://www.xverta.com"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -5248,7 +5787,7 @@ if __name__ == "__main__":
     env_content = f"""# {project_name} Environment Variables
 DEBUG=True
 PORT=8001
-CORS_ORIGINS=http://localhost:3000,http://localhost:3001"""
+CORS_ORIGINS=https://xverta.com,https://www.xverta.com"""
     
     if needs_database:
         env_content += """
@@ -5340,7 +5879,7 @@ const PORT = process.env.PORT || 8001;
 // Middleware
 app.use(helmet());
 app.use(cors({{
-    origin: ['http://localhost:3000', 'http://localhost:3001'],
+    origin: ['https://xverta.com', 'https://www.xverta.com'],
     credentials: true
 }}));
 app.use(morgan('combined'));
@@ -5489,8 +6028,8 @@ npm {'run dev' if 'Next.js' in tech_stack else 'start'}
 ```
 
 The application will be available at:
-- Frontend: http://localhost:3000
-- Backend API: http://localhost:8001
+- Frontend: https://xverta.com
+- Backend API: https://api.xverta.com
 
 ## Project Structure
 
@@ -7560,7 +8099,7 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Frontend URL
+    allow_origins=["https://xverta.com", "https://www.xverta.com"],  # Frontend URL
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -7690,7 +8229,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - VITE_API_URL=http://localhost:8000
+      - VITE_API_URL=https://api.xverta.com
     depends_on:
       - backend
 
@@ -7744,9 +8283,9 @@ A full-stack application with React frontend and FastAPI backend.
    ```
 
 3. **Access the Application**
-   - Frontend: http://localhost:3000
-   - Backend API: http://localhost:8000
-   - API Docs: http://localhost:8000/docs
+   - Frontend: https://xverta.com
+   - Backend API: https://api.xverta.com
+   - API Docs: https://api.xverta.com/docs
 
 ### Docker Setup
 
@@ -7778,7 +8317,7 @@ Create `.env` files:
 
 **Frontend (.env)**
 ```
-VITE_API_URL=http://localhost:8000
+VITE_API_URL=https://api.xverta.com
 ```
 
 **Backend (.env)**
@@ -7814,7 +8353,7 @@ SECRET_KEY=your-secret-key-here
 - `GET /api/items/{{id}}` - Get item by ID
 - `DELETE /api/items/{{id}}` - Delete item
 
-Visit http://localhost:8000/docs for interactive API documentation.
+Visit https://api.xverta.com/docs for interactive API documentation.
 '''
     
     with open(project_path / "README.md", "w") as f:
@@ -7822,7 +8361,7 @@ Visit http://localhost:8000/docs for interactive API documentation.
     
     # Generate .env.example
     env_example = '''# Frontend Environment Variables
-VITE_API_URL=http://localhost:8000
+VITE_API_URL=https://api.xverta.com
 
 # Backend Environment Variables  
 DATABASE_URL=postgresql://user:password@localhost:5432/database
@@ -8965,7 +9504,7 @@ async def github_callback(code: str = None, state: str = None):
         token_response = requests.post(token_url, data=token_data, headers=token_headers)
         
         if token_response.status_code != 200:
-            print(f"❌ Token exchange failed: {token_response.text}")
+            print(f"❌ Token exchange failed with status: {token_response.status_code}")
             return RedirectResponse(
                 url="/?error=token_exchange_failed", 
                 status_code=302
@@ -8975,7 +9514,7 @@ async def github_callback(code: str = None, state: str = None):
         access_token = token_info.get("access_token")
         
         if not access_token:
-            print(f"❌ No access token received: {token_info}")
+            print(f"❌ No access token received from GitHub")
             return RedirectResponse(
                 url="/?error=no_access_token", 
                 status_code=302
@@ -9001,23 +9540,157 @@ async def github_callback(code: str = None, state: str = None):
         
         user_info = user_response.json()
         username = user_info.get("login", "unknown")
-        user_id = user_info.get("id")
-        avatar_url = user_info.get("avatar_url")
+        github_id = user_info.get("id")
+        avatar_url = user_info.get("avatar_url", "")
+        email = user_info.get("email", "")
         
-        print(f"✅ User authenticated: {username} (ID: {user_id})")
+        # Get email if not in main response
+        if not email:
+            email_response = requests.get("https://api.github.com/user/emails", headers=user_headers)
+            if email_response.status_code == 200:
+                emails = email_response.json()
+                primary_email = next((e["email"] for e in emails if e.get("primary")), None)
+                email = primary_email or (emails[0]["email"] if emails else f"{username}@github.user")
         
-        # In a real application, you would:
-        # 1. Store the user session
-        # 2. Create a JWT token
-        # 3. Store user data in database
-        # For now, we'll just redirect with success
+        print(f"✅ User authenticated via GitHub")
         
-        # Redirect to frontend with success and user info
-        redirect_url = f"/?auth=success&user={username}&avatar={avatar_url}"
-        
-        print(f"🚀 Redirecting user to: {redirect_url}")
-        
-        return RedirectResponse(url=redirect_url, status_code=302)
+        # Create or update user in MongoDB
+        try:
+            from database import MongoDB
+            db = MongoDB.get_database()
+            users_collection = db.users
+            
+            existing_user = users_collection.find_one({"email": email})
+            
+            if existing_user:
+                # Update existing user
+                users_collection.update_one(
+                    {"email": email},
+                    {"$set": {
+                        "username": username,
+                        "avatar": avatar_url,
+                        "github_id": github_id,
+                        "last_login": datetime.utcnow()
+                    }}
+                )
+                user_doc = users_collection.find_one({"email": email})
+            else:
+                # Create new user
+                new_user = {
+                    "email": email,
+                    "username": username,
+                    "avatar": avatar_url,
+                    "github_id": github_id,
+                    "oauth_provider": "github",
+                    "created_at": datetime.utcnow(),
+                    "last_login": datetime.utcnow()
+                }
+                result = users_collection.insert_one(new_user)
+                user_doc = users_collection.find_one({"_id": result.inserted_id})
+            
+            # Generate JWT token
+            user_id_str = str(user_doc["_id"])
+            access_token = create_access_token(data={"sub": user_id_str})
+            
+            # Prepare user data for frontend
+            user_data = {
+                "_id": user_id_str,
+                "email": email,
+                "username": username,
+                "avatar": avatar_url
+            }
+            
+            print(f"✅ JWT token generated successfully")
+            
+            # Redirect to frontend with token and user data via HTML page
+            frontend_url = os.getenv("FRONTEND_URL", "https://xverta.com")
+            import base64
+            
+            # Base64 encode user data to avoid URL encoding issues
+            user_data_json = json.dumps(user_data)
+            user_data_b64 = base64.b64encode(user_data_json.encode()).decode()
+            
+            redirect_url = f"{frontend_url}/oauth/callback?auth=success&token={access_token}&user={user_data_b64}"
+            
+            print(f"🚀 Redirecting to: {redirect_url}")
+            
+            # Return HTML page with AGGRESSIVE redirect debugging
+            html_content = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Login Successful</title>
+                <meta charset="UTF-8">
+            </head>
+            <body>
+                <div style="display: flex; align-items: center; justify-content: center; height: 100vh; font-family: Arial, sans-serif;">
+                    <div style="text-align: center;">
+                        <h2>✅ Login Successful!</h2>
+                        <p id="status">Processing authentication...</p>
+                        <p style="font-size: 12px; color: #666; margin-top: 10px;">
+                            If you are not redirected in 2 seconds, <a href="{redirect_url}" style="color: #0066cc;">click here</a>.
+                        </p>
+                        <pre id="debug" style="font-size: 10px; color: #999; margin-top: 20px; text-align: left;"></pre>
+                    </div>
+                </div>
+                <script>
+                    const debug = document.getElementById('debug');
+                    const status = document.getElementById('status');
+                    
+                    function log(msg) {{
+                        console.log(msg);
+                        debug.textContent += msg + '\\n';
+                    }}
+                    
+                    log('🔄 GitHub OAuth callback page loaded');
+                    log('🎯 Redirect URL: {redirect_url}');
+                    log('🔍 Window location: ' + window.location.href);
+                    log('🔍 User agent: ' + navigator.userAgent);
+                    
+                    let attempts = 0;
+                    const maxAttempts = 3;
+                    
+                    function tryRedirect() {{
+                        attempts++;
+                        log(`⚡ Redirect attempt ${{attempts}} of ${{maxAttempts}}`);
+                        status.textContent = `Redirecting (attempt ${{attempts}})...`;
+                        
+                        try {{
+                            // Try multiple redirect methods
+                            if (attempts === 1) {{
+                                log('🔹 Method 1: window.location.href');
+                                window.location.href = "{redirect_url}";
+                            }} else if (attempts === 2) {{
+                                log('🔹 Method 2: window.location.replace');
+                                window.location.replace("{redirect_url}");
+                            }} else {{
+                                log('🔹 Method 3: window.location assignment');
+                                window.location = "{redirect_url}";
+                            }}
+                            
+                            log('✅ Redirect initiated');
+                        }} catch (e) {{
+                            log('❌ Redirect failed: ' + e.message);
+                            if (attempts < maxAttempts) {{
+                                setTimeout(tryRedirect, 500);
+                            }} else {{
+                                status.textContent = 'Redirect failed. Please click the link above.';
+                            }}
+                        }}
+                    }}
+                    
+                    // Start first redirect attempt immediately
+                    tryRedirect();
+                </script>
+            </body>
+            </html>
+            """
+            
+            return HTMLResponse(content=html_content, status_code=200)
+            
+        except Exception as db_error:
+            print(f"❌ Database error: {str(db_error)}")
+            return RedirectResponse(url=f"/?error=database_error", status_code=302)
         
     except Exception as e:
         print(f"❌ OAuth callback error: {str(e)}")
@@ -9049,7 +9722,7 @@ async def github_login():
         github_auth_url = (
             f"https://github.com/login/oauth/authorize"
             f"?client_id={github_client_id}"
-            f"&redirect_uri={os.getenv('GITHUB_CALLBACK_URL', 'http://localhost:8000/auth/github/callback')}"
+            f"&redirect_uri={os.getenv('GITHUB_CALLBACK_URL', 'https://api.xverta.com/auth/github/callback')}"
             f"&scope=repo,user:email"
             f"&state={state}"
             f"&allow_signup=true"
@@ -9087,7 +9760,7 @@ async def google_callback(request: Request):
             "client_id": os.getenv("GOOGLE_CLIENT_ID"),
             "client_secret": os.getenv("GOOGLE_CLIENT_SECRET"),
             "code": code,
-            "redirect_uri": os.getenv("GOOGLE_CALLBACK_URL", "http://localhost:8000/auth/google/callback"),
+            "redirect_uri": os.getenv("GOOGLE_CALLBACK_URL", "https://api.xverta.com/auth/google/callback"),
             "grant_type": "authorization_code"
         }
         token_headers = {
@@ -9098,14 +9771,14 @@ async def google_callback(request: Request):
         token_response = requests.post(token_url, data=token_data, headers=token_headers)
 
         if token_response.status_code != 200:
-            print(f"❌ Token exchange failed: {token_response.text}")
+            print(f"❌ Token exchange failed with status: {token_response.status_code}")
             return RedirectResponse(url="/?error=token_exchange_failed", status_code=302)
 
         token_info = token_response.json()
         access_token = token_info.get("access_token")
 
         if not access_token:
-            print(f"❌ No access token received: {token_info}")
+            print(f"❌ No access token received from Google")
             return RedirectResponse(url="/?error=no_access_token", status_code=302)
 
         print("✅ Access token received successfully")
@@ -9125,19 +9798,154 @@ async def google_callback(request: Request):
         email = user_info.get("email", "unknown")
         name = user_info.get("name", "unknown")
         picture = user_info.get("picture", "")
+        google_id = user_info.get("id", "")
 
-        print(f"✅ User authenticated: {email} ({name})")
+        print(f"✅ User authenticated via Google")
 
-        # Redirect to frontend homepage with success and user info
-        frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
-        redirect_url = f"{frontend_url}/home?auth=success&user={email}&name={name}&avatar={picture}"
-        print(f"🚀 Redirecting user to: {redirect_url}")
+        # Create or update user in MongoDB
+        try:
+            from database import MongoDB
+            db = MongoDB.get_database()
+            users_collection = db.users
+            
+            existing_user = users_collection.find_one({"email": email})
+            
+            if existing_user:
+                # Update existing user
+                users_collection.update_one(
+                    {"email": email},
+                    {"$set": {
+                        "name": name,
+                        "avatar": picture,
+                        "google_id": google_id,
+                        "last_login": datetime.utcnow()
+                    }}
+                )
+                user_doc = users_collection.find_one({"email": email})
+            else:
+                # Create new user
+                new_user = {
+                    "email": email,
+                    "name": name,
+                    "username": name,  # Use name as username for Google users
+                    "avatar": picture,
+                    "google_id": google_id,
+                    "oauth_provider": "google",
+                    "created_at": datetime.utcnow(),
+                    "last_login": datetime.utcnow()
+                }
+                result = users_collection.insert_one(new_user)
+                user_doc = users_collection.find_one({"_id": result.inserted_id})
+            
+            # Generate JWT token
+            user_id_str = str(user_doc["_id"])
+            access_token = create_access_token(data={"sub": user_id_str})
+            
+            # Prepare user data for frontend
+            user_data = {
+                "_id": user_id_str,
+                "email": email,
+                "name": name,
+                "username": user_doc.get("username", name),
+                "avatar": picture
+            }
+            
+            print(f"✅ JWT token generated successfully")
+            
+            # Redirect to frontend OAuth callback handler with token and user data
+            frontend_url = os.getenv("FRONTEND_URL", "https://xverta.com")
+            import base64
+            
+            # Base64 encode user data to avoid URL encoding issues
+            user_data_json = json.dumps(user_data)
+            user_data_b64 = base64.b64encode(user_data_json.encode()).decode()
+            
+            redirect_url = f"{frontend_url}/oauth/callback?auth=success&token={access_token}&user={user_data_b64}"
+            
+            print(f"🚀 Redirecting to: {redirect_url}")
 
-        return RedirectResponse(url=redirect_url, status_code=302)
+            # Return HTML page with AGGRESSIVE redirect debugging
+            html_content = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Login Successful</title>
+                <meta charset="UTF-8">
+            </head>
+            <body>
+                <div style="display: flex; align-items: center; justify-content: center; height: 100vh; font-family: Arial, sans-serif;">
+                    <div style="text-align: center;">
+                        <h2>✅ Login Successful!</h2>
+                        <p id="status">Processing authentication...</p>
+                        <p style="font-size: 12px; color: #666; margin-top: 10px;">
+                            If you are not redirected in 2 seconds, <a href="{redirect_url}" style="color: #0066cc;">click here</a>.
+                        </p>
+                        <pre id="debug" style="font-size: 10px; color: #999; margin-top: 20px; text-align: left;"></pre>
+                    </div>
+                </div>
+                <script>
+                    const debug = document.getElementById('debug');
+                    const status = document.getElementById('status');
+                    
+                    function log(msg) {{
+                        console.log(msg);
+                        debug.textContent += msg + '\\n';
+                    }}
+                    
+                    log('🔄 Google OAuth callback page loaded');
+                    log('🎯 Redirect URL: {redirect_url}');
+                    log('🔍 Window location: ' + window.location.href);
+                    log('🔍 User agent: ' + navigator.userAgent);
+                    
+                    let attempts = 0;
+                    const maxAttempts = 3;
+                    
+                    function tryRedirect() {{
+                        attempts++;
+                        log(`⚡ Redirect attempt ${{attempts}} of ${{maxAttempts}}`);
+                        status.textContent = `Redirecting (attempt ${{attempts}})...`;
+                        
+                        try {{
+                            // Try multiple redirect methods
+                            if (attempts === 1) {{
+                                log('🔹 Method 1: window.location.href');
+                                window.location.href = "{redirect_url}";
+                            }} else if (attempts === 2) {{
+                                log('🔹 Method 2: window.location.replace');
+                                window.location.replace("{redirect_url}");
+                            }} else {{
+                                log('🔹 Method 3: window.location assignment');
+                                window.location = "{redirect_url}";
+                            }}
+                            
+                            log('✅ Redirect initiated');
+                        }} catch (e) {{
+                            log('❌ Redirect failed: ' + e.message);
+                            if (attempts < maxAttempts) {{
+                                setTimeout(tryRedirect, 500);
+                            }} else {{
+                                status.textContent = 'Redirect failed. Please click the link above.';
+                            }}
+                        }}
+                    }}
+                    
+                    // Start first redirect attempt immediately
+                    tryRedirect();
+                </script>
+            </body>
+            </html>
+            """
+            
+            return HTMLResponse(content=html_content, status_code=200)
+            
+        except Exception as db_error:
+            print(f"❌ Database error: {str(db_error)}")
+            frontend_url = os.getenv("FRONTEND_URL", "https://xverta.com")
+            return RedirectResponse(url=f"{frontend_url}/voice-chat?error=database_error", status_code=302)
 
     except Exception as e:
         print(f"❌ OAuth callback error: {str(e)}")
-        frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+        frontend_url = os.getenv("FRONTEND_URL", "https://xverta.com")
         return RedirectResponse(url=f"{frontend_url}/home?error=callback_failed&message={str(e)}", status_code=302)
 @app.get("/auth/google/login")
 async def google_login():
@@ -9147,7 +9955,7 @@ async def google_login():
     """
     try:
         google_client_id = os.getenv("GOOGLE_CLIENT_ID")
-        google_callback_url = os.getenv("GOOGLE_CALLBACK_URL", "http://localhost:8000/auth/google/callback")
+        google_callback_url = os.getenv("GOOGLE_CALLBACK_URL", "https://api.xverta.com/auth/google/callback")
         if not google_client_id:
             raise HTTPException(status_code=500, detail="Google Client ID not configured")
 
@@ -9221,7 +10029,7 @@ async def auth_status():
         "github_app_configured": bool(os.getenv("GITHUB_APP_ID")),
         "github_client_id_configured": bool(os.getenv("GITHUB_CLIENT_ID")),  # Added
         "github_client_secret_configured": bool(os.getenv("GITHUB_CLIENT_SECRET")),
-        "callback_url": os.getenv("GITHUB_CALLBACK_URL", "http://localhost:8000/auth/github/callback"),
+        "callback_url": os.getenv("GITHUB_CALLBACK_URL", "https://api.xverta.com/auth/github/callback"),
         "login_url": "/auth/github/login",
         "timestamp": datetime.now().isoformat()
     }
@@ -9273,7 +10081,7 @@ async def manual_deploy(request: dict):
                 "owner": owner,
                 "url": repo_url
             },
-            "deployment_url": f"http://localhost:8000/{repo_name}",
+            "deployment_url": f"https://api.xverta.com/{repo_name}",
             "timestamp": datetime.now().isoformat()
         }
         
@@ -10129,6 +10937,7 @@ async def health_check():
     """Check if the API is running"""
     return {"status": "healthy"}
 
+
 from fastapi.staticfiles import StaticFiles
 
 # Add this after your other app configurations but before the endpoints
@@ -10342,7 +11151,7 @@ MANDATORY FULL-STACK INTEGRATION FEATURES:
    - Real-time updates and data synchronization
 
 3. WORKING API INTEGRATION:
-   - Real fetch() calls to backend API (http://localhost:8001/api/v1)
+   - Real fetch() calls to backend API (https://api.xverta.com/api)
    - Proper error handling for all network requests
    - Loading states with spinners and feedback
    - Success/error notifications with toast messages
@@ -10385,7 +11194,7 @@ E-COMMERCE FEATURES (If shopping/cart detected):
 - Inventory management and stock display
 
 API INTEGRATION PATTERNS:
-- Use consistent API base URL: http://localhost:8001/api/v1
+- Use consistent API base URL: https://api.xverta.com/api
 - Include Authorization headers: Bearer ${{token}}
 - Handle 401 errors with automatic logout
 - Display loading states during API calls
@@ -10436,7 +11245,7 @@ export default defineConfig({{
   plugins: [react()],
   server: {{
     proxy: {{
-      '/api': 'http://localhost:8001'
+      '/api': 'https://api.xverta.com'
     }}
   }}
 }})
@@ -10603,7 +11412,7 @@ MANDATORY FULL-STACK INTEGRATION FEATURES:
 CRITICAL REQUIREMENTS - NO MOCKS OR PLACEHOLDERS:
 - Generate COMPLETE, PRODUCTION-READY FastAPI code that works immediately
 - Use FastAPI with modern Python 3.9+ async/await patterns
-- Include proper CORS handling for React frontend (localhost:5173 AND localhost:3000)
+- Include proper CORS handling for React frontend (https://xverta.com)
 - Create WORKING API endpoints with full business logic implementation
 - Add comprehensive error handling and validation with Pydantic models
 - Include proper HTTP status codes and response models
@@ -11126,6 +11935,159 @@ async def generate_ai_powered_full_stack_files(project_path: Path, idea: str, pr
     except Exception as e:
         print(f"Error generating AI-powered project: {e}")
         return ["Error generating project files"]
+
+# --- S3 Project Storage Endpoints ---
+from s3_storage import upload_project_to_s3, get_project_from_s3, list_user_projects, delete_project_from_s3
+
+class SaveProjectRequest(BaseModel):
+    name: str
+    slug: str
+    files: List[Dict[str, str]]
+    user_id: Optional[str] = 'anonymous'
+
+@app.post("/api/projects/save")
+async def save_project_to_s3(request: SaveProjectRequest):
+    """
+    Save a project to S3 storage
+    
+    Expects JSON body:
+    {
+        "name": "My Project",
+        "slug": "my-project-12345",
+        "files": [
+            {"path": "index.html", "content": "<html>...</html>"},
+            {"path": "style.css", "content": "body {...}"}
+        ],
+        "user_id": "user@example.com"  // optional, defaults to 'anonymous'
+    }
+    """
+    try:
+        # Upload files to S3
+        result = upload_project_to_s3(
+            project_slug=request.slug,
+            files=request.files,
+            user_id=request.user_id
+        )
+        
+        # TODO: Save metadata to database
+        # In a production app, you'd save this to Postgres/DynamoDB:
+        # await db.projects.create({
+        #     'name': request.name,
+        #     'slug': request.slug,
+        #     'user_id': request.user_id,
+        #     'file_count': len(request.files),
+        #     'created_at': datetime.utcnow()
+        # })
+        
+        return {
+            "success": True,
+            "message": "Project saved successfully",
+            "project": {
+                "name": request.name,
+                "slug": request.slug,
+                "user_id": request.user_id,
+                "files_count": result['files_uploaded']
+            }
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save project: {str(e)}")
+
+
+@app.get("/api/projects")
+async def get_user_projects(current_user: Optional[dict] = Depends(get_current_user_optional)):
+    """
+    Get all projects for a user
+    
+    Auth: Uses JWT token to identify user (optional - defaults to 'anonymous')
+    """
+    # Get user_id from authenticated user or default to anonymous
+    user_id = current_user.get('_id') if current_user else 'anonymous'
+    
+    try:
+        projects = list_user_projects(user_id=user_id)
+        
+        # TODO: Enhance with metadata from database
+        # In production, join with database to get full project info:
+        # projects_with_metadata = await db.projects.find({'user_id': user_id})
+        
+        return {
+            "success": True,
+            "projects": projects,
+            "count": len(projects)
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch projects: {str(e)}")
+
+
+@app.get("/api/projects/{project_slug}")
+async def get_project(project_slug: str, current_user: Optional[dict] = Depends(get_current_user_optional)):
+    """
+    Get a specific project's files from S3
+    
+    Path params:
+        project_slug: Unique project identifier
+    Auth: Uses JWT token to identify user (optional)
+    """
+    # Get user_id from authenticated user or default to anonymous
+    user_id = current_user.get('_id') if current_user else 'anonymous'
+    
+    try:
+        project = get_project_from_s3(project_slug=project_slug, user_id=user_id)
+        
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        return {
+            "success": True,
+            "project": project
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve project: {str(e)}")
+
+
+@app.delete("/api/projects/{project_slug}")
+async def delete_project(project_slug: str, current_user: Optional[dict] = Depends(get_current_user_optional)):
+    """
+    Delete a project from S3
+    
+    Path params:
+        project_slug: Unique project identifier
+    Auth: Uses JWT token to identify user (optional)
+    """
+    # Get user_id from authenticated user or default to anonymous
+    user_id = current_user.get('_id') if current_user else 'anonymous'
+    
+    try:
+        success = delete_project_from_s3(project_slug=project_slug, user_id=user_id)
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        # TODO: Delete from database
+        # await db.projects.delete({'slug': project_slug, 'user_id': user_id})
+        
+        return {
+            "success": True,
+            "message": "Project deleted successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete project: {str(e)}")
+
+# Health check endpoints for ALB
+
+
+@app.head("/health")
+async def health_check_head():
+    from fastapi.responses import Response
+    return Response(status_code=200)
 
 if __name__ == "__main__":
     import uvicorn

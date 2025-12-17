@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { API_BASE_URL } from '../config/api';
 // Make sure these component paths are correct for your project structure
 import SecurityIssueFormatter from './SecurityIssueFormatter';
 import ChatResponseFormatter from './ChatResponseFormatter';
@@ -56,7 +57,7 @@ const OwaspMappingCardSection = ({ scanResult }) => {
                 console.log('OWASP Mapping - scanResult type:', typeof scanResult);
                 console.log('OWASP Mapping - scanResult keys:', Object.keys(scanResult || {}));
                 
-                const response = await fetch('http://localhost:8000/owasp-mapping', {
+                const response = await fetch(`${API_BASE_URL}/owasp-mapping`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
@@ -156,7 +157,7 @@ const ReportPage = ({ scanResult }) => {
         setIsLoading(true);
 
         try {
-            const response = await fetch('http://localhost:8000/ai-chat', {
+            const response = await fetch(`${API_BASE_URL}/ai-chat`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({

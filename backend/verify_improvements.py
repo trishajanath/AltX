@@ -9,7 +9,7 @@ from datetime import datetime
 def check_server_status():
     """Check if the server is running"""
     try:
-        response = requests.get("http://localhost:8000/health", timeout=5)
+        response = requests.get("https://api.xverta.com/health", timeout=5)
         if response.status_code == 200:
             print("✅ Server is running and healthy")
             return True
@@ -40,7 +40,7 @@ def test_quick_generation():
     try:
         print("📤 Sending build request...")
         response = requests.post(
-            "http://localhost:8000/api/build-with-ai",
+            "https://api.xverta.com/api/build-with-ai",
             json=payload,
             timeout=60
         )

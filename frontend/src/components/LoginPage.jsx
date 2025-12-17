@@ -1,20 +1,25 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
+import { apiUrl } from '../config/api';
 import PageWrapper from './PageWrapper';
 
 const LoginPage = () => {
     const navigate = useNavigate();
+    const { login } = useAuth();
     const [formData, setFormData] = useState({
         email: '',
-        password: ''
+        password: '',
+        rememberMe: false
     });
     const [isLoggingIn, setIsLoggingIn] = useState(false);
     const [error, setError] = useState('');
 
     const handleChange = (e) => {
+        const { name, value, type, checked } = e.target;
         setFormData({
             ...formData,
-            [e.target.name]: e.target.value
+            [name]: type === 'checkbox' ? checked : value
         });
     };
 
@@ -31,8 +36,8 @@ const LoginPage = () => {
         }
         
         try {
-            // Make API call to login endpoint
-            const response = await fetch('http://localhost:8000/auth/login', {
+            // Make API call to MongoDB auth login endpoint
+            const response = await fetch(apiUrl('api/auth/login'), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -46,17 +51,76 @@ const LoginPage = () => {
             const data = await response.json();
             
             if (response.ok && data.success) {
-                // Store authentication data in localStorage
-                localStorage.setItem('access_token', data.access_token);
-                localStorage.setItem('user', JSON.stringify(data.user));
+                // Use AuthContext to store authentication data
+                login(data.user, data.access_token, formData.rememberMe);
                 
                 console.log('✅ Login successful:', data.user);
                 
-                // Redirect to home page after successful login
+                // Check for pending demo project from S3
+                const sessionId = localStorage.getItem('demoSessionId');
+                if (sessionId) {
+                    try {
+                        // Retrieve project from S3
+                        const response = await fetch(apiUrl(`api/demo/get-pending-project/${sessionId}`));
+                        const result = await response.json();
+                        
+                        if (!result.success || !result.project) {
+                            console.log('ℹ️ No pending demo project found');
+                        } else {
+                            const projectData = result.project;
+                            console.log('📦 Creating pending demo project:', projectData);
+                        
+                            // Create the project via API
+                            const projectResponse = await fetch(apiUrl('api/build-with-ai'), {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'Authorization': `Bearer ${data.access_token}`
+                                },
+                                body: JSON.stringify({
+                                    project_name: projectData.slug,
+                                    idea: `Create a ${projectData.name}`,
+                                    tech_stack: ['React', 'TailwindCSS'],
+                                    project_type: 'web app',
+                                    features: [],
+                                    requirements: {
+                                        description: `Create a modern ${projectData.name}`,
+                                        type: 'web app'
+                                    }
+                                })
+                            });
+                        
+                            // Delete from S3
+                            await fetch(apiUrl(`api/demo/delete-pending-project/${sessionId}`), {
+                                method: 'DELETE'
+                            });
+                            localStorage.removeItem('demoSessionId');
+                        
+                            if (projectResponse.ok) {
+                                const projectResult = await projectResponse.json();
+                                if (projectResult.success) {
+                                    console.log('✅ Demo project created successfully');
+                                    // Redirect to the project editor
+                                    navigate(`/project/${projectData.slug}`);
+                                    return;
+                                }
+                            }
+                        }
+                    } catch (error) {
+                        console.error('❌ Failed to create demo project:', error);
+                        // Clean up session ID on error
+                        await fetch(apiUrl(`api/demo/delete-pending-project/${sessionId}`), {
+                            method: 'DELETE'
+                        });
+                        localStorage.removeItem('demoSessionId');
+                    }
+                }
+                
+                // Redirect to voice chat after successful login
                 navigate('/voice-chat');
             } else {
                 // Handle login error
-                const errorMessage = data.message || 'Invalid email or password. Please try again.';
+                const errorMessage = data.detail || 'Invalid email or password. Please try again.';
                 console.error('❌ Login failed:', errorMessage);
                 setError(errorMessage);
             }
@@ -541,9 +605,20 @@ const LoginPage = () => {
                                 />
                             </div>
 
-                            <div className="forgot-password">
-                                <button type="button" className="forgot-link">
-                                    Forgot your password?
+                            <div className="remember-forgot-container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+                                <label className="remember-me-label" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '14px', color: 'rgba(255, 255, 255, 0.8)' }}>
+                                    <input
+                                        type="checkbox"
+                                        name="rememberMe"
+                                        checked={formData.rememberMe}
+                                        onChange={handleChange}
+                                        style={{ cursor: 'pointer', accentColor: 'var(--accent)' }}
+                                    />
+                                    Remember me
+                                </label>
+
+                                <button type="button" className="forgot-link" style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontSize: '14px', textDecoration: 'none' }}>
+                                    Forgot password?
                                 </button>
                             </div>
 
@@ -562,7 +637,7 @@ const LoginPage = () => {
                         <div className="social-login">
                             <button
                                 className="social-button"
-                                                    onClick={() => window.location.href = 'http://localhost:8000/auth/google/login'}
+                                                    onClick={() => window.location.href = 'https://api.xverta.com/auth/google/login'}
                             >
                                 <svg className="social-icon" viewBox="0 0 24 24" fill="none">
                                     <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
@@ -575,7 +650,7 @@ const LoginPage = () => {
 
                             <button
                                 className="social-button"
-                                onClick={() => window.location.href = "http://127.0.0.1:8000/auth/github/login"}
+                                onClick={() => window.location.href = "https://api.xverta.com/auth/github/login"}
                             >
                                 <svg className="social-icon" viewBox="0 0 24 24" fill="currentColor">
                                     <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>

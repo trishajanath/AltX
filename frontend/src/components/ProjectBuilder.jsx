@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
+import { apiUrl } from '../config/api';
 import PageWrapper from "./PageWrapper";
 import usePreventZoom from "./usePreventZoom";
 import MonacoProjectEditor from "./MonacoProjectEditor";
@@ -43,7 +44,7 @@ const ProjectBuilder = () => {
   const loadFileTree = async (projectName) => {
     try {
       const treeRes = await fetch(
-        `http://localhost:8000/api/project-file-tree?project_name=${encodeURIComponent(projectName)}`
+        apiUrl(`api/project-file-tree?project_name=${encodeURIComponent(projectName)}`)
       );
       const treeData = await treeRes.json();
       if (treeData.success) {
@@ -76,7 +77,7 @@ const ProjectBuilder = () => {
     setShowMonacoEditor(true);
     
     // Setup WebSocket connection for real-time updates
-    const ws = new WebSocket(`ws://localhost:8000/ws/project/${projectName}`);
+    const ws = new WebSocket(`wss://api.xverta.com/ws/project/${projectName}`);
     
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
@@ -120,7 +121,7 @@ const ProjectBuilder = () => {
 
       setBuildProgress(["[INIT] 🤖 Starting AI-powered React + FastAPI generation..."]);
 
-      const response = await fetch("http://localhost:8000/api/build-with-ai", {
+      const response = await fetch(apiUrl("api/build-with-ai"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -168,10 +169,10 @@ const ProjectBuilder = () => {
     setFileContent("Loading file content...");
     try {
       const res = await fetch(
-        `http://localhost:8000/api/project-file-content?project_name=${encodeURIComponent(
+        apiUrl(`api/project-file-content?project_name=${encodeURIComponent(
           generatedProject.name
         )}&file_path=${encodeURIComponent(file.path)}`
-      );
+      ));
       const data = await res.json();
       setFileContent(data.content || "Error: Could not load file content.");
     } catch (error) {

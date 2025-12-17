@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { API_BASE_URL } from '../config/api';
 
 // These components are assumed to be in separate files as they were not refactored.
 import PageWrapper from './PageWrapper';
@@ -140,7 +141,7 @@ const SecurityScanPage = ({ setScanResult }) => {
                 })),
                 { type: 'user', parts: [userMessage] }
             ];
-            const response = await fetch('http://localhost:8000/ai-chat', {
+            const response = await fetch(`${API_BASE_URL}/ai-chat`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ question: userMessage, context: 'security_scanning', history }),
@@ -174,7 +175,7 @@ const SecurityScanPage = ({ setScanResult }) => {
         };
         await mockScan();
         try {
-            const response = await fetch('http://localhost:8000/scan', {
+            const response = await fetch(`${API_BASE_URL}/scan`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ url: targetUrl, model_type: modelType }),

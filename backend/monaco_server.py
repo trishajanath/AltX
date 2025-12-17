@@ -228,7 +228,7 @@ app = FastAPI(title="Monaco Editor API", version="1.0.0")
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:5174", "http://localhost:3000"],
+    allow_origins=["https://xverta.com", "https://www.xverta.com"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -907,14 +907,14 @@ async def run_project(request: dict = Body(...)):
                 backend_available = False
                 try:
                     async with aiohttp.ClientSession() as session:
-                        async with session.get("http://localhost:8000/health", timeout=aiohttp.ClientTimeout(total=5)) as response:
+                        async with session.get("https://api.xverta.com/health", timeout=aiohttp.ClientTimeout(total=5)) as response:
                             if response.status == 200:
                                 backend_available = True
                 except Exception:
                     # Try root endpoint if /health doesn't exist
                     try:
                         async with aiohttp.ClientSession() as session:
-                            async with session.get("http://localhost:8000/", timeout=aiohttp.ClientTimeout(total=5)) as response:
+                            async with session.get("https://api.xverta.com/", timeout=aiohttp.ClientTimeout(total=5)) as response:
                                 if response.status == 200:
                                     backend_available = True
                     except Exception:
@@ -923,7 +923,7 @@ async def run_project(request: dict = Body(...)):
                 if backend_available:
                     await manager.send_to_project(project_name, {
                         "type": "terminal_output",
-                        "message": "✅ Backend server started on http://localhost:8000",
+                        "message": "✅ Backend server started on https://api.xverta.com",
                         "level": "success"
                     })
                 else:
@@ -1125,7 +1125,7 @@ export default App;'''
                 
                 try:
                     async with aiohttp.ClientSession() as session:
-                        async with session.get("http://localhost:3000", timeout=aiohttp.ClientTimeout(total=5)) as response:
+                        async with session.get("https://xverta.com", timeout=aiohttp.ClientTimeout(total=5)) as response:
                             if response.status == 200:
                                 server_available = True
                 except Exception:
@@ -1134,16 +1134,16 @@ export default App;'''
                         server_available = True  # Process is running, assume it will start soon
                 
                 if server_available and process.returncode is None:  # Still running and responding
-                    preview_urls.append("http://localhost:3000")
+                    preview_urls.append("https://xverta.com")
                     await manager.send_to_project(project_name, {
                         "type": "terminal_output",
-                        "message": "✅ Frontend server started on http://localhost:3000",
+                        "message": "✅ Frontend server started on https://xverta.com",
                         "level": "success"
                     })
                     
                     await manager.send_to_project(project_name, {
                         "type": "preview_ready",
-                        "url": "http://localhost:3000"
+                        "url": "https://xverta.com"
                     })
                 else:
                     await manager.send_to_project(project_name, {
@@ -1152,7 +1152,7 @@ export default App;'''
                         "level": "warning"
                     })
                     # Still add preview URL as it might work shortly
-                    preview_urls.append("http://localhost:3000")
+                    preview_urls.append("https://xverta.com")
                 
             except Exception as e:
                 await manager.send_to_project(project_name, {

@@ -17,12 +17,12 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        target: 'https://api.xverta.com',
         changeOrigin: true,
-        secure: false
+        secure: true
       },
       '/ws': {
-        target: 'ws://localhost:8000',
+        target: 'wss://api.xverta.com',
         ws: true,
         changeOrigin: true
       }

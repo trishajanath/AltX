@@ -5,6 +5,7 @@ import { BarChart3, Rocket, Shield, GitBranch, Menu, X, ChevronDown, LogOut, Mes
 import { motion, AnimatePresence } from 'framer-motion';
 import Plasma from './Plasma';
 import MainNavBar from './MainNavBar';
+import { useAuth } from '../contexts/AuthContext';
 
 // --- ✨ UPDATED Vortex Three.js Background ---
 import {
@@ -243,86 +244,12 @@ const ThreeBackground = React.memo(({
 // --- Shared Page Wrapper Component (Enhanced) ---
 const PageWrapper = ({ children }) => {
     const [currentView, setCurrentView] = useState('dashboard');
-    
-    // Initialize auth state from localStorage immediately to prevent flickering
-    const getInitialAuthState = () => {
-        try {
-            const userData = localStorage.getItem('user');
-            const token = localStorage.getItem('access_token');
-            
-            if (userData && token) {
-                const userInfo = JSON.parse(userData);
-                if (userInfo.email && userInfo.name) {
-                    return { user: userInfo, isAuthenticated: true };
-                }
-            }
-        } catch (error) {
-            console.error('Error reading initial auth state:', error);
-        }
-        return { user: null, isAuthenticated: false };
-    };
-    
-    const initialAuth = getInitialAuthState();
-    const [user, setUser] = useState(initialAuth.user);
-    const [isAuthenticated, setIsAuthenticated] = useState(initialAuth.isAuthenticated);
+    const { user, isAuthenticated, logout } = useAuth();
     const location = useLocation();
-    
-    // Check for authentication state on component mount and set up listener
-    useEffect(() => {
-        const checkAuthState = () => {
-            try {
-                const userData = localStorage.getItem('user');
-                const token = localStorage.getItem('access_token');
-                
-                if (userData && token) {
-                    const userInfo = JSON.parse(userData);
-                    if (userInfo.email && userInfo.name) {
-                        setUser(userInfo);
-                        setIsAuthenticated(true);
-                        if (process.env.NODE_ENV === 'development') {
-                            
-                        }
-                        return;
-                    }
-                }
-                
-                // If no valid auth, reset state
-                setUser(null);
-                setIsAuthenticated(false);
-            } catch (error) {
-                console.error('Error checking auth state in PageWrapper:', error);
-                setUser(null);
-                setIsAuthenticated(false);
-            }
-        };
-
-        // No need to check auth state on mount since we initialized from localStorage
-        // Just set up the listeners for future changes
-
-        // Set up storage event listener to react to auth changes
-        const handleStorageChange = (e) => {
-            if (e.key === 'user' || e.key === 'access_token') {
-                checkAuthState();
-            }
-        };
-
-        
-        window.addEventListener('storage', handleStorageChange);
-        
-        // Also check periodically in case of same-tab changes (reduced frequency)
-        const interval = setInterval(checkAuthState, 2000);
-
-        return () => {
-            window.removeEventListener('storage', handleStorageChange);
-            clearInterval(interval);
-        };
-    }, []);
+    const navigate = useNavigate();
 
     const handleLogout = () => {
-        localStorage.removeItem('user');
-        localStorage.removeItem('access_token');
-        setUser(null);
-        setIsAuthenticated(false);
+        logout();
         if (process.env.NODE_ENV === 'development') {
             console.log('🚪 User logged out');
         }
@@ -340,8 +267,14 @@ const PageWrapper = ({ children }) => {
 
         return () => clearInterval(interval);
     }, []);
-    // Hide navbar on landing page, login, and signup pages
-    const hideNavBar = location.pathname === '/' || location.pathname === '/login' || location.pathname === '/signup';
+    // Hide navbar on landing page, login, signup, and marketing pages
+    const hideNavBar = location.pathname === '/' || 
+                      location.pathname === '/login' || 
+                      location.pathname === '/signup' ||
+                      location.pathname === '/features' ||
+                      location.pathname === '/pricing' ||
+                      location.pathname === '/about' ||
+                      location.pathname.startsWith('/project/');
 
     return (
         <>

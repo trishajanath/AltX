@@ -12,7 +12,7 @@ to produce content, the requ		# Check if the response was blocked (anything othe
 			"* main.jsx must bootstrap React with ReactDOM.createRoot and import index.css.\n"
 			"* package.json must include scripts (dev, build, preview) and dependencies for React, ReactDOM, Vite.\n"
 			"* Include inline TailwindCSS via CDN in index.html.\n"
-			"* Components should make direct fetch calls to `http://localhost:8000/api`.\n"
+			"* Components should make direct fetch calls to `https://api.xverta.com/api`.\n"
 			"* Provide responsive design and loading/error states.\n"
 			"* Keep code concise but functional.\n\n" see what we got before the truncation
 				text = self._candidate_text(candidate)
@@ -592,13 +592,19 @@ IMPORTANT:
 class PureAIGenerator:
 	"""Gemini-only generator that produces code without fallbacks."""
 
-	def __init__(self, model_name: str = "gemini-2.5-pro", enable_validation: bool = True, fast_mode: bool = True) -> None:
+	def __init__(self, model_name: str = "gemini-2.5-pro", enable_validation: bool = True, fast_mode: bool = True, s3_uploader=None, user_id: str = "anonymous") -> None:
 		api_key = os.getenv("GOOGLE_API_KEY")
 		if not api_key:
 			raise ValueError("❌ GOOGLE_API_KEY environment variable is required")
 
 		genai.configure(api_key=api_key)
 		self.model = genai.GenerativeModel(model_name)
+		
+		# S3 direct upload configuration (REQUIRED - no local storage)
+		self.s3_uploader = s3_uploader
+		self.user_id = user_id
+		if not s3_uploader:
+			print("⚠️ WARNING: No S3 uploader configured - generation will fail on EC2")
 
 		# Optimize generation config based on mode
 		self.base_config: Dict[str, Any] = {
@@ -688,11 +694,11 @@ class PureAIGenerator:
 		
 		return code
 
-	def _write_validated_file(self, file_path: Path, content: str, file_type: str) -> str:
-		"""Write a file with optional AI validation and automatic fixes."""
+	def _write_validated_file(self, file_path: Path, content: str, file_type: str, project_slug: str = None) -> str:
+		"""Write a file with optional AI validation and automatic fixes. Supports S3 direct upload."""
 		if not self.enable_validation or self.validation_agent is None:
 			# Write without validation
-			file_path.write_text(content, encoding="utf-8")
+			self._write_file(file_path, content, project_slug)
 			return content
 			
 		try:
@@ -702,18 +708,49 @@ class PureAIGenerator:
 			# Use the fixed content if validation succeeded
 			if validation_result.is_valid or validation_result.fixes_applied:
 				fixed_content = validation_result.fixed_content
-				file_path.write_text(fixed_content, encoding="utf-8")
+				self._write_file(file_path, fixed_content, project_slug)
 				return fixed_content
 			else:
 				# Write original content if validation didn't help
-				file_path.write_text(content, encoding="utf-8")
+				self._write_file(file_path, content, project_slug)
 				return content
 			
 		except Exception as e:
 			print(f"⚠️ Validation failed for {file_path}, writing original content: {e}")
 			# Fallback to original content if validation fails
-			file_path.write_text(content, encoding="utf-8")
+			self._write_file(file_path, content, project_slug)
 			return content
+	
+	def _write_file(self, file_path: Path, content: str, project_slug: str = None):
+		"""Write file directly to S3 only - NO local storage."""
+		if not self.s3_uploader or not project_slug:
+			raise ValueError("❌ S3 uploader and project_slug are REQUIRED - no local storage available")
+		
+		try:
+			# Convert file path to relative path for S3 key
+			relative_path = str(file_path).replace("\\", "/")
+			if "generated_projects" in relative_path:
+				# Extract path after project name
+				parts = relative_path.split("/")
+				try:
+					project_idx = parts.index("generated_projects") + 2  # Skip "generated_projects/{project_slug}/"
+					relative_path = "/".join(parts[project_idx:])
+				except (ValueError, IndexError):
+					# If parsing fails, use the filename
+					relative_path = file_path.name
+			else:
+				relative_path = file_path.name
+			
+			# Upload DIRECTLY to S3 (no local intermediate)
+			file_info = {
+				"path": relative_path,
+				"content": content
+			}
+			self.s3_uploader(project_slug, [file_info], self.user_id)
+			print(f"☁️ Uploaded {relative_path} directly to S3")
+		except Exception as e:
+			print(f"❌ S3 upload FAILED for {file_path}: {e}")
+			raise  # Fail fast - no fallback to local storage
 	
 	def _validate_file_async(self, file_path: Path, content: str, file_type: str) -> Tuple[Path, str, bool]:
 		"""Validate a single file asynchronously. Returns (file_path, final_content, success)."""
@@ -735,12 +772,14 @@ class PureAIGenerator:
 			print(f"❌ Validation failed for {file_path.name}: {e}")
 			return file_path, content, False
 	
-	def _write_files_parallel(self, file_tasks: List[Tuple[Path, str, str]]) -> Dict[str, str]:
+	def _write_files_parallel(self, file_tasks: List[Tuple[Path, str, str]], project_slug: str = None) -> Dict[str, str]:
 		"""
 		Write multiple files with parallel validation for maximum speed.
+		Supports direct S3 upload and optional local storage.
 		
 		Args:
 			file_tasks: List of (file_path, content, file_type) tuples
+			project_slug: Project identifier for S3 uploads
 			
 		Returns:
 			Dictionary mapping file paths to final content
@@ -754,7 +793,7 @@ class PureAIGenerator:
 		if not self.enable_validation or self.validation_agent is None:
 			print(f"📝 Writing {len(file_tasks)} files without validation...")
 			for file_path, content, _ in file_tasks:
-				file_path.write_text(content, encoding="utf-8")
+				self._write_file(file_path, content, project_slug)
 				results[str(file_path)] = content
 			return results
 		
@@ -774,8 +813,8 @@ class PureAIGenerator:
 			for future in as_completed(future_to_task):
 				file_path, final_content, success = future.result()
 				
-				# Write the file with final content
-				file_path.write_text(final_content, encoding="utf-8")
+				# Write the file with final content (S3 + local)
+				self._write_file(file_path, final_content, project_slug)
 				results[str(file_path)] = final_content
 				
 				if success:
@@ -818,8 +857,12 @@ class PureAIGenerator:
 	async def generate_project_structure(
 		self, project_path: Path, project_spec: dict, project_name: str, tech_stack: List[str] = None
 	) -> List[str]:
-		print(f"DEBUG: Creating project at {project_path}")
+		print(f"☁️ Generating project directly to S3: {project_name}")
 		print(f"DEBUG: Project spec: {project_spec}")
+		
+		# Validate S3 uploader is configured
+		if not self.s3_uploader:
+			raise ValueError("❌ S3 uploader is REQUIRED for project generation - no local storage available")
 		
 		# Extract idea from spec for backward compatibility
 		idea = project_spec.get("idea", "") if isinstance(project_spec, dict) else str(project_spec)
@@ -830,16 +873,15 @@ class PureAIGenerator:
 			print(f"ERROR: Failed to analyze and plan: {e}")
 			raise
 			
-		project_path.mkdir(parents=True, exist_ok=True)
+		# NO local directory creation - everything goes to S3
 		files_created: List[str] = []
 		errors_encountered: List[str] = []
 		
-		# Generate backend files one by one to avoid token limits
-		backend_path = project_path / "backend"
-		backend_path.mkdir(parents=True, exist_ok=True)
+		# Generate backend files directly to S3
+		backend_path = project_path / "backend"  # Virtual path for S3 key construction
 		
-		# 🚀 PARALLEL GENERATION: Generate all backend files concurrently
-		print("🚀 Generating backend files in parallel...")
+		# 🚀 PARALLEL GENERATION: Generate all backend files concurrently to S3
+		print("🚀 Generating backend files in parallel to S3...")
 		
 		async def generate_backend_file(file_type: str, filename: str) -> Tuple[str, str, str]:
 			"""Generate a single backend file and return (filename, content, file_type)"""
@@ -883,22 +925,21 @@ class PureAIGenerator:
 				backend_file_tasks.append((file_path, content, file_type))
 				print(f"✅ Generated {filename} ({len(content)} chars)")
 		
-		# Write all backend files with parallel validation
+		# Write all backend files with parallel validation directly to S3
 		if backend_file_tasks:
-			backend_written = self._write_files_parallel(backend_file_tasks)
+			backend_written = self._write_files_parallel(backend_file_tasks, project_name)
 			for file_path in backend_written:
 				relative_path = Path(file_path).relative_to(project_path)
 				files_created.append(str(relative_path).replace("\\", "/"))
-			print(f"🎉 Completed all {len(backend_written)} backend files!")
+			print(f"☁️ Uploaded all {len(backend_written)} backend files to S3!")
 			
-		# Generate frontend files
-		frontend_path = project_path / "frontend"
+		# Generate frontend files directly to S3
+		frontend_path = project_path / "frontend"  # Virtual path for S3 key construction
 		frontend_src = frontend_path / "src"
-		frontend_src.mkdir(parents=True, exist_ok=True)
-		print(f"DEBUG: Created frontend directory at {frontend_path}")
+		print(f"☁️ Generating frontend files directly to S3")
 		
-		# 🚀 PARALLEL GENERATION: Generate main App.jsx and supporting files concurrently
-		print("🚀 Generating frontend App.jsx and support files in parallel...")
+		# 🚀 PARALLEL GENERATION: Generate main App.jsx and supporting files concurrently to S3
+		print("🚀 Generating frontend App.jsx and support files in parallel to S3...")
 		
 		try:
 			# Generate App.jsx asynchronously  
@@ -952,8 +993,7 @@ export default App;'''
 				print(f"❌ ERROR in App.jsx generation: {app_code}")
 				app_code = f"// Fallback App.jsx due to generation error\nexport default function App() {{ return <div>Error: {app_code}</div>; }}"
 			
-			# Prepare frontend files for parallel validation
-			(frontend_src / "lib").mkdir(parents=True, exist_ok=True)
+			# Prepare frontend files for parallel validation (no local directory creation)
 			
 			utils_content = '''import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
@@ -981,8 +1021,8 @@ export const cardVariants = {
 				(frontend_src / "lib" / "utils.js", utils_content, "javascript"),
 			]
 			
-			# Write frontend files with parallel validation
-			frontend_written = self._write_files_parallel(frontend_file_tasks)
+			# Write frontend files with parallel validation directly to S3
+			frontend_written = self._write_files_parallel(frontend_file_tasks, project_name)
 			
 			# Add to files_created list
 			for file_path in frontend_written:
@@ -1094,6 +1134,31 @@ export const cardVariants = {
 			"generation_timestamp": datetime.now().isoformat(),
 			"files_generated": files_created
 		}
+		
+		# Create metadata file for S3
+		metadata_content = {
+			"name": project_name,
+			"created_date": int(datetime.now().timestamp()),
+			"type": plan.get('app_type', 'Web Application'),
+			"description": plan.get('description', ''),
+			"features": plan.get('features', []),
+			"tech_stack": tech_stack
+		}
+		
+		# Upload metadata to S3
+		project_slug = project_name.lower().replace(" ", "-").replace("_", "-")
+		try:
+			self.s3_uploader(
+				project_slug,
+				[{
+					'path': 'project_metadata.json',
+					'content': json.dumps(metadata_content, indent=2)
+				}],
+				self.user_id
+			)
+			print(f"✅ Uploaded project metadata to S3")
+		except Exception as e:
+			print(f"⚠️ Failed to upload metadata: {e}")
 		
 		# Save validation report
 		validation_report_path = project_path / "VALIDATION_REPORT.json"
@@ -1929,7 +1994,7 @@ export default defineConfig({
 			"components": sanitized_components,
 			"required_paths": required_paths,
 			"frontend_overview": frontend_plan,
-			"backend_api_base": "http://localhost:8000/api",
+			"backend_api_base": "https://api.xverta.com/api",
 			"features": plan.get("features", []),
 		}
 
@@ -2081,7 +2146,7 @@ MANDATORY REQUIREMENTS:
    - Token expiration and validation
 
 2. COMPREHENSIVE CORS CONFIGURATION:
-   - Allow all origins for development (http://localhost:3000, http://localhost:5173)
+   - Allow all origins for production (https://xverta.com, https://www.xverta.com)
    - Allow credentials for cookie/token handling
    - Proper headers for authentication
    - Methods: GET, POST, PUT, DELETE, OPTIONS
@@ -2244,7 +2309,7 @@ app = FastAPI(title="{project_name}", description="{description}")
 # CORS Configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173", "http://localhost:8080"],
+    allow_origins=["https://xverta.com", "https://www.xverta.com"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -2880,8 +2945,8 @@ LAYOUT-SPECIFIC REQUIREMENTS:
 
 🌐 BROWSER ENVIRONMENT SAFETY:
 - NEVER use process.env directly (causes ReferenceError in browser)
-- Instead use: const API_URL = 'http://localhost:8001/api/v1'; (hardcoded for local dev)
-- OR safe check: const API_URL = (typeof window !== 'undefined' && window.ENV?.API_URL) || 'http://localhost:8001/api/v1';
+- Instead use: const API_URL = 'https://api.xverta.com/api'; (production API)
+- OR safe check: const API_URL = (typeof window !== 'undefined' && window.ENV?.API_URL) || 'https://api.xverta.com/api';
 - NO Node.js globals in browser code (process, Buffer, __dirname, require)
 
 🏆 AWWWARDS-INSPIRED DESIGN BRIEF:
@@ -2945,7 +3010,7 @@ MANDATORY FULL-STACK INTEGRATION REQUIREMENTS:
    - Error handling and success notifications
 
 2. WORKING API INTEGRATION:
-   - Real fetch() calls to backend API (http://localhost:8001/api/v1)
+   - Real fetch() calls to backend API (https://api.xverta.com/api)
    - Authentication headers: Authorization: Bearer {{token}}
    - Proper error handling for all network requests
    - Loading states with spinners and user feedback
@@ -3112,7 +3177,7 @@ const LoginModal = ({{ isOpen, onClose, onSuccess }}) => {{
     setError('');
     
     try {{
-      const response = await fetch('http://localhost:8001/api/v1/auth/login', {{
+      const response = await fetch('https://api.xverta.com/api/auth/login', {{
         method: 'POST',
         headers: {{ 'Content-Type': 'application/json' }},
         body: JSON.stringify({{ email, password }})
@@ -3179,7 +3244,7 @@ const SignupModal = ({{ isOpen, onClose, onSuccess }}) => {{
     setError('');
     
     try {{
-      const response = await fetch('http://localhost:8001/api/v1/auth/register', {{
+      const response = await fetch('https://api.xverta.com/api/auth/register', {{
         method: 'POST',
         headers: {{ 'Content-Type': 'application/json' }},
         body: JSON.stringify({{

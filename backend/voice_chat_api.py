@@ -114,6 +114,11 @@ CRITICAL: Always ask about design preferences! Ask questions like:
    - Say: "I'll assume [default]. We can change this later."
    - Continue to next question
 
+TECH STACK DEFAULT: If user doesn't specify tech stack or says "I don't know" or "default":
+   - Frontend: React JSX
+   - Backend: FastAPI
+   - Say: "I'll use React for the frontend and FastAPI for the backend - our recommended stack!"
+
 4. Keep responses CONVERSATIONAL and BRIEF (2-3 sentences max)
 
 5. After gathering info, create a summary like:
@@ -359,13 +364,28 @@ Response:"""
             candidate = response.candidates[0]
             finish_reason = getattr(candidate, 'finish_reason', None)
             print(f"DEBUG: AI response finish_reason: {finish_reason}")
-            print(f"DEBUG: AI response text: {response.text[:100] if response.text else 'No text'}")
             
             if finish_reason is not None and finish_reason != 1:  # 1 = STOP (normal completion)
-                print(f"DEBUG: AI response was blocked or incomplete, finish_reason: {finish_reason}")
-                ai_response = "I had a technical issue. Let me continue - what else would you like to tell me about your project?"
+                print(f"⚠️ AI response blocked/incomplete, finish_reason: {finish_reason}")
+                # Check if there's any partial text
+                try:
+                    partial_text = response.text if hasattr(response, 'text') else None
+                    if partial_text:
+                        print(f"DEBUG: Partial text available: {partial_text[:100]}")
+                        ai_response = partial_text
+                    else:
+                        ai_response = "Got it! What else would you like to add to your project?"
+                except Exception as e:
+                    print(f"DEBUG: Could not access response text: {e}")
+                    ai_response = "Got it! What else would you like to add to your project?"
             else:
-                ai_response = response.text if response.text else "I'm ready to help you build your app! What would you like to create?"
+                # Normal completion
+                try:
+                    ai_response = response.text if response.text else "I'm ready to help you build your app! What would you like to create?"
+                    print(f"✅ AI response text: {ai_response[:100]}")
+                except Exception as e:
+                    print(f"⚠️ Error accessing response.text: {e}")
+                    ai_response = "I'm ready to help you build your app! What would you like to create?"
         else:
             print("DEBUG: No candidates in AI response")
             ai_response = "I'm your AI assistant and I'm ready to help you build amazing projects! What kind of app would you like to create today!"
@@ -512,10 +532,18 @@ async def synthesize_speech(request: TextToSpeechRequest):
     if not GOOGLE_CLOUD_AVAILABLE:
         return JSONResponse(
             status_code=503,
-            content={"error": "Text-to-speech not available"}
+            content={"error": "Text-to-speech not available - Google Cloud SDK not installed"}
         )
     
     try:
+        # Check if Google Cloud credentials are configured
+        if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
+            print("⚠️  GOOGLE_APPLICATION_CREDENTIALS not set, TTS unavailable")
+            return JSONResponse(
+                status_code=503,
+                content={"error": "Text-to-speech credentials not configured"}
+            )
+        
         client = texttospeech.TextToSpeechClient()
         
         # Truncate long text
@@ -532,7 +560,7 @@ async def synthesize_speech(request: TextToSpeechRequest):
         
         audio_config = texttospeech.AudioConfig(
             audio_encoding=texttospeech.AudioEncoding.MP3,
-            speaking_rate=1.0
+            speaking_rate=1.3
         )
         
         response = client.synthesize_speech(
@@ -553,15 +581,20 @@ async def synthesize_speech(request: TextToSpeechRequest):
         
         os.unlink(temp_file_path)
         
-        # Return as audio blob
-        return Response(
+        # Return as audio blob (CORS handled by middleware)
+        response = Response(
             content=audio_content,
             media_type="audio/mpeg",
-            headers={"Content-Disposition": "inline; filename=speech.mp3"}
+            headers={
+                "Content-Disposition": "inline; filename=speech.mp3"
+            }
         )
+        return response
         
     except Exception as e:
-        print(f"TTS error: {e}")
+        print(f"❌ TTS error: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Text-to-speech failed: {str(e)}")
 
 # Enhanced TTS with Chatterbox integration

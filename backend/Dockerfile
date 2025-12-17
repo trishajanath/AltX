@@ -1,18 +1,37 @@
-# Use an official, lightweight Python image as a base
-FROM python:3.9-slim
+# Use an official Python runtime as a parent image
+FROM python:3.11-slim
 
-# Set the working directory inside the container
+# Set working directory
 WORKDIR /app
-RUN apt-get update && apt-get install -y git
 
-# Copy the requirements file first to leverage Docker's layer caching
+# Install system dependencies required for PyAudio and other packages
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    portaudio19-dev \
+    python3-dev \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements.txt and install dependencies
 COPY requirements.txt .
-
-# Install the dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of your backend application's code
+# Copy Google Cloud credentials
+COPY xverta-convo-e1ac5d825bfb.json /app/xverta-convo-e1ac5d825bfb.json
+
+# Set Google Cloud credentials environment variable
+ENV GOOGLE_APPLICATION_CREDENTIALS=/app/xverta-convo-e1ac5d825bfb.json
+
+# Copy the rest of the backend code
 COPY . .
 
-# The command to run your application when the container starts
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Copy and set permissions for startup script
+COPY start.sh .
+RUN chmod +x start.sh
+
+# Expose port (must match FastAPI port)
+EXPOSE 8000
+
+# Command to run both Monaco server and FastAPI
+CMD ["./start.sh"]

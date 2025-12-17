@@ -9,6 +9,7 @@ import re
 import json
 from datetime import datetime
 from pure_ai_generator import PureAIGenerator
+from s3_storage import upload_project_to_s3
 import asyncio
 from pathlib import Path
 
@@ -58,7 +59,10 @@ RULES:
 
 # Initialize chat, AI generator, and state
 chat = model.start_chat(history=[])
-ai_generator = PureAIGenerator()
+ai_generator = PureAIGenerator(
+    s3_uploader=upload_project_to_s3,
+    user_id='anonymous'  # speechLogic doesn't have user auth yet
+)
 conversation_state = {
     "gathering_requirements": False,
     "requirements_complete": False,

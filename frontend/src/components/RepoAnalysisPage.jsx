@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE_URL, apiUrl } from '../config/api';
 import PageWrapper from './PageWrapper';
 import usePreventZoom from './usePreventZoom';
 import ChatResponseFormatter from './ChatResponseFormatter';
@@ -253,7 +254,7 @@ const RepoAnalysisPage = ({ setScanResult }) => { // Assuming setScanResult is p
         setFixedIssues(new Set());
         setFixingIssues({});
         try {
-            const response = await fetch('http://localhost:8000/analyze-repo', {
+            const response = await fetch('https://api.xverta.com/analyze-repo', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ repo_url: cleanedUrl, model_type: modelType }),
@@ -378,7 +379,7 @@ I'm ready to answer specific questions about these findings, provide detailed ex
             };
         });
         
-        const response = await fetch('http://localhost:8000/ai-chat', {
+        const response = await fetch('https://api.xverta.com/ai-chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -438,7 +439,7 @@ I'm ready to answer specific questions about these findings, provide detailed ex
                     repo_url: repoUrl.trim()
                 }
             };
-            const response = await fetch('http://localhost:8000/propose-fix', {
+            const response = await fetch('https://api.xverta.com/propose-fix', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ repo_url: repoUrl.trim(), issue: issueData, branch_name: "main" }),
@@ -595,7 +596,7 @@ I'm ready to answer specific questions about these findings, provide detailed ex
     // Function to check rate limit status
     const checkRateLimitStatus = async () => {
         try {
-            const response = await fetch('http://localhost:8000/api/rate-limit-status');
+            const response = await fetch(apiUrl('api/rate-limit-status'));
             const data = await response.json();
             setRateLimitStatus(data);
         } catch (error) {
