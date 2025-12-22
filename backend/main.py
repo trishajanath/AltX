@@ -135,8 +135,8 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://www.xverta.com",
-        "https://xverta.com",
+        "http://localhost:5173",  # Frontend dev server
+        "http://localhost:5173",
         "http://localhost:3000",
         "http://localhost:5173",
         "http://localhost:5174",
@@ -3844,7 +3844,7 @@ async def run_project(request: dict = Body(...)):
         })
         
         # Generate sandbox preview URL
-        sandbox_url = f"https://api.xverta.com/api/sandbox-preview/{project_slug}"
+        sandbox_url = f"http://localhost:8000/api/sandbox-preview/{project_slug}"
         
         # Validate that essential files exist
         essential_files = ["src/App.jsx", "src/main.jsx"]
@@ -4565,7 +4565,7 @@ async def get_project_history(current_user: Optional[dict] = Depends(get_current
                     "name": project_data.get('name', project_slug.replace("-", " ").title()),
                     "slug": project_slug,
                     "created_date": created_date,
-                    "preview_url": f"https://api.xverta.com/api/sandbox-preview/{project_slug}",
+                    "preview_url": f"http://localhost:8000/api/sandbox-preview/{project_slug}",
                     "editor_url": f"/project/{project_slug}",
                     "has_frontend": has_frontend,
                     "has_backend": has_backend,
@@ -5720,7 +5720,7 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://xverta.com", "https://www.xverta.com"],
+    allow_origins=["http://localhost:5173"],  # Frontend dev server
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -5787,7 +5787,7 @@ if __name__ == "__main__":
     env_content = f"""# {project_name} Environment Variables
 DEBUG=True
 PORT=8001
-CORS_ORIGINS=https://xverta.com,https://www.xverta.com"""
+CORS_ORIGINS=http://localhost:5173"""
     
     if needs_database:
         env_content += """
@@ -5879,7 +5879,7 @@ const PORT = process.env.PORT || 8001;
 // Middleware
 app.use(helmet());
 app.use(cors({{
-    origin: ['https://xverta.com', 'https://www.xverta.com'],
+    origin: ['http://localhost:5173'],
     credentials: true
 }}));
 app.use(morgan('combined'));
@@ -8099,7 +8099,7 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://xverta.com", "https://www.xverta.com"],  # Frontend URL
+    allow_origins=["http://localhost:5173"],  # Frontend dev server
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -8229,7 +8229,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - VITE_API_URL=https://api.xverta.com
+      - VITE_API_URL=http://localhost:8000
     depends_on:
       - backend
 
@@ -8283,9 +8283,9 @@ A full-stack application with React frontend and FastAPI backend.
    ```
 
 3. **Access the Application**
-   - Frontend: https://xverta.com
-   - Backend API: https://api.xverta.com
-   - API Docs: https://api.xverta.com/docs
+   - Frontend: http://localhost:5173
+   - Backend API: http://localhost:8000
+   - API Docs: http://localhost:8000/docs
 
 ### Docker Setup
 
@@ -8317,7 +8317,7 @@ Create `.env` files:
 
 **Frontend (.env)**
 ```
-VITE_API_URL=https://api.xverta.com
+VITE_API_URL=http://localhost:8000
 ```
 
 **Backend (.env)**
@@ -8353,7 +8353,7 @@ SECRET_KEY=your-secret-key-here
 - `GET /api/items/{{id}}` - Get item by ID
 - `DELETE /api/items/{{id}}` - Delete item
 
-Visit https://api.xverta.com/docs for interactive API documentation.
+Visit http://localhost:8000/docs for interactive API documentation.
 '''
     
     with open(project_path / "README.md", "w") as f:
@@ -8361,7 +8361,7 @@ Visit https://api.xverta.com/docs for interactive API documentation.
     
     # Generate .env.example
     env_example = '''# Frontend Environment Variables
-VITE_API_URL=https://api.xverta.com
+VITE_API_URL=http://localhost:8000
 
 # Backend Environment Variables  
 DATABASE_URL=postgresql://user:password@localhost:5432/database
@@ -9722,7 +9722,7 @@ async def github_login():
         github_auth_url = (
             f"https://github.com/login/oauth/authorize"
             f"?client_id={github_client_id}"
-            f"&redirect_uri={os.getenv('GITHUB_CALLBACK_URL', 'https://api.xverta.com/auth/github/callback')}"
+            f"&redirect_uri={os.getenv('GITHUB_CALLBACK_URL', 'http://localhost:8000/auth/github/callback')}"
             f"&scope=repo,user:email"
             f"&state={state}"
             f"&allow_signup=true"
@@ -9760,7 +9760,7 @@ async def google_callback(request: Request):
             "client_id": os.getenv("GOOGLE_CLIENT_ID"),
             "client_secret": os.getenv("GOOGLE_CLIENT_SECRET"),
             "code": code,
-            "redirect_uri": os.getenv("GOOGLE_CALLBACK_URL", "https://api.xverta.com/auth/google/callback"),
+            "redirect_uri": os.getenv("GOOGLE_CALLBACK_URL", "http://localhost:8000/auth/google/callback"),
             "grant_type": "authorization_code"
         }
         token_headers = {
@@ -9955,7 +9955,7 @@ async def google_login():
     """
     try:
         google_client_id = os.getenv("GOOGLE_CLIENT_ID")
-        google_callback_url = os.getenv("GOOGLE_CALLBACK_URL", "https://api.xverta.com/auth/google/callback")
+        google_callback_url = os.getenv("GOOGLE_CALLBACK_URL", "http://localhost:8000/auth/google/callback")
         if not google_client_id:
             raise HTTPException(status_code=500, detail="Google Client ID not configured")
 
@@ -10029,7 +10029,7 @@ async def auth_status():
         "github_app_configured": bool(os.getenv("GITHUB_APP_ID")),
         "github_client_id_configured": bool(os.getenv("GITHUB_CLIENT_ID")),  # Added
         "github_client_secret_configured": bool(os.getenv("GITHUB_CLIENT_SECRET")),
-        "callback_url": os.getenv("GITHUB_CALLBACK_URL", "https://api.xverta.com/auth/github/callback"),
+        "callback_url": os.getenv("GITHUB_CALLBACK_URL", "http://localhost:8000/auth/github/callback"),
         "login_url": "/auth/github/login",
         "timestamp": datetime.now().isoformat()
     }
@@ -10081,7 +10081,7 @@ async def manual_deploy(request: dict):
                 "owner": owner,
                 "url": repo_url
             },
-            "deployment_url": f"https://api.xverta.com/{repo_name}",
+            "deployment_url": f"http://localhost:8000/{repo_name}",
             "timestamp": datetime.now().isoformat()
         }
         
@@ -11151,7 +11151,7 @@ MANDATORY FULL-STACK INTEGRATION FEATURES:
    - Real-time updates and data synchronization
 
 3. WORKING API INTEGRATION:
-   - Real fetch() calls to backend API (https://api.xverta.com/api)
+   - Real fetch() calls to backend API (http://localhost:8000/api)
    - Proper error handling for all network requests
    - Loading states with spinners and feedback
    - Success/error notifications with toast messages
@@ -11194,7 +11194,7 @@ E-COMMERCE FEATURES (If shopping/cart detected):
 - Inventory management and stock display
 
 API INTEGRATION PATTERNS:
-- Use consistent API base URL: https://api.xverta.com/api
+- Use consistent API base URL: http://localhost:8000/api
 - Include Authorization headers: Bearer ${{token}}
 - Handle 401 errors with automatic logout
 - Display loading states during API calls
@@ -11245,7 +11245,7 @@ export default defineConfig({{
   plugins: [react()],
   server: {{
     proxy: {{
-      '/api': 'https://api.xverta.com'
+      '/api': 'http://localhost:8000'
     }}
   }}
 }})
@@ -11412,7 +11412,7 @@ MANDATORY FULL-STACK INTEGRATION FEATURES:
 CRITICAL REQUIREMENTS - NO MOCKS OR PLACEHOLDERS:
 - Generate COMPLETE, PRODUCTION-READY FastAPI code that works immediately
 - Use FastAPI with modern Python 3.9+ async/await patterns
-- Include proper CORS handling for React frontend (https://xverta.com)
+- Include proper CORS handling for React frontend (http://localhost:5173)
 - Create WORKING API endpoints with full business logic implementation
 - Add comprehensive error handling and validation with Pydantic models
 - Include proper HTTP status codes and response models

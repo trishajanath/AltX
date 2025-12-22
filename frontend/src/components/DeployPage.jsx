@@ -43,7 +43,7 @@ const DeployPage = ({ setScanResult }) => {
                 setDeployLogs(currentLogs);
             }
 
-            const response = await fetch('https://api.xverta.com/api/deploy', {
+            const response = await fetch('http://localhost:8000/api/deploy', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ repo_url: repoUrl.trim() }),

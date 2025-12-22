@@ -809,7 +809,7 @@ Just tell me what you'd like to do.`
         };
         
         // Call the new Gemini auto-fix endpoint
-        const response = await fetch('https://api.xverta.com/api/gemini-fix-console-error', {
+        const response = await fetch('http://localhost:8000/api/gemini-fix-console-error', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -1050,7 +1050,7 @@ Click the "Fix Issues" button or ask me to "fix the issues" and I'll try to reso
         return;
       }
 
-      const ws = new WebSocket(`wss://api.xverta.com/ws/project/${project.name}`);
+      const ws = new WebSocket(`ws://localhost:8000/ws/project/${project.name}`);
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -1149,7 +1149,7 @@ Click the "Fix Issues" button or ask me to "fix the issues" and I'll try to reso
   const runProject = async () => {
     setIsBuilding(true);
     try {
-      const response = await fetch('https://api.xverta.com/api/run-project', {
+      const response = await fetch('http://localhost:8000/api/run-project', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1270,7 +1270,7 @@ Please try describing the issue manually.`
       error_type: 'manual_fix_request'
     };
     
-    const geminiResponse = await fetch('https://api.xverta.com/api/gemini-fix-console-error', {
+    const geminiResponse = await fetch('http://localhost:8000/api/gemini-fix-console-error', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1402,7 +1402,7 @@ Starting your project again...`
         formData.append('audio', audioBlob, 'recording.webm');
         
         try {
-          const response = await fetch('https://api.xverta.com/api/process-speech', {
+          const response = await fetch('http://localhost:8000/api/process-speech', {
             method: 'POST',
             body: formData
           });
@@ -1526,7 +1526,7 @@ The changes are live in your preview.`
     
     try {
       // Try Chatterbox TTS first
-      const response = await fetch('https://api.xverta.com/api/synthesize-chatterbox', {
+      const response = await fetch('http://localhost:8000/api/synthesize-chatterbox', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text, language: 'en' })
@@ -1604,7 +1604,7 @@ The changes are live in your preview.`
     }
     
     try {
-      const response = await fetch('https://api.xverta.com/api/ai-project-assistant', {
+      const response = await fetch('http://localhost:8000/api/ai-project-assistant', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

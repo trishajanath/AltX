@@ -254,7 +254,7 @@ const RepoAnalysisPage = ({ setScanResult }) => { // Assuming setScanResult is p
         setFixedIssues(new Set());
         setFixingIssues({});
         try {
-            const response = await fetch('https://api.xverta.com/analyze-repo', {
+            const response = await fetch('http://localhost:8000/analyze-repo', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ repo_url: cleanedUrl, model_type: modelType }),
@@ -379,7 +379,7 @@ I'm ready to answer specific questions about these findings, provide detailed ex
             };
         });
         
-        const response = await fetch('https://api.xverta.com/ai-chat', {
+        const response = await fetch('http://localhost:8000/ai-chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -439,7 +439,7 @@ I'm ready to answer specific questions about these findings, provide detailed ex
                     repo_url: repoUrl.trim()
                 }
             };
-            const response = await fetch('https://api.xverta.com/propose-fix', {
+            const response = await fetch('http://localhost:8000/propose-fix', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ repo_url: repoUrl.trim(), issue: issueData, branch_name: "main" }),

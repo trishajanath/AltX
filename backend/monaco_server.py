@@ -228,7 +228,7 @@ app = FastAPI(title="Monaco Editor API", version="1.0.0")
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://xverta.com", "https://www.xverta.com"],
+    allow_origins=["http://localhost:5173"],  # Frontend dev server
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -907,14 +907,14 @@ async def run_project(request: dict = Body(...)):
                 backend_available = False
                 try:
                     async with aiohttp.ClientSession() as session:
-                        async with session.get("https://api.xverta.com/health", timeout=aiohttp.ClientTimeout(total=5)) as response:
+                        async with session.get("http://localhost:8000/health", timeout=aiohttp.ClientTimeout(total=5)) as response:
                             if response.status == 200:
                                 backend_available = True
                 except Exception:
                     # Try root endpoint if /health doesn't exist
                     try:
                         async with aiohttp.ClientSession() as session:
-                            async with session.get("https://api.xverta.com/", timeout=aiohttp.ClientTimeout(total=5)) as response:
+                            async with session.get("http://localhost:8000/", timeout=aiohttp.ClientTimeout(total=5)) as response:
                                 if response.status == 200:
                                     backend_available = True
                     except Exception:
@@ -923,7 +923,7 @@ async def run_project(request: dict = Body(...)):
                 if backend_available:
                     await manager.send_to_project(project_name, {
                         "type": "terminal_output",
-                        "message": "✅ Backend server started on https://api.xverta.com",
+                        "message": "✅ Backend server started on http://localhost:8000",
                         "level": "success"
                     })
                 else:
@@ -1125,7 +1125,7 @@ export default App;'''
                 
                 try:
                     async with aiohttp.ClientSession() as session:
-                        async with session.get("https://xverta.com", timeout=aiohttp.ClientTimeout(total=5)) as response:
+                        async with session.get("http://localhost:5173", timeout=aiohttp.ClientTimeout(total=5)) as response:
                             if response.status == 200:
                                 server_available = True
                 except Exception:
@@ -1137,13 +1137,13 @@ export default App;'''
                     preview_urls.append("https://xverta.com")
                     await manager.send_to_project(project_name, {
                         "type": "terminal_output",
-                        "message": "✅ Frontend server started on https://xverta.com",
+                        "message": "✅ Frontend server started on http://localhost:5173",
                         "level": "success"
                     })
                     
                     await manager.send_to_project(project_name, {
                         "type": "preview_ready",
-                        "url": "https://xverta.com"
+                        "url": "http://localhost:5173"
                     })
                 else:
                     await manager.send_to_project(project_name, {

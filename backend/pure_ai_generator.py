@@ -12,7 +12,7 @@ to produce content, the requ		# Check if the response was blocked (anything othe
 			"* main.jsx must bootstrap React with ReactDOM.createRoot and import index.css.\n"
 			"* package.json must include scripts (dev, build, preview) and dependencies for React, ReactDOM, Vite.\n"
 			"* Include inline TailwindCSS via CDN in index.html.\n"
-			"* Components should make direct fetch calls to `https://api.xverta.com/api`.\n"
+			"* Components should make direct fetch calls to `http://localhost:8000/api`.\n"
 			"* Provide responsive design and loading/error states.\n"
 			"* Keep code concise but functional.\n\n" see what we got before the truncation
 				text = self._candidate_text(candidate)
@@ -1994,7 +1994,7 @@ export default defineConfig({
 			"components": sanitized_components,
 			"required_paths": required_paths,
 			"frontend_overview": frontend_plan,
-			"backend_api_base": "https://api.xverta.com/api",
+			"backend_api_base": "http://localhost:8000/api",
 			"features": plan.get("features", []),
 		}
 
@@ -2146,7 +2146,7 @@ MANDATORY REQUIREMENTS:
    - Token expiration and validation
 
 2. COMPREHENSIVE CORS CONFIGURATION:
-   - Allow all origins for production (https://xverta.com, https://www.xverta.com)
+   - Allow all origins for local development (http://localhost:5173)
    - Allow credentials for cookie/token handling
    - Proper headers for authentication
    - Methods: GET, POST, PUT, DELETE, OPTIONS
@@ -2309,7 +2309,7 @@ app = FastAPI(title="{project_name}", description="{description}")
 # CORS Configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://xverta.com", "https://www.xverta.com"],
+    allow_origins=["http://localhost:5173"],  # Frontend dev server
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -2945,8 +2945,8 @@ LAYOUT-SPECIFIC REQUIREMENTS:
 
 🌐 BROWSER ENVIRONMENT SAFETY:
 - NEVER use process.env directly (causes ReferenceError in browser)
-- Instead use: const API_URL = 'https://api.xverta.com/api'; (production API)
-- OR safe check: const API_URL = (typeof window !== 'undefined' && window.ENV?.API_URL) || 'https://api.xverta.com/api';
+- Instead use: const API_URL = 'http://localhost:8000/api'; (local API)
+- OR safe check: const API_URL = (typeof window !== 'undefined' && window.ENV?.API_URL) || 'http://localhost:8000/api';
 - NO Node.js globals in browser code (process, Buffer, __dirname, require)
 
 🏆 AWWWARDS-INSPIRED DESIGN BRIEF:
@@ -3010,7 +3010,7 @@ MANDATORY FULL-STACK INTEGRATION REQUIREMENTS:
    - Error handling and success notifications
 
 2. WORKING API INTEGRATION:
-   - Real fetch() calls to backend API (https://api.xverta.com/api)
+   - Real fetch() calls to backend API (http://localhost:8000/api)
    - Authentication headers: Authorization: Bearer {{token}}
    - Proper error handling for all network requests
    - Loading states with spinners and user feedback
@@ -3177,7 +3177,7 @@ const LoginModal = ({{ isOpen, onClose, onSuccess }}) => {{
     setError('');
     
     try {{
-      const response = await fetch('https://api.xverta.com/api/auth/login', {{
+      const response = await fetch('http://localhost:8000/api/auth/login', {{
         method: 'POST',
         headers: {{ 'Content-Type': 'application/json' }},
         body: JSON.stringify({{ email, password }})
@@ -3244,7 +3244,7 @@ const SignupModal = ({{ isOpen, onClose, onSuccess }}) => {{
     setError('');
     
     try {{
-      const response = await fetch('https://api.xverta.com/api/auth/register', {{
+      const response = await fetch('http://localhost:8000/api/auth/register', {{
         method: 'POST',
         headers: {{ 'Content-Type': 'application/json' }},
         body: JSON.stringify({{

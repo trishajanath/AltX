@@ -6,7 +6,7 @@ import asyncio
 import requests
 import json
 
-BASE_URL = "https://api.xverta.com"
+BASE_URL = "http://localhost:8000"
 
 def test_signup():
     """Test user signup"""
@@ -139,7 +139,7 @@ def main():
     print("\n📝 Next steps:")
     print("   1. Configure MongoDB URL in backend/.env")
     print("   2. Set JWT_SECRET_KEY in backend/.env")
-    print("   3. Access https://xverta.com/auth in your browser")
+    print("   3. Access http://localhost:5173/auth in your browser")
     print("   4. Create an account and start using the app!")
 
 
@@ -148,7 +148,7 @@ if __name__ == "__main__":
         main()
     except requests.exceptions.ConnectionError:
         print("\n❌ Connection Error!")
-        print("   Backend is not running on https://api.xverta.com")
+        print("   Backend is not running on http://localhost:8000")
         print("   Start the backend with: uvicorn main:app --reload")
     except Exception as e:
         print(f"\n❌ Unexpected error: {e}")

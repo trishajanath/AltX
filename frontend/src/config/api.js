@@ -1,5 +1,5 @@
 // API Configuration
-export const API_BASE_URL = 'https://api.xverta.com';
+export const API_BASE_URL = 'http://localhost:8000';
 
 // Helper function for API calls
 export const apiUrl = (path) => {

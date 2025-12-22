@@ -287,40 +287,7 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
     }
   };
 
-  // Auto-scroll using ResizeObserver (runs once on mount)
-  useEffect(() => {
-    const container = chatContainerRef.current;
-    const content = chatContentRef.current;
-
-    if (!container || !content) return;
-
-    // Create an observer that fires when the content's size changes
-    const observer = new ResizeObserver(() => {
-      // Only auto-scroll if user is at bottom
-      if (userAtBottomRef.current) {
-        container.scrollTop = container.scrollHeight;
-      }
-    });
-
-    // Start observing the inner content div
-    observer.observe(content);
-
-    // Clean up the observer on unmount
-    return () => {
-      observer.disconnect();
-    };
-  }, []); // Empty array runs this only once
-
-  // Detect when user scrolls manually (NO STATE - refs only to prevent re-renders)
-  const handleScroll = () => {
-    const el = chatContainerRef.current;
-    if (!el) return;
-
-    const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
-    
-    // Update ref only (no state update = no re-render = no scroll jump)
-    userAtBottomRef.current = isAtBottom;
-  };
+  // No auto-scroll - let user control scrolling manually
 
   // Cleanup effect: Stop all audio when component unmounts (navigation away)
   useEffect(() => {
@@ -754,7 +721,7 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
       setIsLoadingHistory(true);
       setHistoryError(null);
       
-      const response = await authenticatedFetch('https://api.xverta.com/api/project-history');
+      const response = await authenticatedFetch('http://localhost:8000/api/project-history');
       
       console.log('Response status:', response.status);
       console.log('Response headers:', Object.fromEntries(response.headers.entries()));
@@ -798,7 +765,7 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
 
   // Handle preview project - open in new tab
   const handlePreviewProject = (project) => {
-    const previewUrl = project.preview_url || `https://api.xverta.com/api/sandbox-preview/${project.slug}`;
+    const previewUrl = project.preview_url || `http://localhost:8000/api/sandbox-preview/${project.slug}`;
     window.open(previewUrl, '_blank', 'noopener,noreferrer');
   };
 
@@ -1782,10 +1749,10 @@ const MainContent = () => (
                 {/* NEW: Top Chatbox Component */}
                 <div className="top-chatbox-component" style={{ position: 'relative' }}>
                 {/* Chat Messages Display Area */}
-                <div ref={chatContainerRef} className="chatbox-messages-area" onScroll={handleScroll}>
+                <div ref={chatContainerRef} className="chatbox-messages-area" style={{ overflowAnchor: 'auto' }}>
                   <div ref={chatContentRef} className="conversation-messages">
                     {conversation.map((message, index) => (
-                      <div key={index} className={`message ${message.type} fade-in`}>
+                      <div key={`${index}-${message.timestamp || index}`} className={`message ${message.type} fade-in`}>
                         {message.type === 'ai' && <div className="ai-avatar"></div>}
                         <div className={`message-bubble`}>
                           {message.isConversion ? (

@@ -267,7 +267,7 @@ class ValidatedPureAIGenerator:
                 "3. Backend: Start server with 'python backend/main.py'", 
                 "4. Frontend: Install dependencies with 'npm install' in frontend folder",
                 "5. Frontend: Start dev server with 'npm run dev' in frontend folder",
-                "6. Access application at https://xverta.com"
+                "6. Access application at http://localhost:5173"
             ]
         }
         

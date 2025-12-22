@@ -77,7 +77,7 @@ const ProjectBuilder = () => {
     setShowMonacoEditor(true);
     
     // Setup WebSocket connection for real-time updates
-    const ws = new WebSocket(`wss://api.xverta.com/ws/project/${projectName}`);
+    const ws = new WebSocket(`ws://localhost:8000/ws/project/${projectName}`);
     
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
