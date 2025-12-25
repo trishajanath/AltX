@@ -9956,6 +9956,11 @@ async def google_login():
     try:
         google_client_id = os.getenv("GOOGLE_CLIENT_ID")
         google_callback_url = os.getenv("GOOGLE_CALLBACK_URL", "http://localhost:8000/auth/google/callback")
+        
+        # Debug logging
+        print(f"DEBUG: GOOGLE_CLIENT_ID = {google_client_id}")
+        print(f"DEBUG: GOOGLE_CALLBACK_URL = {google_callback_url}")
+        
         if not google_client_id:
             raise HTTPException(status_code=500, detail="Google Client ID not configured")
 
