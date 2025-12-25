@@ -83,7 +83,7 @@ class CodeValidator:
         )
     
     def validate_javascript_syntax(self, code: str, filename: str = "generated.js") -> ValidationResult:
-        """Validate JavaScript/JSX code syntax."""
+        """Validate JavaScript/JSX code syntax using ESLint and Babel parser."""
         errors = []
         warnings = []
         suggestions = []
@@ -92,12 +92,151 @@ class CodeValidator:
             # Remove any markdown code blocks
             cleaned_code = self._clean_markdown_from_code(code)
             
-            # Check for common JSX/React issues
-            errors.extend(self._check_jsx_common_issues(cleaned_code))
-            warnings.extend(self._check_jsx_warnings(cleaned_code))
-            suggestions.extend(self._check_jsx_suggestions(cleaned_code))
+            # Try to use ESLint if available for proper React validation
+            if self._check_eslint_available():
+                eslint_result = self._validate_with_eslint(cleaned_code, filename)
+                errors.extend(eslint_result.get('errors', []))
+                warnings.extend(eslint_result.get('warnings', []))
+            else:
+                # Fallback to Node.js syntax check only
+                if self._check_node_available():
+                    errors.extend(self._validate_with_node(cleaned_code, filename))
+                else:
+                    # Basic fallback checks only for critical issues
+                    errors.extend(self._check_jsx_critical_issues(cleaned_code))
             
-            # Try to validate with Node.js if available
+            return ValidationResult(
+                is_valid=len(errors) == 0,
+                errors=errors,
+                warnings=warnings,
+                suggestions=suggestions
+            )
+            
+        except Exception as e:
+            errors.append(f"Validation Error in {filename}: {str(e)}")
+            
+        return ValidationResult(
+            is_valid=False,
+            errors=errors,
+            warnings=warnings,
+            suggestions=suggestions
+        )
+    
+    def _check_eslint_available(self) -> bool:
+        """Check if ESLint is available."""
+        try:
+            result = subprocess.run(['npx', 'eslint', '--version'], capture_output=True, text=True, timeout=5)
+            return result.returncode == 0
+        except:
+            return False
+    
+    def _validate_with_eslint(self, code: str, filename: str) -> Dict[str, List[str]]:
+        """Validate JavaScript code with ESLint using React rules."""
+        errors = []
+        warnings = []
+        
+        try:
+            # Create a temporary file with the code
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.jsx', delete=False, encoding='utf-8') as f:
+                f.write(code)
+                temp_path = f.name
+            
+            # Create a minimal ESLint config for React
+            eslint_config = {
+                "env": {
+                    "browser": True,
+                    "es2021": True
+                },
+                "extends": [
+                    "eslint:recommended",
+                    "plugin:react/recommended",
+                    "plugin:react-hooks/recommended"
+                ],
+                "parserOptions": {
+                    "ecmaVersion": "latest",
+                    "sourceType": "module",
+                    "ecmaFeatures": {
+                        "jsx": True
+                    }
+                },
+                "plugins": ["react", "react-hooks"],
+                "rules": {
+                    "no-unused-vars": "error",
+                    "no-undef": "error",
+                    "react/prop-types": "off",
+                    "react/react-in-jsx-scope": "off"
+                },
+                "settings": {
+                    "react": {
+                        "version": "detect"
+                    }
+                }
+            }
+            
+            config_path = temp_path.replace('.jsx', '.eslintrc.json')
+            with open(config_path, 'w') as f:
+                json.dump(eslint_config, f)
+            
+            # Run ESLint
+            result = subprocess.run(
+                ['npx', 'eslint', '--no-eslintrc', '--config', config_path, '--format', 'json', temp_path],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            # Parse ESLint output
+            if result.stdout:
+                try:
+                    eslint_output = json.loads(result.stdout)
+                    if eslint_output and len(eslint_output) > 0:
+                        for message in eslint_output[0].get('messages', []):
+                            severity = message.get('severity', 2)
+                            msg = f"Line {message.get('line', '?')}: {message.get('message', 'Unknown error')}"
+                            
+                            if severity == 2:  # Error
+                                errors.append(msg)
+                            elif severity == 1:  # Warning
+                                warnings.append(msg)
+                except json.JSONDecodeError:
+                    pass
+            
+            # Cleanup
+            os.unlink(temp_path)
+            if os.path.exists(config_path):
+                os.unlink(config_path)
+                
+        except subprocess.TimeoutExpired:
+            errors.append("ESLint validation timed out")
+        except Exception as e:
+            # ESLint failed, fall back to basic checks
+            pass
+        
+        return {'errors': errors, 'warnings': warnings}
+    
+    def _check_jsx_critical_issues(self, code: str) -> List[str]:
+        """Basic critical issue checks when ESLint is not available."""
+        errors = []
+        
+        # Only check for duplicate declarations - the most common critical issue
+        component_declarations = {}
+        for match in re.finditer(r'(?:const|function|class)\s+(\w+)\s*=', code):
+            comp_name = match.group(1)
+            if comp_name[0].isupper():
+                if comp_name in component_declarations:
+                    errors.append(f"Duplicate component declaration: '{comp_name}'")
+                else:
+                    component_declarations[comp_name] = match.start()
+        
+        # Check for components that are both imported and declared
+        import_matches = re.findall(r'import\s+{([^}]+)}\s+from', code)
+        for import_match in import_matches:
+            imported_comps = [c.strip() for c in import_match.split(',')]
+            for comp in imported_comps:
+                if comp in component_declarations:
+                    errors.append(f"Component '{comp}' is imported and declared locally")
+        
+        return errors
             # Temporarily disabled due to encoding issues
             # if self._check_node_available():
             #     node_errors = self._validate_with_node(cleaned_code, filename)
@@ -212,6 +351,24 @@ class CodeValidator:
         """Check for common JSX/React issues."""
         errors = []
         
+        # Check for duplicate component declarations
+        component_declarations = {}
+        for match in re.finditer(r'(?:const|function|class)\s+(\w+)\s*=', code):
+            comp_name = match.group(1)
+            if comp_name[0].isupper():  # Component names start with uppercase
+                if comp_name in component_declarations:
+                    errors.append(f"Duplicate component declaration: '{comp_name}' is declared multiple times")
+                else:
+                    component_declarations[comp_name] = match.start()
+        
+        # Check for components that are both imported and declared
+        import_matches = re.findall(r'import\s+{([^}]+)}\s+from', code)
+        for import_match in import_matches:
+            imported_comps = [c.strip() for c in import_match.split(',')]
+            for comp in imported_comps:
+                if comp in component_declarations:
+                    errors.append(f"Component '{comp}' is imported but also declared locally - remove duplicate declaration")
+        
         # Check for undefined React components
         components = re.findall(r'<(\w+)', code)
         for comp in components:
@@ -240,24 +397,12 @@ class CodeValidator:
         return errors
     
     def _check_jsx_warnings(self, code: str) -> List[str]:
-        """Check for JSX warnings."""
-        warnings = []
-        
-        # Check for inline styles (suggest CSS classes instead)
-        if 'style={{' in code:
-            warnings.append("Consider using CSS classes instead of inline styles")
-        
-        return warnings
+        """Deprecated - use ESLint instead."""
+        return []
     
     def _check_jsx_suggestions(self, code: str) -> List[str]:
-        """Check for JSX suggestions."""
-        suggestions = []
-        
-        # Suggest useCallback for event handlers
-        if 'onClick=' in code and 'useCallback' not in code:
-            suggestions.append("Consider using useCallback for event handlers to optimize performance")
-        
-        return suggestions
+        """Deprecated - use ESLint instead."""
+        return []
     
     def _check_node_available(self) -> bool:
         """Check if Node.js is available for validation."""

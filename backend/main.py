@@ -1106,6 +1106,7 @@ async def get_sandbox_preview(
     project_name: str, 
     user_email: Optional[str] = Query(None),
     user_id_alt: Optional[str] = Query(None),
+    v: Optional[str] = Query(None),  # Version/cache-busting parameter
     current_user: Optional[dict] = Depends(get_current_user_optional)
 ):
     """Generate a sandboxed HTML preview from S3-stored files (S3-ONLY, EC2 COMPATIBLE)"""
@@ -1171,7 +1172,16 @@ async def get_sandbox_preview(
         
         # Generate the sandbox HTML
         sandbox_html = generate_sandbox_html(files_content, project_name)
-        return HTMLResponse(content=sandbox_html)
+        
+        # Add cache-busting headers to force fresh reload
+        return HTMLResponse(
+            content=sandbox_html,
+            headers={
+                'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
+                'Pragma': 'no-cache',
+                'Expires': '0'
+            }
+        )
         
     except Exception as e:
         error_html = f"""
@@ -1208,7 +1218,9 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
     # Process component files properly for browser compilation
     components_code = ""
     for file_path, content in files_content.items():
-        if file_path.startswith("src/components/") and file_path.endswith(".jsx"):
+        # Include all JSX files in components folder (including subfolders like ui/)
+        if "components/" in file_path and file_path.endswith(".jsx"):
+            # Extract component name from filename
             component_name = file_path.split("/")[-1].replace(".jsx", "")
             
             # Clean up the component content for browser compilation
@@ -1228,7 +1240,20 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
             cleaned_content = '\n'.join(filtered_lines)
             
             # Ensure the component is properly exported for global scope
-            if 'export default' in cleaned_content:
+            # Handle multiple exports like: export const Button, export const Input, etc.
+            import re
+            
+            # Find all "export const ComponentName" declarations
+            export_pattern = r'export\s+const\s+(\w+)\s*='
+            exports_found = re.findall(export_pattern, cleaned_content)
+            
+            if exports_found:
+                # Remove all "export" keywords
+                cleaned_content = re.sub(r'export\s+const\s+', 'const ', cleaned_content)
+                # Add window assignments for each exported component
+                for exported_name in exports_found:
+                    cleaned_content += f'\nwindow.{exported_name} = {exported_name};'
+            elif 'export default' in cleaned_content:
                 cleaned_content = cleaned_content.replace('export default', f'window.{component_name} = ')
             elif f'export {{ {component_name} }}' in cleaned_content:
                 cleaned_content += f'\nwindow.{component_name} = {component_name};'
@@ -1272,6 +1297,25 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
     
     <!-- Load Babel transformer -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Define CommonJS globals to prevent "exports is not defined" errors -->
+    <script>
+        // Babel standalone sometimes generates CommonJS output
+        // Define these globals to prevent errors
+        if (typeof exports === 'undefined') {{
+            window.exports = {{}};
+        }}
+        if (typeof module === 'undefined') {{
+            window.module = {{ exports: {{}} }};
+        }}
+        if (typeof require === 'undefined') {{
+            window.require = function(name) {{
+                console.warn('require() called for:', name, '- returning empty object');
+                return {{}};
+            }};
+        }}
+        console.log('✅ CommonJS globals defined for Babel compatibility');
+    </script>
     
     <!-- Load TailwindCSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -1321,6 +1365,28 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
         }}
         
         const {{ useState, useEffect, useCallback, useMemo, useRef }} = React;
+        
+        // Filter invalid props from DOM elements to prevent React warnings
+        const INVALID_DOM_PROPS = new Set([
+            'as', 'variant', 'size', 'color', 'isActive', 'isDisabled', 'isLoading',
+            'leftIcon', 'rightIcon', 'colorScheme', 'spacing', 'direction', 'align',
+            'justify', 'wrap', 'shouldWrapChildren', 'isTruncated', 'noOfLines'
+        ]);
+        
+        const originalCreateElement = React.createElement;
+        React.createElement = function(type, props, ...children) {{
+            // Only filter props for native HTML elements (strings like 'div', 'button')
+            if (typeof type === 'string' && props) {{
+                const filteredProps = {{}};
+                for (const key in props) {{
+                    if (!INVALID_DOM_PROPS.has(key)) {{
+                        filteredProps[key] = props[key];
+                    }}
+                }}
+                return originalCreateElement.call(this, type, filteredProps, ...children);
+            }}
+            return originalCreateElement.call(this, type, props, ...children);
+        }};
         
         // Create a simple, reliable router that doesn't depend on external libraries
         const createSimpleRouter = () => {{
@@ -4559,15 +4625,26 @@ async def get_project_history(current_user: dict = Depends(get_current_user)):
     """Get list of all generated projects with metadata from S3 - Requires authentication"""
     try:
         # Get user_id from authenticated user (email)
-        user_id = current_user.get('email') or current_user.get('_id')
+        user_id = current_user.get('email')
+        user_id_alternative = str(current_user.get('_id', ''))
         
         print(f"📋 Loading project history for user: {user_id}")
         print(f"🔐 Authentication status: Authenticated as {user_id}")
+        print(f"🔑 Alternative ID (MongoDB _id): {user_id_alternative}")
         
-        # Get project slugs from S3
+        # Try to get project slugs from S3 using email first, then MongoDB _id
         project_list = list_user_projects(user_id=user_id)
         
+        if not project_list and user_id_alternative:
+            print(f"🔄 No projects found for email, trying MongoDB _id: {user_id_alternative}")
+            project_list = list_user_projects(user_id=user_id_alternative)
+            # If found with alternative ID, use it for subsequent operations
+            if project_list:
+                user_id = user_id_alternative
+                print(f"✅ Found projects under MongoDB _id: {user_id}")
+        
         if not project_list:
+            print(f"⚠️ No projects found for user {user_id} or {user_id_alternative}")
             return {"success": True, "projects": []}
         
         # Extract slugs from the list of dicts

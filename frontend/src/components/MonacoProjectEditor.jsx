@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import MonacoEditor from '@monaco-editor/react';
-import { Mic, Send } from 'lucide-react';
+import { Mic, Send, Volume2, VolumeX } from 'lucide-react';
 import { apiUrl } from '../config/api';
 import PageWrapper from './PageWrapper';
 
@@ -280,8 +280,8 @@ const styles = {
     flex: 1,
     overflowY: 'auto',
     overflowX: 'hidden',
-    padding: '24px 32px',
-    gap: '24px',
+    padding: '20px 24px',
+    gap: '16px',
     display: 'flex',
     flexDirection: 'column',
     scrollBehavior: 'smooth',
@@ -293,19 +293,19 @@ const styles = {
   
   chatMessage: {
     display: 'flex',
-    gap: '12px',
-    alignItems: 'flex-start',
-    maxWidth: '85%',
-    padding: '14px 20px',
-    borderRadius: '20px',
-    fontSize: '14px',
-    lineHeight: 1.6,
+    flexDirection: 'column',
+    gap: '6px',
+    maxWidth: '75%',
+    padding: '10px 14px',
+    borderRadius: '12px',
+    fontSize: '13px',
+    lineHeight: 1.5,
     whiteSpace: 'pre-wrap',
     fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
     fontWeight: '400',
     wordBreak: 'break-word',
     position: 'relative',
-    boxShadow: '0 1px 3px rgba(0, 0, 0, 0.3)',
+    boxShadow: '0 1px 2px rgba(0, 0, 0, 0.2)',
   },
   
   // --- UPDATED: Match VoiceChatInterface bubble styles ---
@@ -315,7 +315,7 @@ const styles = {
     alignSelf: 'flex-end',
     marginLeft: 'auto',
     border: '1px solid rgba(255, 255, 255, 0.1)',
-    borderRadius: '20px 20px 4px 20px',
+    borderRadius: '12px 12px 2px 12px',
     fontWeight: '400',
   },
   
@@ -324,18 +324,18 @@ const styles = {
     border: '1px solid rgba(255, 255, 255, 0.06)',
     color: '#ffffff',
     alignSelf: 'flex-start',
-    borderRadius: '20px 20px 20px 4px',
+    borderRadius: '12px 12px 12px 2px',
     fontWeight: '400',
   },
   
   chatInputContainer: {
-    padding: '16px 32px 24px 32px',
+    padding: '16px 20px',
     borderTop: '1px solid rgba(255, 255, 255, 0.15)',
     display: 'flex',
-    gap: '12px',
+    gap: '10px',
     background: 'rgba(255, 255, 255, 0.03)',
     backdropFilter: 'blur(20px)',
-    alignItems: 'center',
+    alignItems: 'flex-end',
     boxShadow: '0 -4px 12px rgba(0, 0, 0, 0.2)',
   },
   
@@ -345,13 +345,13 @@ const styles = {
     backdropFilter: 'blur(10px)',
     color: '#ffffff',
     border: '1px solid rgba(255, 255, 255, 0.15)',
-    borderRadius: '20px',
-    padding: '12px 18px',
+    borderRadius: '12px',
+    padding: '12px 16px',
     fontSize: '14px',
     fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
     outline: 'none',
     resize: 'none',
-    minHeight: '22px',
+    minHeight: '20px',
     maxHeight: '120px',
     lineHeight: 1.5,
     transition: 'all 0.2s ease',
@@ -386,16 +386,16 @@ const styles = {
     flexShrink: 0,
     background: 'transparent',
     border: '1px solid rgba(255, 255, 255, 0.2)',
-    borderRadius: '8px',
-    padding: '0.5rem',
+    borderRadius: '12px',
+    padding: '10px',
     color: '#ffffff',
     cursor: 'pointer',
     transition: 'all 0.2s ease',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    width: '40px',
-    height: '40px',
+    width: '44px',
+    height: '44px',
   },
   
   micButtonRecording: {
@@ -408,18 +408,19 @@ const styles = {
   chatSendButton: {
     background: 'transparent',
     border: '1px solid rgba(255, 255, 255, 0.2)',
-    borderRadius: '8px',
-    padding: '0.5rem',
+    borderRadius: '12px',
+    padding: '10px',
     cursor: 'pointer',
     fontSize: '14px',
     fontWeight: 600,
-    width: '40px',
-    height: '40px',
+    width: '44px',
+    height: '44px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     transition: 'all 0.2s ease',
     color: '#ffffff',
+    flexShrink: 0,
   },
   
   // File tree styles
@@ -575,10 +576,13 @@ const MonacoProjectEditor = () => {
     try {
       const urlObj = new URL(url, window.location.origin);
       
+      // Add cache-busting timestamp to force fresh load
+      urlObj.searchParams.set('v', Date.now().toString());
+      
       // Check if user_email parameter is already present
       if (urlObj.searchParams.has('user_email')) {
         console.log('[Preview Auth] URL already has user_email:', url);
-        return url;
+        return urlObj.toString();  // Return with cache-busting param
       }
       
       // Try to get user from localStorage OR sessionStorage
@@ -1818,29 +1822,44 @@ The changes are live in your preview.`
               background: 'transparent',
               border: 'none',
               color: '#aaaaaa',
-              fontSize: '20px',
+              fontSize: '18px',
               cursor: 'pointer',
-              padding: '8px 12px',
-              marginRight: '16px',
+              padding: '4px 8px',
+              marginRight: '12px',
               display: 'flex',
               alignItems: 'center',
-              gap: '6px'
+              transition: 'color 0.2s'
             }}
             onClick={handleClose}
             title="Back to projects"
+            onMouseEnter={(e) => e.target.style.color = '#ffffff'}
+            onMouseLeave={(e) => e.target.style.color = '#aaaaaa'}
           >
-            ← Back
+            ←
           </button>
           <span style={styles.projectName}>{project.name}</span>
           
           {/* Status Indicator */}
-          <div style={styles.statusIndicator}>
+          <div style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '6px 12px',
+            borderRadius: '20px',
+            background: isBuilding ? 'rgba(255, 170, 0, 0.15)' : isAiThinking ? 'rgba(100, 150, 255, 0.15)' : 'rgba(0, 255, 0, 0.15)',
+            border: `1px solid ${isBuilding ? '#ffaa00' : isAiThinking ? '#6496ff' : '#00ff00'}`,
+            fontSize: '12px',
+            fontWeight: '600'
+          }}>
             <div style={{
-              ...styles.statusDot,
-              ...(isBuilding || isAiThinking ? styles.statusDotBuilding : {})
+              width: '8px',
+              height: '8px',
+              borderRadius: '50%',
+              background: isBuilding ? '#ffaa00' : isAiThinking ? '#6496ff' : '#00ff00',
+              animation: (isBuilding || isAiThinking) ? 'pulse 2s infinite' : 'none'
             }} />
-            <span style={{ color: isBuilding || isAiThinking ? '#ffaa00' : '#00ff00' }}>
-              {isBuilding ? '● Building...' : isAiThinking ? '● Thinking...' : '● Live'}
+            <span style={{ color: isBuilding ? '#ffaa00' : isAiThinking ? '#6496ff' : '#00ff00' }}>
+              {isBuilding ? 'Building' : isAiThinking ? 'Thinking' : 'Live Preview'}
             </span>
           </div>
         </div>
@@ -1899,17 +1918,41 @@ The changes are live in your preview.`
               style={{
                 background: 'transparent',
                 border: '1px solid rgba(255, 255, 255, 0.2)',
-                borderRadius: '6px',
-                color: isMuted ? '#999' : '#fff',
+                borderRadius: '8px',
+                color: isMuted ? '#666' : '#fff',
                 cursor: 'pointer',
-                fontSize: '16px',
-                padding: '4px 8px',
-                marginLeft: 'auto'
+                padding: '8px',
+                marginLeft: 'auto',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s ease',
+                width: '36px',
+                height: '36px'
               }}
-              onClick={() => setIsMuted(!isMuted)}
+              onClick={() => {
+                const newMutedState = !isMuted;
+                setIsMuted(newMutedState);
+                
+                // If muting, stop any currently playing audio
+                if (newMutedState) {
+                  if (currentAudioRef.current) {
+                    currentAudioRef.current.pause();
+                    currentAudioRef.current = null;
+                  }
+                  speechSynthesis.cancel();
+                  setIsPlaying(false);
+                }
+              }}
               title={isMuted ? "Unmute AI voice" : "Mute AI voice"}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'transparent';
+              }}
             >
-              {isMuted ? '🔇' : '🔊'}
+              {isMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
             </button>
           </div>
           
@@ -1968,6 +2011,54 @@ The changes are live in your preview.`
               )}
               <div ref={chatEndRef} style={{ height: '1px' }} />
             </div>
+            
+            {/* Starter Action Chips - Show only when no messages */}
+            {chatMessages.length === 0 && (
+              <div style={{
+                padding: '12px 16px',
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '8px',
+                borderTop: '1px solid rgba(255, 255, 255, 0.1)'
+              }}>
+                {[
+                  { icon: '🎨', text: 'Change theme colors' },
+                  { icon: '➕', text: 'Add new section' },
+                  { icon: '✏️', text: 'Edit homepage text' },
+                  { icon: '🖼️', text: 'Change images' },
+                  { icon: '🚀', text: 'Add animations' },
+                  { icon: '📱', text: 'Make it responsive' }
+                ].map((action, i) => (
+                  <button
+                    key={i}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '8px 14px',
+                      borderRadius: '20px',
+                      background: 'rgba(255, 255, 255, 0.08)',
+                      border: '1px solid rgba(255, 255, 255, 0.15)',
+                      color: '#fff',
+                      fontSize: '13px',
+                      fontWeight: '500',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s',
+                      ':hover': { background: 'rgba(255, 255, 255, 0.12)' }
+                    }}
+                    onClick={() => {
+                      setChatInput(action.text);
+                      document.querySelector('textarea[placeholder*="Type or speak"]')?.focus();
+                    }}
+                    onMouseEnter={(e) => e.target.style.background = 'rgba(255, 255, 255, 0.12)'}
+                    onMouseLeave={(e) => e.target.style.background = 'rgba(255, 255, 255, 0.08)'}
+                  >
+                    <span>{action.icon}</span>
+                    <span>{action.text}</span>
+                  </button>
+                ))}
+              </div>
+            )}
             
             <div style={{ ...styles.chatInputContainer, position: 'relative' }}>
               {/* Context Pill for Selected Element */}

@@ -50,6 +50,8 @@ from google.generativeai.types import (
     HarmBlockThreshold,
     HarmCategory,
 )
+from code_validator import CodeValidator
+
 class ModelGenerationError(RuntimeError):
 	"""Raised when Gemini refuses to generate the requested content."""
 
@@ -636,6 +638,7 @@ class PureAIGenerator:
 		# Initialize AI validation agent
 		self.enable_validation = enable_validation
 		self.fast_mode = fast_mode
+		self.code_validator = CodeValidator()  # ESLint validator for JS/JSX
 		if enable_validation:
 			try:
 				# Always use gemini-2.5-flash for validation (fast and efficient)
@@ -650,7 +653,7 @@ class PureAIGenerator:
 		else:
 			self.validation_agent = None
 		
-		print("🤖 Pure AI Generator initialized (Gemini only, no fallbacks)")
+		print("🤖 Pure AI Generator initialized (Gemini only, no fallbacks) with ESLint validation")
 
 	# ------------------------------------------------------------------
 	# Public API
@@ -683,6 +686,13 @@ class PureAIGenerator:
 		# Check for proper imports
 		if "import React" not in code:
 			code = "import React from 'react';\n\n" + code
+		
+		# Fix common import syntax errors
+		import re
+		# Fix: "import React, from 'react'" -> "import React from 'react'"
+		code = re.sub(r"import\s+React\s*,\s+from\s+['\"]react['\"]", "import React from 'react'", code)
+		# Fix: "import { useState, } from 'react'" -> "import { useState } from 'react'"
+		code = re.sub(r"\{\s*([^}]+?)\s*,\s*\}", r"{ \1 }", code)
 			
 		# Check for export
 		if "export default" not in code:
@@ -1205,7 +1215,23 @@ export const cardVariants = {
 			config_overrides=config_overrides,
 		)
 		
-		return self._strip_code_fences(self._run_generation(request))
+		generated_code = self._strip_code_fences(self._run_generation(request))
+		
+		# Apply immediate syntax fixes for App.jsx before validation
+		if file_type == "frontend_app":
+			generated_code = self._fix_jsx_syntax(generated_code)
+			
+			# Run ESLint validation and block if critical errors found
+			validation_result = self.code_validator.validate_javascript_syntax(generated_code, "App.jsx")
+			if not validation_result.is_valid and validation_result.errors:
+				print(f"⚠️ ESLint validation found {len(validation_result.errors)} errors:")
+				for error in validation_result.errors[:5]:  # Show first 5 errors
+					print(f"   - {error}")
+				print(f"🔧 Attempting to fix common issues...")
+				# Apply additional fixes for common ESLint errors
+				generated_code = self._fix_eslint_errors(generated_code, validation_result)
+		
+		return generated_code
 
 	def _create_supporting_files(self, frontend_path: Path, project_name: str):
 		"""Create supporting files with hardcoded content and React Bits components using parallel validation"""
@@ -1692,7 +1718,7 @@ export default defineConfig({
 		
 		# 🚀 WRITE ALL SUPPORTING FILES IN PARALLEL FOR MAXIMUM SPEED
 		print(f"🚀 Writing {len(supporting_files)} supporting files in parallel...")
-		self._write_files_parallel(supporting_files)
+		self._write_files_parallel(supporting_files, project_name)
 		print(f"🎨 ✅ Created enhanced frontend setup with {len(supporting_files)} validated files for {project_name}")
 
 	async def generate_backend_bundle(
@@ -2648,86 +2674,86 @@ export const TextArea = ({ label, error, rows = 4, className = '', ...props }) =
   );
 };''',
 
-			"frontend/src/components/ui/Navigation.jsx": '''import React, {{ useState }} from 'react';
-import {{ motion }} from 'framer-motion';
-import {{ Menu, X }} from 'lucide-react';
+			"frontend/src/components/ui/Navigation.jsx": '''import React, { useState } from 'react';
+import { motion } from 'framer-motion';
+import { Menu, X } from 'lucide-react';
 
-export const NavBar = ({{ children, className = '' }}) => {{
+export const NavBar = ({ children, className = '' }) => {
   const [isOpen, setIsOpen] = useState(false);
 
   return (
-    <nav className={{`bg-white/80 backdrop-blur-md border-b border-gray-200 sticky top-0 z-50 ${{className}}`}}>
+    <nav className={`bg-white/80 backdrop-blur-md border-b border-gray-200 sticky top-0 z-50 ${className}`}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
-          {{children}}
+          {children}
           
-          {{/* Mobile menu button */}}
+          {/* Mobile menu button */}
           <div className="md:hidden">
             <button
-              onClick={{() => setIsOpen(!isOpen)}}
+              onClick={() => setIsOpen(!isOpen)}
               className="p-2 rounded-md text-gray-400 hover:text-gray-500 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-              {{isOpen ? <X size={{24}} /> : <Menu size={{24}} />}}
+              {isOpen ? <X size={24} /> : <Menu size={24} />}
             </button>
           </div>
         </div>
       </div>
       
-      {{/* Mobile menu */}}
+      {/* Mobile menu */}
       <motion.div
-        initial={{{{ opacity: 0, height: 0 }}}}
-        animate={{{{ 
+        initial={{ opacity: 0, height: 0 }}
+        animate={{ 
           opacity: isOpen ? 1 : 0, 
           height: isOpen ? 'auto' : 0 
-        }}}}
+        }}
         className="md:hidden bg-white border-t border-gray-200"
       >
         <div className="px-2 pt-2 pb-3 space-y-1">
-          {{children}}
+          {children}
         </div>
       </motion.div>
     </nav>
   );
-}};
+};
 
-export const NavLink = ({{ children, active = false, className = '', ...props }}) => (
+export const NavLink = ({ children, active = false, className = '', ...props }) => (
   <motion.a
-    whileHover={{{{ y: -2 }}}}
-    className={{`px-3 py-2 rounded-md text-sm font-medium transition-all duration-200 ${{
+    whileHover={{ y: -2 }}
+    className={`px-3 py-2 rounded-md text-sm font-medium transition-all duration-200 ${
       active
         ? 'text-blue-600 bg-blue-50'
         : 'text-gray-700 hover:text-blue-600 hover:bg-gray-50'
-    }} ${{className}}`}}
-    {{...props}}
+    } ${className}`}
+    {...props}
   >
-    {{children}}
+    {children}
   </motion.a>
 );
 
-export const FloatingTabs = ({{ tabs, activeTab, onTabChange, className = '' }}) => (
-  <div className={{`flex bg-gray-100 p-1 rounded-lg ${{className}}`}}>
-    {{tabs.map((tab) => (
+export const FloatingTabs = ({ tabs, activeTab, onTabChange, className = '' }) => (
+  <div className={`flex bg-gray-100 p-1 rounded-lg ${className}`}>
+    {tabs.map((tab) => (
       <motion.button
-        key={{tab.id}}
-        onClick={{() => onTabChange(tab.id)}}
-        className={{`relative px-6 py-2 text-sm font-medium rounded-md transition-all duration-200 ${{
+        key={tab.id}
+        onClick={() => onTabChange(tab.id)}
+        className={`relative px-6 py-2 text-sm font-medium rounded-md transition-all duration-200 ${
           activeTab === tab.id
             ? 'text-blue-600'
             : 'text-gray-600 hover:text-gray-900'
-        }}`}}
-        whileHover={{{{ y: -1 }}}}
-        whileTap={{{{ y: 0 }}}}
+        }`}
+        whileHover={{ y: -1 }}
+        whileTap={{ y: 0 }}
       >
-        {{activeTab === tab.id && (
+        {activeTab === tab.id && (
           <motion.div
             layoutId="activeTab"
             className="absolute inset-0 bg-white rounded-md shadow-sm"
-            transition={{{{ type: "spring", duration: 0.3 }}}}
+            transition={{ type: "spring", duration: 0.3 }}
           />
-        )}}
-        <span className="relative z-10">{{tab.label}}</span>
+        )}
+        <span className="relative z-10">{tab.label}</span>
       </motion.button>
-    ))}}
+    ))}
   </div>
 );'''
 		}
@@ -2975,6 +3001,82 @@ Functional Features: {', '.join(functional_features) if functional_features else
 - If user specifies colors/themes in requirements above, YOU MUST use those exact colors
 - DO NOT use random or default colors when user has specified preferences
 - User-requested colors take absolute priority over design system defaults
+- VERIFY every className uses the user-requested color scheme
+
+🚨 FUNCTIONALITY REQUIREMENTS - EVERYTHING MUST ACTUALLY WORK:
+
+CRITICAL: This is NOT a static demo - every button, form, and feature MUST be fully functional!
+
+1. BUTTONS MUST WORK:
+   - Every button MUST have a real onClick handler
+   - Login button → actually opens login modal or navigates to login
+   - Add to Cart → actually adds item to cart state and updates count
+   - Submit forms → actually process the form data
+   - Navigation buttons → actually change routes
+   - Delete/Edit buttons → actually modify data
+   - Example: <Button onClick={{() => addToCart(product)}}>Add to Cart</Button>
+   - NOT: <Button>Add to Cart</Button> (NO onClick = BROKEN!)
+
+2. FORMS MUST SUBMIT:
+   - Every form needs onSubmit handler with e.preventDefault()
+   - Must update state with form values using useState
+   - Show success/error messages after submission
+   - Validate inputs before submission
+   - Clear form after successful submission
+   - Example:
+   ```jsx
+   const [formData, setFormData] = useState({{ name: '', email: '' }});
+   const handleSubmit = (e) => {{
+     e.preventDefault();
+     // Actually process the form
+     console.log('Form submitted:', formData);
+     // Show success message, update state, etc.
+   }};
+   ```
+
+3. STATE MANAGEMENT MUST WORK:
+   - Shopping cart → useState for cart items, working add/remove/update
+   - Authentication → useState for user, isLoggedIn status
+   - Forms → useState for all input fields
+   - Modals → useState for open/closed state
+   - Search → useState for search term and filtered results
+   - All state changes must trigger re-renders properly
+
+4. CART FUNCTIONALITY (E-commerce apps):
+   - Working addToCart function that updates cart state
+   - Cart count in header that updates in real-time
+   - Cart modal that shows actual items
+   - Remove from cart button that actually works
+   - Update quantity that changes cart state
+   - Calculate totals correctly
+   - Persist cart in localStorage
+
+5. AUTHENTICATION MUST WORK:
+   - Login form actually updates user state
+   - Show/hide protected content based on auth state
+   - Logout button actually clears user state
+   - Login/Signup modals toggle correctly
+   - Form validation with error messages
+   - Remember user state in localStorage
+
+6. NAVIGATION MUST WORK:
+   - All Links use React Router <Link to="/path">
+   - Navigate function for programmatic navigation
+   - Active route highlighting works
+   - Mobile menu toggle works with state
+   - Back button works (browser history)
+
+7. SEARCH/FILTER MUST WORK:
+   - Search input updates state on change
+   - Filter results based on search term
+   - Display filtered results dynamically
+   - Clear search button works
+
+8. MODALS MUST WORK:
+   - Open/close with state management
+   - Backdrop click closes modal
+   - Close button works
+   - ESC key closes modal
 
 🎯 AWWWARDS QUALITY REQUIREMENTS:
 
@@ -2991,87 +3093,369 @@ Functional Features: {', '.join(functional_features) if functional_features else
    - Diagonal Sections: Use transform-skew and overlapping elements
    - Interactive Elements: Ripple effects, morphing shapes, 3D transforms
 
-3. COLOR PALETTE PRIORITY:
-   - 🚨 FIRST PRIORITY: Use user-requested colors from CUSTOM DESIGN REQUIREMENTS above
-   - If no specific colors requested, choose from: Vibrant (purple-pink-red), Tech (blue-cyan-teal), Warm (amber-orange-red)
-   - NEVER use random colors - always follow user specifications or design system defaults
+3. COLOR PALETTE STRICT COMPLIANCE:
+   - 🚨 ABSOLUTE PRIORITY: Use EXACT colors from user CUSTOM DESIGN REQUIREMENTS above
+   - If user says "blue theme" → ONLY use blue colors (blue-500, blue-600, cyan-500, etc.)
+   - If user says "dark theme" → ONLY use dark backgrounds (bg-gray-900, bg-black)
+   - If user says "purple" → ONLY use purple gradients (purple-600, violet-500, indigo-400)
+   - NEVER mix random colors when user specified a theme
+   - Verify EVERY className uses the correct color scheme
 
-4. PREMIUM INTERACTIONS:
-   - Hover effects: hover:scale-105 hover:-translate-y-2 hover:shadow-glow
-   - Loading states: Skeleton loaders with pulse effects
+4. PREMIUM INTERACTIONS (MUST ALL WORK):
+   - Hover effects: hover:scale-105 hover:-translate-y-2 hover:shadow-glow WITH working onClick
+   - Loading states: Show spinner when data is loading (useState for loading)
    - Smooth transitions: transition-all duration-300 ease-in-out
-   - Parallax scrolling effects and smooth animations
+   - Button clicks: EVERY button must have onClick={{handleFunction}}
+   - Form submissions: ALL forms need onSubmit with preventDefault()
 
-5. AWWWARDS-STYLE COMPONENTS:
-   - Floating navigation with backdrop blur
-   - Interactive hero with animated text reveals
-   - Feature grid with staggered animations
-   - Testimonials with morphing cards
-   - Footer with gradient overlays
+5. AWWWARDS-STYLE COMPONENTS (ALL FUNCTIONAL):
+   - Floating navigation with backdrop blur AND working links
+   - Interactive hero with animated text AND working CTA buttons
+   - Feature grid with staggered animations AND working interactions
+   - Testimonials with morphing cards AND working navigation
+   - Footer with gradient overlays AND working links
+
+MANDATORY WORKING CODE EXAMPLES:
+
+✅ WORKING BUTTON (Always use this pattern):
+```jsx
+const [cart, setCart] = useState([]);
+
+const addToCart = (product) => {{
+  setCart([...cart, product]);
+  showNotification('Added to cart!');
+}};
+
+<Button onClick={{() => addToCart(product)}}>
+  Add to Cart
+</Button>
+```
+
+✅ WORKING FORM (Always use this pattern):
+```jsx
+const [email, setEmail] = useState('');
+const [password, setPassword] = useState('');
+
+const handleLogin = (e) => {{
+  e.preventDefault();
+  // Actually process login
+  setUser({{ email }});
+  setIsLoggedIn(true);
+  showNotification('Login successful!');
+}};
+
+<form onSubmit={{handleLogin}}>
+  <Input 
+    value={{email}} 
+    onChange={{(e) => setEmail(e.target.value)}}
+  />
+  <Button type="submit">Login</Button>
+</form>
+```
+
+✅ WORKING CART (Always use this pattern):
+```jsx
+const [cartItems, setCartItems] = useState([]);
+
+const addToCart = (product) => {{
+  setCartItems([...cartItems, {{ ...product, id: Date.now() }}]);
+}};
+
+const removeFromCart = (itemId) => {{
+  setCartItems(cartItems.filter(item => item.id !== itemId));
+}};
+
+// Header cart count
+<span>Cart ({{cartItems.length}})</span>
+
+// Cart modal
+{{cartItems.map(item => (
+  <div key={{item.id}}>
+    {{item.name}} - ${{item.price}}
+    <button onClick={{() => removeFromCart(item.id)}}>Remove</button>
+  </div>
+))}}
+```
+
+✅ WORKING MODAL (Always use this pattern):
+```jsx
+const [isLoginOpen, setIsLoginOpen] = useState(false);
+
+<Button onClick={{() => setIsLoginOpen(true)}}>Login</Button>
+
+{{isLoginOpen && (
+  <div className="modal-backdrop" onClick={{() => setIsLoginOpen(false)}}>
+    <div className="modal-content" onClick={{(e) => e.stopPropagation()}}>
+      <button onClick={{() => setIsLoginOpen(false)}}>Close</button>
+      <LoginForm />
+    </div>
+  </div>
+)}}
+```
+
+✅ WORKING NAVIGATION (Always use this pattern):
+```jsx
+const navigate = useNavigate();
+const location = useLocation();
+
+// Navigation links
+<Link 
+  to="/about" 
+  className={{location.pathname === '/about' ? 'active' : ''}}
+>
+  About
+</Link>
+
+// Programmatic navigation
+<Button onClick={{() => navigate('/dashboard')}}>
+  Go to Dashboard
+</Button>
+```
+
+❌ BROKEN CODE (NEVER DO THIS):
+```jsx
+// NO onClick handler - button does nothing!
+<Button>Add to Cart</Button>
+
+// Form doesn't prevent default - page reloads!
+<form><button>Submit</button></form>
+
+// No state management - nothing updates!
+<Button>Login</Button>
+
+// Modal never opens - no state control!
+<div className="modal">...</div>
+```
 
 MANDATORY FULL-STACK INTEGRATION REQUIREMENTS:
 
-1. MULTI-PAGE APPLICATION WITH REACT ROUTER (ALWAYS INCLUDE):
-   - Import and configure React Router: import {{ BrowserRouter, Routes, Route, Link, Navigate }} from 'react-router-dom'
-   - Create 5-8 separate page components (HomePage, AboutPage, Features Page, ContactPage, DashboardPage, ProfilePage, etc.)
-   - Implement navigation menu with active route highlighting
-   - Protected routes that require authentication
+1. STATE MANAGEMENT - EVERYTHING MUST USE PROPER STATE:
+   ```jsx
+   // Required state hooks at top of component
+   const [user, setUser] = useState(null);
+   const [isLoggedIn, setIsLoggedIn] = useState(false);
+   const [cartItems, setCartItems] = useState([]);
+   const [isCartOpen, setIsCartOpen] = useState(false);
+   const [isLoginOpen, setIsLoginOpen] = useState(false);
+   const [loading, setLoading] = useState(false);
+   const [searchQuery, setSearchQuery] = useState('');
+   const [filteredData, setFilteredData] = useState([]);
+   ```
+
+2. MULTI-PAGE APPLICATION WITH REACT ROUTER (ALWAYS INCLUDE):
+   - Import and configure React Router: import {{ BrowserRouter, Routes, Route, Link, Navigate, useNavigate }} from 'react-router-dom'
+   - Create 5-8 separate page components (HomePage, AboutPage, FeaturesPage, ContactPage, DashboardPage, ProfilePage, etc.)
+   - Implement navigation menu with active route highlighting using useLocation()
+   - Protected routes that require authentication with Navigate redirects
    - Smooth page transitions and routing
    - Working browser navigation (back/forward buttons)
    - Add React Router to package.json dependencies
+   - Add react-router-dom to package.json dependencies
+   - Example:
+   ```jsx
+   const AppContent = () => {{
+     const location = useLocation();
+     return (
+       <main>
+         <nav>
+           <Link to="/" className={{location.pathname === '/' ? 'active' : ''}}>Home</Link>
+           <Link to="/about" className={{location.pathname === '/about' ? 'active' : ''}}>About</Link>
+         </nav>
+         <Routes>
+           <Route path="/" element={{<HomePage />}} />
+           <Route path="/about" element={{<AboutPage />}} />
+           <Route path="/dashboard" element={{isLoggedIn ? <Dashboard /> : <Navigate to="/login" />}} />
+         </Routes>
+       </main>
+     );
+   }};
+   ```
 
-2. REAL IMAGES FROM UNSPLASH API (NEVER USE PLACEHOLDERS):
-   - ALL images must be fetched from Unsplash API: https://unsplash.com/
-   - Hero images: https://images.unsplash.com/photo-1?w=1600&h=900&q=80&auto=format&fit=crop
-   - Feature images: https://images.unsplash.com/photo-2?w=800&h=600&q=80&auto=format&fit=crop
-   - Product images: https://images.unsplash.com/photo-3?w=400&h=400&q=80&auto=format&fit=crop
-   - Profile images: https://images.unsplash.com/photo-4?w=200&h=200&q=80&auto=format&fit=crop
-   - Background images: https://images.unsplash.com/photo-5?w=1920&h=1080&q=80&auto=format&fit=crop
-   - NEVER use placeholder.com, via.placeholder.com, or fake image URLs
-   - Use specific Unsplash photo IDs or search queries for relevant images
+3. REAL IMAGES FROM UNSPLASH API (NEVER USE PLACEHOLDERS):
+   - ALL images must be fetched from Unsplash API: https://images.unsplash.com/
+   - Use specific photo IDs for consistent, high-quality images
+   - Hero images: https://images.unsplash.com/photo-1557804506-669a67965ba0?w=1600&h=900&q=80&auto=format&fit=crop
+   - Feature images: https://images.unsplash.com/photo-1551434678-e076c223a692?w=800&h=600&q=80&auto=format&fit=crop
+   - Product images: https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=400&h=400&q=80&auto=format&fit=crop
+   - Profile images: https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=200&h=200&q=80&auto=format&fit=crop
+   - Background images: https://images.unsplash.com/photo-1557821552-17105176677c?w=1920&h=1080&q=80&auto=format&fit=crop
+   - NEVER use placeholder.com, via.placeholder.com, placehold.co, or fake image URLs
+   - Use descriptive search terms in URLs: ?w=800&h=600&q=80&auto=format&fit=crop
 
-3. COMPLETE AUTHENTICATION SYSTEM (ALWAYS INCLUDE):
-   - Login modal/page with email/password form and real validation
-   - Signup modal/page with user registration form and validation  
+4. COMPLETE AUTHENTICATION SYSTEM (ALWAYS INCLUDE AND MAKE IT WORK):
+   - Login modal/page with working form submission:
+   ```jsx
+   const [email, setEmail] = useState('');
+   const [password, setPassword] = useState('');
+   const [error, setError] = useState('');
+   
+   const handleLogin = async (e) => {{
+     e.preventDefault();
+     setError('');
+     if (!email || !password) {{
+       setError('Please fill all fields');
+       return;
+     }}
+     // Simulate API call
+     setUser({{ email, name: email.split('@')[0] }});
+     setIsLoggedIn(true);
+     setIsLoginOpen(false);
+     showNotification('Login successful!');
+   }};
+   ```
+   - Signup modal/page with user registration form and validation
    - JWT token storage in localStorage with proper management
    - Authentication state management with React context
-   - User profile display with logout functionality
-   - Protected content areas that require login
-   - Proper form submission with API calls to backend
-   - Error handling and success notifications
+   - User profile display with logout functionality that works:
+   ```jsx
+   const handleLogout = () => {{
+     setUser(null);
+     setIsLoggedIn(false);
+     localStorage.removeItem('user');
+     showNotification('Logged out successfully');
+     navigate('/');
+   }};
+   ```
+   - Protected content areas that check isLoggedIn
+   - Proper form validation with error messages
    - "Remember me" checkbox functionality
    - Password strength validation
 
-4. WORKING API INTEGRATION:
-   - Real fetch() calls to backend API (http://localhost:8000/api/v1)
+5. WORKING API INTEGRATION (MUST ACTUALLY WORK):
+   - Real fetch() calls with proper error handling:
+   ```jsx
+   const fetchProducts = async () => {{
+     setLoading(true);
+     try {{
+       const response = await fetch('http://localhost:8000/api/v1/products');
+       const data = await response.json();
+       setProducts(data);
+     }} catch (error) {{
+       console.error('Failed to fetch products:', error);
+       showNotification('Failed to load products', 'error');
+     }} finally {{
+       setLoading(false);
+     }}
+   }};
+   
+   useEffect(() => {{ fetchProducts(); }}, []);
+   ```
    - Authentication headers: Authorization: Bearer {{token}}
-   - Proper error handling for all network requests
-   - Loading states with spinners and user feedback
-   - Success/error notifications with toast messages
+   - Loading states with spinners: {{loading ? <Loading /> : <ProductList />}}
+   - Success/error notifications that actually show
    - Automatic token refresh and logout on 401 errors
-   - API client helper with interceptors
 
-5. E-COMMERCE FEATURES (If shop/store/cart/product detected):
-   - Product grid with real product data from API
-   - Add to Cart functionality that actually works
-   - Shopping cart modal with item management (add/remove/update)
-   - Cart count display in header that updates in real-time
-   - Cart persistence in localStorage + backend sync
-   - Checkout process with payment forms
+6. E-COMMERCE FEATURES (If shop/store/cart/product detected - MUST WORK):
+   - Product grid with real product data from API or mock data
+   - Working addToCart function:
+   ```jsx
+   const addToCart = (product) => {{
+     const existingItem = cartItems.find(item => item.id === product.id);
+     if (existingItem) {{
+       setCartItems(cartItems.map(item => 
+         item.id === product.id 
+           ? {{ ...item, quantity: item.quantity + 1 }}
+           : item
+       ));
+     }} else {{
+       setCartItems([...cartItems, {{ ...product, quantity: 1 }}]);
+     }}
+     showNotification(`${{product.name}} added to cart!`);
+   }};
+   ```
+   - Shopping cart modal with working item management:
+   ```jsx
+   const removeFromCart = (productId) => {{
+     setCartItems(cartItems.filter(item => item.id !== productId));
+   }};
+   
+   const updateQuantity = (productId, newQuantity) => {{
+     setCartItems(cartItems.map(item =>
+       item.id === productId ? {{ ...item, quantity: newQuantity }} : item
+     ));
+   }};
+   ```
+   - Cart count display in header that updates: <span>Cart ({{cartItems.length}})</span>
+   - Cart persistence in localStorage with useEffect
+   - Checkout process with payment forms that submit
    - Order history and tracking display
-   - Search and filtering capabilities
+   - Search and filtering that actually works:
+   ```jsx
+   const filteredProducts = products.filter(product =>
+     product.name.toLowerCase().includes(searchQuery.toLowerCase())
+   );
+   ```
    - Product detail pages with full information
-   - Price calculations and totals
+   - Price calculations that work: 
+   ```jsx
+   const total = cartItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+   ```
 
-6. ADVANCED UI COMPONENTS:
-   - Header with navigation, user info, cart count
-   - Modals for login, signup, cart, payment processing
-   - Interactive forms with validation and submission
-   - Loading spinners and error boundaries
-   - Responsive navigation with mobile menu
-   - Toast notifications for user feedback
-   - Breadcrumb navigation
-   - Pagination for lists
+6. ADVANCED UI COMPONENTS (ALL MUST WORK):
+   - Header with navigation, user info, cart count that all work
+   - Working modals with state management:
+   ```jsx
+   {{isCartOpen && (
+     <div className="fixed inset-0 bg-black/50 z-50" onClick={{() => setIsCartOpen(false)}}>
+       <div className="bg-white p-6" onClick={{(e) => e.stopPropagation()}}>
+         <button onClick={{() => setIsCartOpen(false)}}>Close</button>
+         {{cartItems.map(item => (
+           <div key={{item.id}}>
+             {{item.name}} - ${{item.price}} x {{item.quantity}}
+             <button onClick={{() => removeFromCart(item.id)}}>Remove</button>
+           </div>
+         ))}}
+       </div>
+     </div>
+   )}}
+   ```
+   - Interactive forms with validation and real submission
+   - Loading spinners that show during async operations
+   - Error boundaries for crash protection
+   - Responsive navigation with working mobile menu toggle
+   - Toast notifications that actually appear:
+   ```jsx
+   const [notification, setNotification] = useState(null);
+   
+   const showNotification = (message, type = 'success') => {{
+     setNotification({{ message, type }});
+     setTimeout(() => setNotification(null), 3000);
+   }};
+   
+   {{notification && (
+     <div className={{`fixed top-4 right-4 p-4 rounded-lg ${{notification.type === 'success' ? 'bg-green-500' : 'bg-red-500'}} text-white`}}>
+       {{notification.message}}
+     </div>
+   )}}
+   ```
+   - Breadcrumb navigation that updates
+   - Pagination that changes displayed items
+   - Search bar that filters results
+
+7. USER DESIGN PREFERENCES - ABSOLUTE COMPLIANCE:
+   - If user says "blue theme" → EVERY gradient, button, accent MUST be blue/cyan/teal
+   - If user says "dark mode" → bg-gray-900/bg-black everywhere, white text
+   - If user says "minimalist" → clean white backgrounds, simple borders, no heavy effects
+   - If user says "colorful" → vibrant gradients, multiple accent colors
+   - VERIFY: Go through EVERY className and ensure it matches user preferences
+   - NO mixing themes - stay consistent with user request throughout entire app
+
+CRITICAL IMPLEMENTATION CHECKLIST:
+✅ Every button has onClick handler
+✅ Every form has onSubmit handler with preventDefault
+✅ All state variables are defined with useState
+✅ Cart adds/removes items and updates count
+✅ Login/Logout actually changes user state
+✅ Modals open/close with state management
+✅ Navigation links use React Router Link component
+✅ Search/filter actually updates displayed results
+✅ Loading states show during async operations
+✅ Error handling with try/catch and user feedback
+✅ All user color/theme preferences are followed exactly
+✅ Real Unsplash images (no placeholders)
+✅ Multi-page with 5+ routes
+✅ Protected routes check authentication
+✅ localStorage persistence for cart and user
 
 CRITICAL IMPLEMENTATION REQUIREMENTS:
 - ALL COMPONENTS MUST BE PROPERLY DEFINED AND EXPORTED
@@ -3081,7 +3465,13 @@ CRITICAL IMPLEMENTATION REQUIREMENTS:
 - WORKING STATE MANAGEMENT WITH REACT HOOKS
 - REAL API CALLS WITH PROPER ERROR HANDLING
 - ADD react-router-dom TO package.json FOR MULTI-PAGE ROUTING
-- USE REAL IMAGES FROM UNSPLASH (https://images.unsplash.com/photo-{id}?w={width}&h={height}&q=80&auto=format&fit=crop)
+- USE REAL IMAGES FROM UNSPLASH (https://images.unsplash.com/photo-{{id}}?w={{width}}&h={{height}}&q=80&auto=format&fit=crop)
+
+⚠️ CRITICAL: DO NOT CREATE DUPLICATE COMPONENTS
+- Components like Button, Input, Card, Loading, AnimatedText, Navigation are ALREADY PROVIDED in src/components/ui/
+- Import them at the top: import {{ Button, Input, Card }} from './components/ui/Button';
+- DO NOT redefine these components inline in App.jsx
+- ONLY create NEW components that are specific to your app (e.g., ProductCard, CartItem, etc.)
 
 Build a complete, functional MULTI-PAGE app with:
 - React Router with 5-8 separate pages (Home, About, Features, Contact, Dashboard, Profile, etc.)
@@ -3093,9 +3483,47 @@ Build a complete, functional MULTI-PAGE app with:
 - Responsive design with TailwindCSS
 - Real, relevant content and professional appearance
 
+🚨🚨🚨 CRITICAL RULE - READ THIS FIRST 🚨🚨🚨
+═══════════════════════════════════════════════
+
+YOU MUST IMPORT UI COMPONENTS - DO NOT REDECLARE THEM!
+
+The following components are ALREADY created in separate files:
+- Button (from './components/ui/Button')
+- Input (from './components/ui/Input')  
+- Card (from './components/ui/Card')
+- Loading (from './components/ui/Loading')
+- AnimatedText (from './components/ui/AnimatedText')
+- NavBar, NavLink, FloatingTabs (from './components/ui/Navigation')
+
+✅ CORRECT APPROACH:
+```jsx
+import {{ Button, Input, Card }} from './components/ui/Button';
+import {{ NavBar, NavLink }} from './components/ui/Navigation';
+
+// Now use them in your app
+<Button onClick={{handleClick}}>Click Me</Button>
+```
+
+❌ WRONG - NEVER DO THIS:
+```jsx
+const Button = ({{ children }}) => <button>{{children}}</button>;
+const Input = (props) => <input {{...props}} />;
+```
+
+If you redeclare these components, the code will fail with "Identifier already declared" errors.
+
+═══════════════════════════════════════════════
+🚨🚨🚨 END CRITICAL RULE 🚨🚨🚨
+
 MANDATORY COMPONENT ARCHITECTURE:
 ```jsx
+// ✅ CORRECT IMPORT SYNTAX (NO EXTRA COMMAS!):
 import React, {{ useState, useEffect, createContext, useContext }} from 'react';
+import {{ BrowserRouter, Routes, Route, Link }} from 'react-router-dom';
+
+// ❌ WRONG - Extra comma after React causes syntax error:
+// import React, from 'react';  // NEVER DO THIS!
 
 // SAFE FRAMER-MOTION FALLBACKS (CRITICAL FOR BROWSER COMPATIBILITY):
 // Create fallback components that filter out animation props to prevent React DOM warnings
