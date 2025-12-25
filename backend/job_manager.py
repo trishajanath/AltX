@@ -122,6 +122,7 @@ class JobManager:
         project_type = params.get("project_type", "web app")
         features = params.get("features", [])
         requirements = params.get("requirements", {})
+        user_id = params.get("user_id", user_email)  # Get user_id from params
         
         try:
             # Step 1: Create project structure
@@ -141,7 +142,8 @@ class JobManager:
                 "tech_stack": tech_stack,
                 "project_type": project_type,
                 "features": features,
-                "requirements": requirements
+                "requirements": requirements,
+                "user_id": user_id  # Pass user_id for S3 organization
             })
             
             if not create_resp.get("success"):

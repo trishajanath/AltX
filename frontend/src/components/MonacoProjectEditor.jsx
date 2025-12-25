@@ -568,6 +568,62 @@ const MonacoProjectEditor = () => {
   const currentAudioRef = useRef(null);
   const recognitionRef = useRef(null);
 
+  // Helper function to ensure preview URL has user email parameter
+  const ensurePreviewUrlHasAuth = (url) => {
+    if (!url) return url;
+    
+    try {
+      const urlObj = new URL(url, window.location.origin);
+      
+      // Check if user_email parameter is already present
+      if (urlObj.searchParams.has('user_email')) {
+        console.log('[Preview Auth] URL already has user_email:', url);
+        return url;
+      }
+      
+      // Try to get user from localStorage OR sessionStorage
+      const userStr = localStorage.getItem('user') || sessionStorage.getItem('user');
+      console.log('[Preview Auth] User from storage:', userStr);
+      
+      if (userStr) {
+        try {
+          const user = JSON.parse(userStr);
+          const email = user.email;
+          const userId = user._id;
+          
+          console.log('[Preview Auth] Extracted email:', email, 'userId:', userId);
+          
+          // Send both email and _id so backend can try both
+          if (email) {
+            urlObj.searchParams.set('user_email', email);
+            if (userId) {
+              urlObj.searchParams.set('user_id_alt', userId);
+            }
+            const finalUrl = urlObj.toString();
+            console.log('[Preview Auth] Final URL with auth:', finalUrl);
+            return finalUrl;
+          } else if (userId) {
+            // Fallback to _id only if no email
+            urlObj.searchParams.set('user_email', userId);
+            const finalUrl = urlObj.toString();
+            console.log('[Preview Auth] Final URL with _id only:', finalUrl);
+            return finalUrl;
+          }
+        } catch (e) {
+          console.warn('Could not parse user from storage:', e);
+        }
+      } else {
+        console.warn('[Preview Auth] No user found in localStorage or sessionStorage!');
+      }
+      
+      console.warn('[Preview Auth] Returning URL without auth:', url);
+      return url;
+    } catch (e) {
+      console.warn('Could not parse preview URL:', e);
+      return url;
+    }
+  };
+
   // Function to refresh preview - FIXED SCOPE ISSUE
   const refreshPreview = useCallback(() => {
     if (previewUrl) {
@@ -605,7 +661,7 @@ const MonacoProjectEditor = () => {
     if (project?.name) {
       // Set initial building state from project
       setIsBuilding(project.isBuilding || false);
-      setPreviewUrl(project.preview_url || null);
+      setPreviewUrl(ensurePreviewUrlHasAuth(project.preview_url) || null);
       
       initializeProject();
       setupWebSocket();
@@ -1023,7 +1079,19 @@ Click the "Fix Issues" button or ask me to "fix the issues" and I'll try to reso
   const initializeProject = async () => {
     // Load file tree (S3-enabled endpoint)
     try {
-      const response = await fetch(apiUrl(`api/project-file-tree?project_name=${encodeURIComponent(project.name)}&user_id=anonymous`));
+      // Get token from localStorage or sessionStorage (matching AuthContext)
+      const token = localStorage.getItem('access_token') || sessionStorage.getItem('access_token');
+      const headers = {
+        'Content-Type': 'application/json',
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      
+      const response = await fetch(
+        apiUrl(`api/project-file-tree?project_name=${encodeURIComponent(project.name)}`),
+        { headers }
+      );
       const data = await response.json();
       if (data.success) {
         setFileTree(data.file_tree || []);
@@ -1081,7 +1149,7 @@ Click the "Fix Issues" button or ask me to "fix the issues" and I'll try to reso
       
       switch (data.type) {
         case 'preview_ready':
-          setPreviewUrl(data.url);
+          setPreviewUrl(ensurePreviewUrlHasAuth(data.url));
           setIsBuilding(false);
           setIsRunning(true);
           // Clear errors on successful preview
@@ -1093,7 +1161,7 @@ Click the "Fix Issues" button or ask me to "fix the issues" and I'll try to reso
             setIsBuilding(false);
             setIsRunning(true);
             if (data.preview_url) {
-              setPreviewUrl(data.preview_url);
+              setPreviewUrl(ensurePreviewUrlHasAuth(data.preview_url));
             }
           }
           break;
@@ -1160,7 +1228,7 @@ Click the "Fix Issues" button or ask me to "fix the issues" and I'll try to reso
       
       const result = await response.json();
       if (result.success && result.preview_url) {
-        setPreviewUrl(result.preview_url);
+        setPreviewUrl(ensurePreviewUrlHasAuth(result.preview_url));
         setIsRunning(true);
         // Clear previous errors on successful run
         setHasErrors(false);
@@ -1653,7 +1721,7 @@ The changes are live in your preview.`
         // Reload project files and preview
         await initializeProject();
         if (result.preview_url) {
-          setPreviewUrl(result.preview_url);
+          setPreviewUrl(ensurePreviewUrlHasAuth(result.preview_url));
         }
         
         // Clear building state after reload
@@ -2269,7 +2337,8 @@ The changes are live in your preview.`
                             }
                           });
                         } catch (err) {
-                          console.warn('Could not inject selection script:', err);
+                          // Silently ignore CORS errors - this is expected when preview is cross-origin
+                          // The preview will still work, just without element selection feature
                         }
                       };
                     }

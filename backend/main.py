@@ -1102,23 +1102,54 @@ async def create_complete_project_structure(project_path: Path, project_spec: di
 
 # --- Sandboxed Preview Endpoint ---
 @app.get("/api/sandbox-preview/{project_name:path}")
-async def get_sandbox_preview(project_name: str, current_user: Optional[dict] = Depends(get_current_user_optional)):
+async def get_sandbox_preview(
+    project_name: str, 
+    user_email: Optional[str] = Query(None),
+    user_id_alt: Optional[str] = Query(None),
+    current_user: Optional[dict] = Depends(get_current_user_optional)
+):
     """Generate a sandboxed HTML preview from S3-stored files (S3-ONLY, EC2 COMPATIBLE)"""
     try:
-        # Get user_id from authenticated user or default to anonymous
-        user_id = current_user.get('_id') if current_user else 'anonymous'
+        # Get user_id from multiple sources (priority order):
+        # 1. Authenticated user from token
+        # 2. Query parameter (for iframe previews)
+        # 3. Default to anonymous
+        user_id = None
+        user_id_alternative = None  # Alternative ID to try (email if we have _id, or _id if we have email)
+        
+        if current_user:
+            user_id = current_user.get('email') or current_user.get('_id')
+            # Store alternative ID for fallback
+            if current_user.get('email') and current_user.get('_id'):
+                user_id_alternative = current_user.get('_id') if user_id == current_user.get('email') else current_user.get('email')
+        elif user_email:
+            user_id = user_email
+            user_id_alternative = user_id_alt  # From query parameter
+        else:
+            user_id = 'anonymous'
         
         print(f"🔍 Sandbox preview requested for: '{project_name}'")
+        print(f"👤 User ID: {user_id}, Alternative ID: {user_id_alternative}")
         project_slug = normalize_project_slug(project_name)
         print(f"🔍 Normalized to slug: '{project_slug}'")
         
-        # Load project from S3 (NO LOCAL FALLBACK)
+        # Try to load project from S3 with user_id
         project_data = get_project_from_s3(project_slug=project_slug, user_id=user_id)
+        
+        # If not found and we have an alternative ID, try that
+        if (not project_data or not project_data.get('files')) and user_id_alternative:
+            print(f"⚠️ Project not found for user {user_id}, trying alternative ID {user_id_alternative}...")
+            project_data = get_project_from_s3(project_slug=project_slug, user_id=user_id_alternative)
+        
+        # If still not found and user_id wasn't anonymous, try anonymous as fallback for backwards compatibility
+        if (not project_data or not project_data.get('files')) and user_id != 'anonymous':
+            print(f"⚠️ Project not found for user {user_id}, trying anonymous...")
+            project_data = get_project_from_s3(project_slug=project_slug, user_id='anonymous')
         
         if not project_data or not project_data.get('files'):
             raise HTTPException(
                 status_code=404, 
-                detail=f"Project '{project_slug}' not found in cloud storage"
+                detail=f"Project '{project_slug}' not found in cloud storage (tried user: {user_id})"
             )
         
         print(f"✅ Loading project from S3: {len(project_data['files'])} files")
@@ -1909,7 +1940,8 @@ async def build_with_ai(
                 "project_type": project_type,
                 "features": features,
                 "requirements": requirements,
-                "customizations": customizations
+                "customizations": customizations,
+                "user_id": user_email  # Pass user email as user_id for S3
             },
             user_email=user_email
         )
@@ -4523,11 +4555,14 @@ async def execute_command(request: dict = Body(...)):
 
 # --- Project History Endpoint (S3-backed) ---
 @app.get("/api/project-history")
-async def get_project_history(current_user: Optional[dict] = Depends(get_current_user_optional)):
-    """Get list of all generated projects with metadata from S3"""
+async def get_project_history(current_user: dict = Depends(get_current_user)):
+    """Get list of all generated projects with metadata from S3 - Requires authentication"""
     try:
-        # Get user_id from authenticated user or default to anonymous
-        user_id = current_user.get('_id') if current_user else 'anonymous'
+        # Get user_id from authenticated user (email)
+        user_id = current_user.get('email') or current_user.get('_id')
+        
+        print(f"📋 Loading project history for user: {user_id}")
+        print(f"🔐 Authentication status: Authenticated as {user_id}")
         
         # Get project slugs from S3
         project_list = list_user_projects(user_id=user_id)
@@ -4541,15 +4576,29 @@ async def get_project_history(current_user: Optional[dict] = Depends(get_current
         if not project_slugs:
             return {"success": True, "projects": []}
         
-        projects = []
+        print(f"📦 Found {len(project_slugs)} projects for user {user_id}, loading first 20")
         
-        for project_slug in project_slugs:
+        # Limit to first 20 projects to avoid overload
+        project_slugs = project_slugs[:20]
+        
+        # Define async function to process a single project
+        async def process_project(project_slug: str):
             try:
-                # Get project files from S3 to inspect metadata
-                project_data = get_project_from_s3(project_slug=project_slug, user_id=user_id)
+                # Run S3 fetch in thread pool to avoid blocking
+                import asyncio
+                from concurrent.futures import ThreadPoolExecutor
+                
+                loop = asyncio.get_event_loop()
+                with ThreadPoolExecutor() as executor:
+                    project_data = await loop.run_in_executor(
+                        executor,
+                        get_project_from_s3,
+                        project_slug,
+                        user_id
+                    )
                 
                 if not project_data:
-                    continue
+                    return None
                 
                 project_files = project_data.get('files', [])
                 
@@ -4565,7 +4614,7 @@ async def get_project_history(current_user: Optional[dict] = Depends(get_current
                     "name": project_data.get('name', project_slug.replace("-", " ").title()),
                     "slug": project_slug,
                     "created_date": created_date,
-                    "preview_url": f"http://localhost:8000/api/sandbox-preview/{project_slug}",
+                    "preview_url": f"http://localhost:8000/api/sandbox-preview/{project_slug}?user_email={user_id}",
                     "editor_url": f"/project/{project_slug}",
                     "has_frontend": has_frontend,
                     "has_backend": has_backend,
@@ -4610,13 +4659,26 @@ async def get_project_history(current_user: Optional[dict] = Depends(get_current
                     project_info["created_date_formatted"] = created_dt.strftime("%Y-%m-%d %H:%M")
                     project_info["created_date"] = created_dt.timestamp()
                 
-                projects.append(project_info)
+                return project_info
                 
             except Exception as e:
                 print(f"Error processing project {project_slug}: {e}")
                 import traceback
                 traceback.print_exc()
-                continue
+                return None
+        
+        # Fetch all projects in parallel with concurrency limit
+        print(f"⚡ Fetching {len(project_slugs)} projects in parallel...")
+        import asyncio
+        
+        # Process projects in parallel
+        tasks = [process_project(slug) for slug in project_slugs]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Filter out None values and exceptions
+        projects = [p for p in results if p is not None and not isinstance(p, Exception)]
+        
+        print(f"✅ Successfully loaded {len(projects)} projects")
         
         # Sort by creation date (newest first), handle None values
         projects.sort(key=lambda x: x.get("created_date") or 0, reverse=True)
@@ -4636,8 +4698,11 @@ async def get_project_history(current_user: Optional[dict] = Depends(get_current
 async def get_project_file_tree(project_name: str = Query(...), current_user: Optional[dict] = Depends(get_current_user_optional)):
     """Get file tree structure for a project from S3 or local storage"""
     try:
-        # Get user_id from authenticated user or default to anonymous
-        user_id = current_user.get('_id') if current_user else 'anonymous'
+        # Get user_id from authenticated user (use email) or default to anonymous
+        user_id = current_user.get('email') or current_user.get('_id') if current_user else 'anonymous'
+        
+        print(f"📁 File tree requested for: {project_name}")
+        print(f"👤 User ID: {user_id}")
         
         project_slug = project_name.replace(" ", "-")
         

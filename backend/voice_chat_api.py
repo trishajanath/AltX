@@ -349,7 +349,7 @@ Response:"""
             generation_config={
                 "temperature": 0.7,
                 "top_p": 0.8,
-                "max_output_tokens": 500
+                "max_output_tokens": 2048  # Increased from 500 to allow complete responses
             },
             safety_settings=[
                 {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
@@ -366,7 +366,22 @@ Response:"""
             print(f"DEBUG: AI response finish_reason: {finish_reason}")
             
             if finish_reason is not None and finish_reason != 1:  # 1 = STOP (normal completion)
-                print(f"⚠️ AI response blocked/incomplete, finish_reason: {finish_reason}")
+                if finish_reason == 2:  # MAX_TOKENS - response was truncated
+                    print(f"⚠️ AI response hit max tokens limit, using partial response")
+                    # Use partial text if available
+                    try:
+                        partial_text = response.text if hasattr(response, 'text') else None
+                        if partial_text:
+                            print(f"DEBUG: Using truncated response: {partial_text[:100]}")
+                            ai_response = partial_text
+                        else:
+                            ai_response = "Got it! What else would you like to add to your project?"
+                    except Exception as e:
+                        print(f"DEBUG: Could not access response text: {e}")
+                        ai_response = "Got it! What else would you like to add to your project?"
+                else:
+                    # Other blocking reasons (safety, etc.)
+                    print(f"⚠️ AI response blocked/incomplete, finish_reason: {finish_reason}")
                 # Check if there's any partial text
                 try:
                     partial_text = response.text if hasattr(response, 'text') else None

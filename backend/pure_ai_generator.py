@@ -1857,14 +1857,17 @@ export default defineConfig({
 			spec_details += f"Tech Stack: {', '.join(tech_stack)}\n"
 		
 		return (
-			f"Create a COMPREHENSIVE, FEATURE-RICH project plan in JSON for: {idea}\n"
+			f"Create a COMPREHENSIVE, MULTI-PAGE, PRODUCTION-READY project plan in JSON for: {idea}\n"
 			f"Project: {project_name}\n"
 			f"{spec_details}\n"
-			"🎯 REQUIREMENTS:\n"
+			"🎯 MANDATORY REQUIREMENTS:\n"
 			"- Generate 5-8 SPECIFIC, DETAILED features (not generic)\n"
-			"- Create 4-6 meaningful frontend components\n"
-			"- Design 3-5 backend models with relevant fields\n"
-			"- Define 6-10 RESTful API endpoints\n"
+			"- Create 6-10 separate page components (Home, About, Features, Contact, etc.)\n"
+			"- Design 3-5 backend models with complete fields and relationships\n"
+			"- Define 10-15 FULLY FUNCTIONAL RESTful API endpoints\n"
+			"- Plan for REAL IMAGES from Unsplash API (never use placeholder URLs)\n"
+			"- Include working authentication (login/signup/logout)\n"
+			"- Add shopping cart for e-commerce projects (fully functional)\n"
 			"- Include REAL data examples and use cases\n\n"
 			"JSON format:\n"
 			"{\n"
@@ -1879,13 +1882,22 @@ export default defineConfig({
 			"    \"Specific Feature 6 with real benefit\"\n"
 			"  ],\n"
 			"  \"frontend\": {\n"
-			"    \"stack\": \"React+Vite+Tailwind+Framer Motion\",\n"
+			"    \"stack\": \"React+Vite+Tailwind+Framer Motion+React Router\",\n"
+			"    \"pages\": [\n"
+			"      {\"name\": \"HomePage\", \"route\": \"/\", \"purpose\": \"Main landing page with hero and features\"},\n"
+			"      {\"name\": \"AboutPage\", \"route\": \"/about\", \"purpose\": \"About us with team and mission\"},\n"
+			"      {\"name\": \"FeaturesPage\", \"route\": \"/features\", \"purpose\": \"Detailed features showcase\"},\n"
+			"      {\"name\": \"ContactPage\", \"route\": \"/contact\", \"purpose\": \"Contact form with working submission\"},\n"
+			"      {\"name\": \"DashboardPage\", \"route\": \"/dashboard\", \"purpose\": \"User dashboard (protected route)\"},\n"
+			"      {\"name\": \"ProfilePage\", \"route\": \"/profile\", \"purpose\": \"User profile management (protected)\"}\n"
+			"    ],\n"
 			"    \"components\": [\n"
+			"      {\"name\": \"Header\", \"purpose\": \"Navigation with auth state and cart\"},\n"
 			"      {\"name\": \"HeroSection\", \"purpose\": \"Eye-catching landing section with CTA\"},\n"
-			"      {\"name\": \"FeaturesGrid\", \"purpose\": \"Showcase key features with icons and descriptions\"},\n"
-			"      {\"name\": \"MainContentArea\", \"purpose\": \"Primary interactive content with CRUD operations\"},\n"
-			"      {\"name\": \"StatsSection\", \"purpose\": \"Display impressive metrics and statistics\"},\n"
-			"      {\"name\": \"Footer\", \"purpose\": \"Comprehensive footer with links and info\"}\n"
+			"      {\"name\": \"FeaturesGrid\", \"purpose\": \"Showcase features with real images\"},\n"
+			"      {\"name\": \"ProductCard\", \"purpose\": \"Product display with add to cart\"},\n"
+			"      {\"name\": \"ShoppingCart\", \"purpose\": \"Fully functional cart with backend sync\"},\n"
+			"      {\"name\": \"Footer\", \"purpose\": \"Footer with links and info\"}\n"
 			"    ]\n"
 			"  },\n"
 			"  \"backend\": {\n"
@@ -2999,40 +3011,67 @@ Functional Features: {', '.join(functional_features) if functional_features else
 
 MANDATORY FULL-STACK INTEGRATION REQUIREMENTS:
 
-1. COMPLETE AUTHENTICATION SYSTEM (ALWAYS INCLUDE):
-   - Login modal with email/password form and real validation
-   - Signup modal with user registration form and validation  
+1. MULTI-PAGE APPLICATION WITH REACT ROUTER (ALWAYS INCLUDE):
+   - Import and configure React Router: import {{ BrowserRouter, Routes, Route, Link, Navigate }} from 'react-router-dom'
+   - Create 5-8 separate page components (HomePage, AboutPage, Features Page, ContactPage, DashboardPage, ProfilePage, etc.)
+   - Implement navigation menu with active route highlighting
+   - Protected routes that require authentication
+   - Smooth page transitions and routing
+   - Working browser navigation (back/forward buttons)
+   - Add React Router to package.json dependencies
+
+2. REAL IMAGES FROM UNSPLASH API (NEVER USE PLACEHOLDERS):
+   - ALL images must be fetched from Unsplash API: https://unsplash.com/
+   - Hero images: https://images.unsplash.com/photo-1?w=1600&h=900&q=80&auto=format&fit=crop
+   - Feature images: https://images.unsplash.com/photo-2?w=800&h=600&q=80&auto=format&fit=crop
+   - Product images: https://images.unsplash.com/photo-3?w=400&h=400&q=80&auto=format&fit=crop
+   - Profile images: https://images.unsplash.com/photo-4?w=200&h=200&q=80&auto=format&fit=crop
+   - Background images: https://images.unsplash.com/photo-5?w=1920&h=1080&q=80&auto=format&fit=crop
+   - NEVER use placeholder.com, via.placeholder.com, or fake image URLs
+   - Use specific Unsplash photo IDs or search queries for relevant images
+
+3. COMPLETE AUTHENTICATION SYSTEM (ALWAYS INCLUDE):
+   - Login modal/page with email/password form and real validation
+   - Signup modal/page with user registration form and validation  
    - JWT token storage in localStorage with proper management
    - Authentication state management with React context
    - User profile display with logout functionality
    - Protected content areas that require login
    - Proper form submission with API calls to backend
    - Error handling and success notifications
+   - "Remember me" checkbox functionality
+   - Password strength validation
 
-2. WORKING API INTEGRATION:
-   - Real fetch() calls to backend API (http://localhost:8000/api)
+4. WORKING API INTEGRATION:
+   - Real fetch() calls to backend API (http://localhost:8000/api/v1)
    - Authentication headers: Authorization: Bearer {{token}}
    - Proper error handling for all network requests
    - Loading states with spinners and user feedback
    - Success/error notifications with toast messages
    - Automatic token refresh and logout on 401 errors
+   - API client helper with interceptors
 
-3. E-COMMERCE FEATURES (If shop/store/cart/product detected):
+5. E-COMMERCE FEATURES (If shop/store/cart/product detected):
    - Product grid with real product data from API
    - Add to Cart functionality that actually works
    - Shopping cart modal with item management (add/remove/update)
    - Cart count display in header that updates in real-time
+   - Cart persistence in localStorage + backend sync
    - Checkout process with payment forms
    - Order history and tracking display
    - Search and filtering capabilities
+   - Product detail pages with full information
+   - Price calculations and totals
 
-4. ADVANCED UI COMPONENTS:
+6. ADVANCED UI COMPONENTS:
    - Header with navigation, user info, cart count
    - Modals for login, signup, cart, payment processing
    - Interactive forms with validation and submission
    - Loading spinners and error boundaries
-   - Responsive navigation with mobile support
+   - Responsive navigation with mobile menu
    - Toast notifications for user feedback
+   - Breadcrumb navigation
+   - Pagination for lists
 
 CRITICAL IMPLEMENTATION REQUIREMENTS:
 - ALL COMPONENTS MUST BE PROPERLY DEFINED AND EXPORTED
@@ -3041,10 +3080,14 @@ CRITICAL IMPLEMENTATION REQUIREMENTS:
 - INCLUDE SHADCN/UI STYLE COMPONENTS
 - WORKING STATE MANAGEMENT WITH REACT HOOKS
 - REAL API CALLS WITH PROPER ERROR HANDLING
+- ADD react-router-dom TO package.json FOR MULTI-PAGE ROUTING
+- USE REAL IMAGES FROM UNSPLASH (https://images.unsplash.com/photo-{id}?w={width}&h={height}&q=80&auto=format&fit=crop)
 
-Build a complete, functional app with:
+Build a complete, functional MULTI-PAGE app with:
+- React Router with 5-8 separate pages (Home, About, Features, Contact, Dashboard, Profile, etc.)
+- Real images from Unsplash API (NEVER placeholders)
 - Authentication system with working login/signup
-- Modern hero section with call-to-action buttons
+- Modern hero section with call-to-action buttons  
 - Feature showcase with interactive elements
 - Working e-commerce functionality (if applicable)
 - Responsive design with TailwindCSS
