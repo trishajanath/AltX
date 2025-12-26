@@ -105,7 +105,6 @@
   max-height: 40vh;
   scrollbar-width: thin;
   scrollbar-color: rgba(0, 0, 0, 0.4) transparent;
-  scroll-behavior: smooth;
 }
 
 .chatbox-messages-area::-webkit-scrollbar {
@@ -497,6 +496,173 @@
 .project-card-btn:hover {
   background: rgba(255, 255, 255, 0.05);
   border-color: rgba(255, 255, 255, 0.3);
+}
+
+/* View All Projects Button */
+.view-all-projects-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.875rem 1.75rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  font-family: "Inter", sans-serif;
+  color: #000000;
+  background: #FFFFFF;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.view-all-projects-btn:hover {
+  background: #F0F0F0;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.view-all-projects-btn:active {
+  transform: translateY(0);
+}
+
+/* Projects Modal Overlay */
+.projects-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  animation: fadeIn 0.2s ease;
+  padding: 2rem;
+  overflow: hidden;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Projects Modal */
+.projects-modal {
+  background: rgba(10, 10, 10, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 1.5rem;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  width: 100%;
+  max-width: 1200px;
+  max-height: 85vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  animation: slideUp 0.3s ease;
+  position: relative;
+  scroll-behavior: smooth;
+}
+
+/* Dark scrollbar for modal */
+.projects-modal::-webkit-scrollbar {
+  width: 10px;
+}
+
+.projects-modal::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 0 1.5rem 1.5rem 0;
+}
+
+.projects-modal::-webkit-scrollbar-thumb {
+  background: rgba(40, 40, 40, 0.8);
+  border-radius: 5px;
+  border: 2px solid rgba(0, 0, 0, 0.3);
+}
+
+.projects-modal::-webkit-scrollbar-thumb:hover {
+  background: rgba(60, 60, 60, 0.9);
+}
+
+/* Firefox scrollbar */
+.projects-modal {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(40, 40, 40, 0.8) rgba(0, 0, 0, 0.3);
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Projects Modal Header */
+.projects-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2rem 2rem 1.5rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  position: sticky;
+  top: 0;
+  background: var(--glass-bg, rgba(16, 16, 16, 0.95));
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  z-index: 10;
+}
+
+.modal-close-btn {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  padding: 0.5rem;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-close-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+/* Modal Content Padding */
+.projects-modal .jump-back-in-header {
+  padding: 1.5rem 2rem 0;
+}
+
+.projects-modal .project-cards-grid {
+  padding: 1.5rem 2rem 2rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1.5rem;
+  overflow-x: visible;
+  overflow-y: visible;
+}
+
+/* Ensure smooth cards */
+.projects-modal .project-card {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.projects-modal .project-card:hover {
+  transform: translateY(-4px) scale(1.02);
 }
 
 .project-card-btn.primary {

@@ -237,27 +237,6 @@ class CodeValidator:
                     errors.append(f"Component '{comp}' is imported and declared locally")
         
         return errors
-            # Temporarily disabled due to encoding issues
-            # if self._check_node_available():
-            #     node_errors = self._validate_with_node(cleaned_code, filename)
-            #     errors.extend(node_errors)
-            
-            return ValidationResult(
-                is_valid=len(errors) == 0,
-                errors=errors,
-                warnings=warnings,
-                suggestions=suggestions
-            )
-            
-        except Exception as e:
-            errors.append(f"Validation Error in {filename}: {str(e)}")
-            
-        return ValidationResult(
-            is_valid=False,
-            errors=errors,
-            warnings=warnings,
-            suggestions=suggestions
-        )
     
     def validate_json_syntax(self, code: str, filename: str = "generated.json") -> ValidationResult:
         """Validate JSON syntax."""

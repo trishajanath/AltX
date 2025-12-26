@@ -1294,7 +1294,7 @@ export const cardVariants = {
 		supporting_files = []
 		supporting_files.append((frontend_path / "package.json", json.dumps(package_json, indent=2), "json"))
 		
-		# Enhanced index.html - PRODUCTION READY without CDN warnings
+		# Enhanced index.html - PRODUCTION READY with auto-fix agent
 		html = f'''<!doctype html>
 <html lang="en">
   <head>
@@ -1305,6 +1305,62 @@ export const cardVariants = {
   <body class="bg-gradient-to-br from-slate-50 to-blue-50 min-h-screen">
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
+    
+    <!-- Auto-Fix Error Interceptor - Automatically fixes runtime errors -->
+    <script>
+    (function() {{
+      const projectSlug = window.location.pathname.split('/').pop() || '{project_name}';
+      const userId = new URLSearchParams(window.location.search).get('user_id_alt') || 'anonymous';
+      
+      class ErrorInterceptor {{
+        constructor(projectSlug, userId) {{
+          this.projectSlug = projectSlug;
+          this.userId = userId;
+          this.reportedErrors = new Set();
+          this.init();
+        }}
+        
+        init() {{
+          const self = this;
+          const originalError = console.error;
+          console.error = function(...args) {{
+            originalError.apply(console, args);
+            const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+            self.reportError(msg, new Error().stack);
+          }};
+          
+          window.addEventListener('error', (e) => self.reportError(e.message, e.error?.stack || '', e.filename));
+          window.addEventListener('unhandledrejection', (e) => self.reportError(`Promise: ${{e.reason}}`, e.reason?.stack || ''));
+        }}
+        
+        async reportError(msg, stack, file) {{
+          const sig = `${{msg}}-${{file}}`.substring(0, 100);
+          if (this.reportedErrors.has(sig)) return;
+          this.reportedErrors.add(sig);
+          
+          console.log('🤖 Auto-fix agent analyzing error...');
+          
+          try {{
+            const res = await fetch('http://localhost:8000/api/auto-fix-errors', {{
+              method: 'POST',
+              headers: {{ 'Content-Type': 'application/json' }},
+              body: JSON.stringify({{ project_name: this.projectSlug, user_id: this.userId, error_message: msg, error_stack: stack, file_path: file }})
+            }});
+            
+            const result = await res.json();
+            if (result.success) {{
+              console.log(`✅ Auto-fixed: ${{result.message}}`);
+              setTimeout(() => location.reload(), 2000);
+            }}
+          }} catch(e) {{
+            console.warn('Auto-fix unavailable:', e);
+          }}
+        }}
+      }}
+      
+      new ErrorInterceptor(projectSlug, userId);
+    }})();
+    </script>
   </body>
 </html>'''
 		supporting_files.append((frontend_path / "index.html", html, "html"))
@@ -1830,6 +1886,85 @@ export default defineConfig({
 		if stripped.endswith("```"):
 			stripped = stripped.rsplit("\n", 1)[0]
 		return stripped.strip()
+
+	def _fix_jsx_syntax(self, code: str) -> str:
+		"""Apply quick JSX syntax fixes before validation."""
+		import re
+		
+		# Fix common JSX issues
+		# 1. Fix class -> className
+		code = re.sub(r'\bclass=', 'className=', code)
+		
+		# 2. Fix for -> htmlFor
+		code = re.sub(r'\bfor=', 'htmlFor=', code)
+		
+		# 3. Ensure self-closing tags have proper syntax
+		code = re.sub(r'<(img|br|hr|input|meta|link)([^>]*[^/])>', r'<\1\2 />', code)
+		
+		# 4. Fix style attributes that should be objects
+		# Convert style="color: red; font-size: 16px" to style={{color: 'red', fontSize: '16px'}}
+		def fix_style_attr(match):
+			style_content = match.group(1)
+			if '{' in style_content:
+				return match.group(0)  # Already object syntax
+			
+			# Parse CSS string
+			styles = {}
+			for rule in style_content.split(';'):
+				if ':' in rule:
+					prop, value = rule.split(':', 1)
+					prop = prop.strip()
+					value = value.strip()
+					# Convert kebab-case to camelCase
+					prop_camel = ''.join(word.capitalize() if i > 0 else word 
+					                   for i, word in enumerate(prop.split('-')))
+					styles[prop_camel] = value
+			
+			if not styles:
+				return match.group(0)
+			
+			# Convert to JSX object notation
+			style_obj = ', '.join(f"{k}: '{v}'" for k, v in styles.items())
+			return f'style={{{{{style_obj}}}}}'
+		
+		code = re.sub(r'style=["\']([^"\']+)["\']', fix_style_attr, code)
+		
+		return code
+
+	def _fix_eslint_errors(self, code: str, validation_result) -> str:
+		"""Apply fixes for common ESLint errors."""
+		import re
+		
+		# Fix unused imports by removing them
+		if any('is defined but never used' in err for err in validation_result.errors):
+			# Remove unused React import if components don't use JSX.createElement
+			if "React" in code and "'React' is defined but never used" in str(validation_result.errors):
+				# Check if React is actually used
+				if not re.search(r'React\.(createElement|Fragment|useState|useEffect)', code):
+					code = re.sub(r"import\s+React\s+from\s+['\"]react['\"];\s*\n?", '', code)
+					code = re.sub(r"import\s+React,\s*{", 'import {', code)
+		
+		# Fix missing keys in map operations
+		if any('Missing "key" prop' in err for err in validation_result.errors):
+			# Add key prop to elements in map
+			def add_key_to_map(match):
+				map_content = match.group(0)
+				if 'key=' not in map_content:
+					# Try to find the opening tag after .map
+					tag_match = re.search(r'\.map\([^)]+\)\s*=>\s*(\{?\s*<(\w+)', map_content)
+					if tag_match:
+						tag_name = tag_match.group(2)
+						# Add key prop
+						map_content = map_content.replace(
+							f'<{tag_name}',
+							f'<{tag_name} key={{index}}',
+							1
+						)
+				return map_content
+			
+			code = re.sub(r'\.map\([^{]+{[^}]+}', add_key_to_map, code)
+		
+		return code
 
 	def _generate_json_bundle(self, request: GenerationRequest) -> Dict[str, str]:
 		raw = self._run_generation(request)
@@ -3483,35 +3618,46 @@ Build a complete, functional MULTI-PAGE app with:
 - Responsive design with TailwindCSS
 - Real, relevant content and professional appearance
 
-🚨🚨🚨 CRITICAL RULE - READ THIS FIRST 🚨🚨🚨
-═══════════════════════════════════════════════
+🚨🚨🚨 !!!! CRITICAL ERROR PREVENTION RULE - READ THIS FIRST !!!! 🚨🚨🚨
+═══════════════════════════════════════════════════════════════════════
+⛔⛔⛔ FAILURE TO FOLLOW THIS WILL CAUSE IMMEDIATE "Identifier 'Button' has already been declared" ERROR ⛔⛔⛔
 
-YOU MUST IMPORT UI COMPONENTS - DO NOT REDECLARE THEM!
+⚠️ ABSOLUTE RULE: DO NOT DECLARE Button, Input, Card, Loading, AnimatedText, OR Navigation COMPONENTS!
+⚠️ THESE COMPONENTS ALREADY EXIST IN SEPARATE FILES!
+⚠️ YOU MUST ONLY IMPORT THEM - NEVER REDECLARE THEM!
 
-The following components are ALREADY created in separate files:
-- Button (from './components/ui/Button')
-- Input (from './components/ui/Input')  
-- Card (from './components/ui/Card')
-- Loading (from './components/ui/Loading')
-- AnimatedText (from './components/ui/AnimatedText')
-- NavBar, NavLink, FloatingTabs (from './components/ui/Navigation')
-
-✅ CORRECT APPROACH:
+🔴 FORBIDDEN DECLARATIONS (These will break the code):
 ```jsx
-import {{ Button, Input, Card }} from './components/ui/Button';
-import {{ NavBar, NavLink }} from './components/ui/Navigation';
-
-// Now use them in your app
-<Button onClick={{handleClick}}>Click Me</Button>
-```
-
-❌ WRONG - NEVER DO THIS:
-```jsx
-const Button = ({{ children }}) => <button>{{children}}</button>;
+// ❌ WRONG - DO NOT WRITE THIS - THIS CAUSES ERROR:
+const Button = ({{ children, ...props }}) => <button {{...props}}>{{children}}</button>;
 const Input = (props) => <input {{...props}} />;
+const Card = ({{ children }}) => <div>{{children}}</div>;
+// ⛔ If you write any of the above, the code WILL FAIL with duplicate declaration error!
 ```
 
-If you redeclare these components, the code will fail with "Identifier already declared" errors.
+✅ CORRECT APPROACH (Only way that works):
+```jsx
+// ✅ START YOUR CODE WITH THESE IMPORTS:
+import {{ Button, Input, Card, Loading }} from './components/ui/Button';
+import {{ NavBar, NavLink, FloatingTabs }} from './components/ui/Navigation';
+import {{ AnimatedText }} from './components/ui/AnimatedText';
+
+// ✅ Then use them directly in your JSX:
+<Button onClick={{handleClick}} variant="primary">Click Me</Button>
+<Input value={{email}} onChange={{e => setEmail(e.target.value)}} />
+<Card className="p-6">Content here</Card>
+```
+
+⛔ VERIFICATION CHECKLIST BEFORE GENERATING CODE:
+□ Did you write "const Button ="? → ❌ DELETE IT! Import Button instead!
+□ Did you write "const Input ="? → ❌ DELETE IT! Import Input instead!
+□ Did you write "const Card ="? → ❌ DELETE IT! Import Card instead!
+□ Did you write "const Loading ="? → ❌ DELETE IT! Import Loading instead!
+□ Did you add import statements for Button, Input, Card? → ✅ REQUIRED!
+
+🚨 IMPORTANT: These components are pre-built with full functionality, variants, and styling.
+📍 Location: src/components/ui/Button.jsx, src/components/ui/Input.jsx, etc.
+💡 You only need to CREATE NEW components that are app-specific (e.g., ProductCard, UserProfile, etc.)
 
 ═══════════════════════════════════════════════
 🚨🚨🚨 END CRITICAL RULE 🚨🚨🚨
@@ -3577,27 +3723,11 @@ const Plus = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24
 
 const Minus = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 12h14"></path></svg>;
 
-// UI COMPONENTS (SHADCN STYLE)
-const Button = ({{children, variant = "default", className = "", onClick, disabled, ...props}}) => (
-  <button 
-    className={{cn(
-      "inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none disabled:opacity-50 disabled:cursor-not-allowed",
-      buttonVariants[variant],
-      className
-    )}} 
-    onClick={{onClick}}
-    disabled={{disabled}}
-    {{...props}}
-  >
-    {{children}}
-  </button>
-);
-
-const Card = ({{children, className = "", variant = "default"}}) => (
-  <div className={{cn(cardVariants[variant], className)}}>
-    {{children}}
-  </div>
-);
+// 🚨🚨 CRITICAL: IMPORT THESE COMPONENTS - DO NOT REDECLARE THEM! 🚨🚨
+// ⛔ Button, Input, Card, Loading, AnimatedText, NavBar - ALL EXIST IN ui/ FOLDER
+// ⛔ YOU MUST IMPORT THEM AT THE TOP OF YOUR CODE
+// ⛔ DO NOT WRITE: const Button = ... (This will cause duplicate declaration error!)
+// ✅ CORRECT: import { Button, Input, Card } from './components/ui/Button';
 
 const Modal = ({{ isOpen, onClose, children, title }}) => {{
   if (!isOpen) return null;
@@ -3983,6 +4113,25 @@ IMPORTANT RULES:
 - Test all component references before using
 - STRICTLY FOLLOW all design requirements specified above
 - Apply design preferences to ALL sections (background colors, text colors, etc.)
+
+🚨🚨🚨 FINAL CRITICAL CHECK - VERIFY BEFORE GENERATING 🚨🚨🚨
+═══════════════════════════════════════════════════════════════
+⛔ SCAN YOUR CODE FOR THESE FORBIDDEN PATTERNS:
+  ❌ const Button = 
+  ❌ const Input = 
+  ❌ const Card = 
+  ❌ const Loading = 
+  ❌ const AnimatedText = 
+  ❌ const NavBar = 
+  
+  IF YOU FIND ANY OF THESE → DELETE THEM AND IMPORT INSTEAD!
+  
+✅ YOUR CODE MUST START WITH THESE IMPORTS:
+  import {{ Button, Input, Card, Loading }} from './components/ui/Button';
+  import {{ NavBar, NavLink }} from './components/ui/Navigation';
+  import {{ AnimatedText }} from './components/ui/AnimatedText';
+  
+⚠️ These components are pre-built and WILL cause "Identifier already declared" error if redeclared!
 
 🚨 FRAMER-MOTION CRITICAL FIXES:
 - ALWAYS wrap conditional renders with <AnimatePresence>

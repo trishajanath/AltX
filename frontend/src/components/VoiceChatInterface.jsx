@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Mic, MicOff, Scan, Database, UploadCloud, Volume2, VolumeX, MessageCircle, Loader, Play, Square, Settings, BrainCircuit, ArrowRight, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -30,6 +30,7 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
   const [showHistory, setShowHistory] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [historyError, setHistoryError] = useState(null);
+  const [showProjectsModal, setShowProjectsModal] = useState(false);
   const [demoProject, setDemoProject] = useState(null);
   const [demoStage, setDemoStage] = useState('initial'); // 'initial', 'awaiting_confirmation', 'confirmed'
   const [demoPendingProject, setDemoPendingProject] = useState(null);
@@ -87,6 +88,7 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
   const lastMessageContentRef = useRef('');
   const prevConversationLengthRef = useRef(0);
   const userAtBottomRef = useRef(true); // Track if user is at bottom (ref-only, no re-renders)
+  const projectHistoryLoadedRef = useRef(false); // Prevent multiple loads
 
   // Initialize with AI welcome message
   useEffect(() => {
@@ -99,8 +101,49 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
       content: welcomeMessage,
       timestamp: new Date()
     }]);
-    prevConversationLengthRef.current = 1; // Set initial length to prevent auto-scroll on mount
+    prevConversationLengthRef.current = 1; // Set initial length
+    
+    // Scroll to bottom after initial render
+    setTimeout(() => {
+      const container = chatContainerRef.current;
+      if (container) {
+        const messageElements = container.querySelectorAll('.message');
+        const lastMessageElement = messageElements[messageElements.length - 1];
+        if (lastMessageElement) {
+          lastMessageElement.scrollIntoView({ behavior: 'auto', block: 'end' });
+        }
+        userAtBottomRef.current = true;
+        console.log('Scrolled to bottom on mount');
+      }
+    }, 100);
   }, []); // Empty dependency array to run only once
+  
+  // Preserve scroll position when isPlaying or isListening changes
+  useEffect(() => {
+    const container = chatContainerRef.current;
+    if (!container) return;
+    
+    // Always keep at bottom during playing/listening state changes
+    const keepAtBottom = () => {
+      if (container && userAtBottomRef.current) {
+        // Find and scroll to last message element instead of using scrollTop
+        const messageElements = container.querySelectorAll('.message');
+        const lastMessageElement = messageElements[messageElements.length - 1];
+        
+        if (lastMessageElement) {
+          lastMessageElement.scrollIntoView({ behavior: 'auto', block: 'end' });
+          console.log('🔄 Preserved scroll at last message during state change');
+        }
+      }
+    };
+    
+    // Use multiple animation frames to ensure DOM updates are complete
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        keepAtBottom();
+      });
+    });
+  }, [isPlaying, isListening, realTimeTranscript]);
   
   // Separate effect to speak welcome message in demo mode
   useEffect(() => {
@@ -117,6 +160,86 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
       return () => clearTimeout(timer);
     }
   }, [conversation, isDemo, isMuted]);
+
+  // Set up scroll listener once on mount
+  useEffect(() => {
+    const container = chatContainerRef.current;
+    if (!container) return;
+
+    // Check if user is near bottom (within 150px threshold)
+    const isNearBottom = () => {
+      const threshold = 150;
+      const position = container.scrollTop + container.clientHeight;
+      const height = container.scrollHeight;
+      return position >= height - threshold;
+    };
+
+    // Track scroll position to know if user is at bottom
+    const handleScroll = () => {
+      const wasAtBottom = userAtBottomRef.current;
+      const isAtBottom = isNearBottom();
+      
+      // Only update if state changed to avoid unnecessary updates
+      if (wasAtBottom !== isAtBottom) {
+        userAtBottomRef.current = isAtBottom;
+        console.log('Scroll position:', isAtBottom ? 'at bottom' : 'scrolled up');
+      }
+    };
+
+    // Add scroll listener
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    
+    // Initialize - assume user starts at bottom
+    userAtBottomRef.current = true;
+
+    return () => {
+      container.removeEventListener('scroll', handleScroll);
+    };
+  }, []); // Empty dependency - set up once
+
+  // Handle auto-scroll when conversation changes
+  useEffect(() => {
+    const container = chatContainerRef.current;
+    if (!container) return;
+
+    // Check if conversation changed (new message or content updated)
+    const conversationChanged = conversation.length !== prevConversationLengthRef.current ||
+                                (conversation.length > 0 && 
+                                 lastMessageContentRef.current !== conversation[conversation.length - 1].content);
+    
+    if (conversationChanged) {
+      const lastMessage = conversation[conversation.length - 1];
+      console.log('Conversation changed, scrolling to bottom. Last message:', lastMessage?.content?.substring(0, 50));
+      
+      // Store last message content to detect updates
+      if (lastMessage) {
+        lastMessageContentRef.current = lastMessage.content;
+      }
+      
+      // Scroll the last message element into view instead of manipulating scrollTop
+      const scrollToLastMessage = (attempt = 0) => {
+        if (!container) return;
+        
+        // Find the last message element
+        const messageElements = container.querySelectorAll('.message');
+        const lastMessageElement = messageElements[messageElements.length - 1];
+        
+        if (lastMessageElement) {
+          lastMessageElement.scrollIntoView({ behavior: 'auto', block: 'end' });
+          userAtBottomRef.current = true;
+          console.log('✅ Scrolled to last message, attempt:', attempt);
+        } else if (attempt < 10) {
+          // Retry if message not rendered yet
+          requestAnimationFrame(() => scrollToLastMessage(attempt + 1));
+        }
+      };
+      
+      // Start scroll with animation frame
+      requestAnimationFrame(() => scrollToLastMessage(0));
+      
+      prevConversationLengthRef.current = conversation.length;
+    }
+  }, [conversation]);
 
   // Suggestion chips for initial conversation
   const suggestionChips = [
@@ -715,47 +838,53 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
   };
 
   // Fetch project history
-  const fetchProjectHistory = async () => {
+  const fetchProjectHistory = useCallback(async () => {
+    // Prevent multiple simultaneous fetches
+    if (projectHistoryLoadedRef.current || isLoadingHistory) {
+      console.log('⏭️ Skipping project history fetch (already loaded or loading)');
+      return;
+    }
+
     try {
-      console.log('Fetching project history...');
+      console.log('📋 Fetching project history...');
+      projectHistoryLoadedRef.current = true;
       setIsLoadingHistory(true);
       setHistoryError(null);
       
       const response = await authenticatedFetch('http://localhost:8000/api/project-history');
-      
-      console.log('Response status:', response.status);
-      console.log('Response headers:', Object.fromEntries(response.headers.entries()));
       
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
       
       const data = await response.json();
-      console.log('Project history data:', data);
       
       if (data.success) {
         setProjectHistory(data.projects || []);
         setHistoryError(null);
-        console.log('Success: Successfully loaded', data.projects?.length || 0, 'projects');
+        console.log('✅ Successfully loaded', data.projects?.length || 0, 'projects');
       } else {
-        console.error('Error: Failed to fetch project history:', data.error);
+        console.error('❌ Failed to fetch project history:', data.error);
         setHistoryError(data.error || 'Failed to load projects');
         setProjectHistory([]);
+        projectHistoryLoadedRef.current = false; // Allow retry on error
       }
     } catch (error) {
-      console.error('Error fetching project history:', error);
+      console.error('❌ Error fetching project history:', error);
       setHistoryError(error.message || 'Network error while loading projects');
       setProjectHistory([]);
+      projectHistoryLoadedRef.current = false; // Allow retry on error
     } finally {
       setIsLoadingHistory(false);
-      console.log('Finished loading project history');
     }
-  };
+  }, [authenticatedFetch, isLoadingHistory]);
 
-  // Load project history on component mount
+  // Load project history on component mount (only once)
   useEffect(() => {
-    fetchProjectHistory();
-  }, []);
+    if (!isDemo && !projectHistoryLoadedRef.current) {
+      fetchProjectHistory();
+    }
+  }, []); // Empty array - only run once on mount
 
   // Handle edit project - navigate to Monaco editor
   const handleEditProject = (project) => {
@@ -1055,7 +1184,7 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
     setIsLoading(true);
     
     try {
-      const response = await fetch(apiUrl('api/chat'), {
+      const response = await authenticatedFetch('http://localhost:8000/api/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -1357,7 +1486,8 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
           if (job.status === 'completed') {
             addMessage('system', `Success: Project "${projectName}" generated successfully!`);
             
-            // Refresh project history
+            // Refresh project history (force reload)
+            projectHistoryLoadedRef.current = false;
             fetchProjectHistory();
             
             // Redirect to Monaco editor
@@ -1398,6 +1528,13 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
 
   // Manual text input for fallback
   const [textInput, setTextInput] = useState('');
+  const textInputRef = useRef(null);
+  
+  // Stable text input handler to prevent focus loss
+  const handleTextInputChange = useCallback((e) => {
+    setTextInput(e.target.value);
+  }, []);
+  
   const [audioDevices, setAudioDevices] = useState([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState('');
   const [audioStoppedMessage, setAudioStoppedMessage] = useState('');
@@ -1605,7 +1742,7 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
     await speakTextWithSettings(testText);
   };
   
-  const sendTextMessage = () => {
+  const sendTextMessage = useCallback(() => {
     if (!textInput.trim() || isLoading || isDemo) return; // Disabled in demo mode
     
     addMessage('user', textInput);
@@ -1629,7 +1766,7 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
     }
     
     setTextInput('');
-  };
+  }, [textInput, isLoading, isDemo, currentMode, sendToAI, addMessage]);
 
   // Helper to get placeholder text for the current mode
   const getPlaceholder = () => {
@@ -1714,7 +1851,8 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
   };
 
 const MainContent = () => (
-  <div className="voice-chat-page" style={isDemo ? { background: 'transparent', padding: '20px' } : {}}>
+  <>
+    <div className="voice-chat-page" style={isDemo ? { background: 'transparent', padding: '20px' } : {}}>
         {/* --- Floating Settings Panel (remains hidden) --- */}
         <div className={`floating-settings ${showTTSSettings ? 'visible' : ''}`}>
           <div className="settings-panel">
@@ -1749,7 +1887,7 @@ const MainContent = () => (
                 {/* NEW: Top Chatbox Component */}
                 <div className="top-chatbox-component" style={{ position: 'relative' }}>
                 {/* Chat Messages Display Area */}
-                <div ref={chatContainerRef} className="chatbox-messages-area" style={{ overflowAnchor: 'auto' }}>
+                <div ref={chatContainerRef} className="chatbox-messages-area">
                   <div ref={chatContentRef} className="conversation-messages">
                     {conversation.map((message, index) => (
                       <div key={`${index}-${message.timestamp || index}`} className={`message ${message.type} fade-in`}>
@@ -1927,13 +2065,20 @@ const MainContent = () => (
                     {/* Text Input (adapts to mode) */}
                     <div className="hero-text-input-container">
                       <input
+                        ref={textInputRef}
                         type="text"
                         value={textInput}
-                        onChange={(e) => setTextInput(e.target.value)}
-                        onKeyPress={(e) => e.key === 'Enter' && sendTextMessage()}
+                        onChange={handleTextInputChange}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            sendTextMessage();
+                          }
+                        }}
                         placeholder={isDemo ? 'Click a suggestion above to try the demo' : getPlaceholder()}
                         className="hero-text-input"
                         disabled={isLoading || isDemo}
+                        autoComplete="off"
                       />
                       <button
                         onClick={sendTextMessage}
@@ -1975,96 +2120,33 @@ const MainContent = () => (
                 {/* Show real project history (not in demo mode) */}
                 {!isDemo && (
                   <div className="jump-back-in-section">
-                    {isLoadingHistory ? (
-                      <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-secondary)' }}>
-                        <Loader size={32} className="spinning" />
-                        <p style={{ marginTop: '16px' }}>Loading projects...</p>
-                      </div>
-                    ) : projectHistory && projectHistory.length > 0 ? (
-                      <>
-                    {/* Interactive Header Bar */}
-                    <div className="jump-back-in-header">
-                      <h2 className="empty-state-section-title">Jump Right Back In</h2>
-                      
-                      <div className="jump-back-in-controls">
-                        {/* Search Bar */}
-                        <div className="project-search-container">
-                          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="search-icon">
-                            <circle cx="7" cy="7" r="5" stroke="currentColor" strokeWidth="1.5"/>
-                            <path d="M11 11L14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                          </svg>
-                          <input 
-                            type="text" 
-                            placeholder="Search projects..."
-                            className="project-search-input"
-                          />
-                        </div>
-                        
-                        {/* Filter/Sort Dropdown */}
-                        <select className="project-sort-select">
-                          <option value="recent">Last edited</option>
-                          <option value="name">Name (A-Z)</option>
-                          <option value="oldest">Oldest first</option>
-                        </select>
-                        
-                        {/* View All Button */}
-                        <button className="view-all-btn">
-                          View All
-                          <ArrowRight size={14} />
-                        </button>
-                      </div>
+                    <div style={{ padding: '40px', textAlign: 'center' }}>
+                      <h2 className="empty-state-section-title" style={{ marginBottom: '12px' }}>Ready to continue?</h2>
+                      <p style={{ color: 'var(--text-secondary)', marginBottom: '24px', fontSize: '14px' }}>
+                        Pick up where you left off with your previous projects
+                      </p>
+                      <button 
+                        className="view-all-projects-btn"
+                        onClick={() => {
+                          setShowProjectsModal(true);
+                          // Load projects when modal opens if not already loaded
+                          if (!projectHistoryLoadedRef.current && !isLoadingHistory) {
+                            fetchProjectHistory();
+                          }
+                        }}
+                      >
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: '8px' }}>
+                          <rect x="3" y="3" width="7" height="7" rx="1"/>
+                          <rect x="14" y="3" width="7" height="7" rx="1"/>
+                          <rect x="14" y="14" width="7" height="7" rx="1"/>
+                          <rect x="3" y="14" width="7" height="7" rx="1"/>
+                        </svg>
+                        View All Projects
+                        <ArrowRight size={16} style={{ marginLeft: '8px' }} />
+                      </button>
                     </div>
-                    
-                    <div className="project-cards-grid">
-                      {/* Show real project history */}
-                      {projectHistory.slice(0, 6).map((project, index) => (
-                        <div key={project.slug || index} className="project-card">
-                          <div className="project-card-header">
-                            <div className="project-card-info">
-                              <h4 className="project-card-name">{project.name || 'Unnamed Project'}</h4>
-                              <p className="project-card-meta">
-                                Edited {project.created_date ? formatTimeAgo(new Date(project.created_date * 1000).toISOString()) : 'recently'}
-                              </p>
-                            </div>
-                          </div>
-                          
-                          {/* Live Preview Container */}
-                          <div className="project-card-preview">
-                            <iframe
-                              src={`/api/sandbox-preview/${project.slug}`}
-                              title={`Preview of ${project.name}`}
-                              className="project-preview-iframe"
-                              sandbox="allow-scripts allow-same-origin"
-                              scrolling="no"
-                            />
-                          </div>
-                          
-                          <div className="project-card-actions">
-                            <button 
-                              className="project-card-btn primary"
-                              onClick={() => handleEditProject(project)}
-                            >
-                              Open Project
-                            </button>
-                            <button 
-                              className="project-card-btn"
-                              onClick={() => handlePreviewProject(project)}
-                            >
-                              Preview
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    </>
-                    ) : (
-                      <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-secondary)' }}>
-                        <p>No projects yet. Start building your first app!</p>
-                      </div>
-                    )}
                   </div>
                 )}
-
 
               </div>
               </div>
@@ -2072,7 +2154,119 @@ const MainContent = () => (
           </div>
         </div>
       </div>
-  );
+
+      {/* Projects Modal - Outside main content for proper z-index layering */}
+      {showProjectsModal && (
+        <div className="projects-modal-overlay" onClick={() => setShowProjectsModal(false)}>
+          <div className="projects-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="projects-modal-header">
+              <h2 className="empty-state-section-title">Jump Right Back In</h2>
+              <button 
+                className="modal-close-btn"
+                onClick={() => setShowProjectsModal(false)}
+                title="Close"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            
+            {isLoadingHistory ? (
+              <div style={{ padding: '60px 40px', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                <Loader size={40} className="spinning" />
+                <p style={{ marginTop: '20px', fontSize: '15px' }}>Loading your projects...</p>
+              </div>
+            ) : projectHistory && projectHistory.length > 0 ? (
+              <>
+                {/* Interactive Header Bar */}
+                <div className="jump-back-in-header">
+            
+            <div className="jump-back-in-controls">
+              {/* Search Bar */}
+              <div className="project-search-container">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="search-icon">
+                  <circle cx="7" cy="7" r="5" stroke="currentColor" strokeWidth="1.5"/>
+                  <path d="M11 11L14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                </svg>
+                <input 
+                  type="text" 
+                  placeholder="Search projects..."
+                  className="project-search-input"
+                />
+              </div>
+              
+              {/* Filter/Sort Dropdown */}
+              <select className="project-sort-select">
+                <option value="recent">Last edited</option>
+                <option value="name">Name (A-Z)</option>
+                <option value="oldest">Oldest first</option>
+              </select>
+              
+              {/* View All Button */}
+              <button className="view-all-btn">
+                View All
+                <ArrowRight size={14} />
+              </button>
+            </div>
+          </div>
+          
+          <div className="project-cards-grid">
+            {/* Show real project history */}
+            {projectHistory.map((project, index) => (
+              <div key={project.slug || index} className="project-card">
+                <div className="project-card-header">
+                  <div className="project-card-info">
+                    <h4 className="project-card-name">{project.name || 'Unnamed Project'}</h4>
+                    <p className="project-card-meta">
+                      Edited {project.created_date ? formatTimeAgo(new Date(project.created_date * 1000).toISOString()) : 'recently'}
+                    </p>
+                  </div>
+                </div>
+                
+                {/* Live Preview Container */}
+                <div className="project-card-preview">
+                  <iframe
+                    src={`/api/sandbox-preview/${project.slug}`}
+                    title={`Preview of ${project.name}`}
+                    className="project-preview-iframe"
+                    sandbox="allow-scripts allow-same-origin"
+                    scrolling="no"
+                  />
+                </div>
+                
+                <div className="project-card-actions">
+                  <button 
+                    className="project-card-btn primary"
+                    onClick={() => handleEditProject(project)}
+                  >
+                    Open Project
+                  </button>
+                  <button 
+                    className="project-card-btn"
+                    onClick={() => handlePreviewProject(project)}
+                  >
+                    Preview
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+          </>
+        ) : (
+          <div style={{ padding: '60px 40px', textAlign: 'center', color: 'var(--text-secondary)' }}>
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ margin: '0 auto 16px', opacity: 0.3 }}>
+              <rect x="3" y="3" width="7" height="7" rx="1"/>
+              <rect x="14" y="3" width="7" height="7" rx="1"/>
+              <rect x="14" y="14" width="7" height="7" rx="1"/>
+              <rect x="3" y="14" width="7" height="7" rx="1"/>
+            </svg>
+            <p style={{ fontSize: '15px' }}>No projects yet. Start building your first app!</p>
+          </div>
+        )}
+          </div>
+        </div>
+      )}
+  </>
+);
 
   return isDemo ? <MainContent /> : (
     <PageWrapper>

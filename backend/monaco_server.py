@@ -1233,33 +1233,56 @@ async def check_project_errors(project_name: str = Query(...)):
 # --- Auto Fix Errors Endpoint ---  
 @app.post("/api/auto-fix-errors")
 async def auto_fix_errors(request: dict = Body(...)):
-    """Automatically fix common errors"""
+    """Automatically fix runtime errors detected in browser console"""
     try:
+        from auto_fix_agent import auto_fix_agent
+        
         project_name = request.get("project_name")
-        errors = request.get("errors", [])
+        error_message = request.get("error_message", "")
+        error_stack = request.get("error_stack", "")
+        file_path = request.get("file_path")
+        user_id = request.get("user_id", "anonymous")
+        
+        print(f"🔧 Auto-fix triggered for {project_name}: {error_message[:100]}")
         
         await manager.send_to_project(project_name, {
             "type": "terminal_output",
-            "message": f"🔧 Auto-fixing {len(errors)} errors...",
+            "message": f"🔧 AI agent analyzing error: {error_message[:80]}...",
             "level": "info"
         })
         
-        # Simulate fixing
-        await asyncio.sleep(1)
+        # Use AI agent to fix the error
+        result = await auto_fix_agent.analyze_and_fix_error(
+            error_message=error_message,
+            error_stack=error_stack,
+            project_slug=project_name,
+            user_id=user_id,
+            file_path=file_path
+        )
         
-        await manager.send_to_project(project_name, {
-            "type": "terminal_output",
-            "message": "✅ Errors fixed",
-            "level": "success"
-        })
+        if result['success']:
+            await manager.send_to_project(project_name, {
+                "type": "terminal_output",
+                "message": f"✅ {result['message']}",
+                "level": "success"
+            })
+            
+            await manager.send_to_project(project_name, {
+                "type": "file_fixed",
+                "file_path": result['file_path'],
+                "error_type": result['error_type']
+            })
+        else:
+            await manager.send_to_project(project_name, {
+                "type": "terminal_output",
+                "message": f"❌ Auto-fix failed: {result.get('error', 'Unknown error')}",
+                "level": "error"
+            })
         
-        return {
-            "success": True,
-            "files_modified": [],
-            "fixes_applied": len(errors)
-        }
+        return result
         
     except Exception as e:
+        print(f"❌ Auto-fix endpoint error: {str(e)}")
         return {"success": False, "error": str(e)}
 
 # --- Execute Terminal Command Endpoint ---
