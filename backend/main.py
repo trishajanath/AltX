@@ -1183,13 +1183,26 @@ async def get_sandbox_preview(
             }
         )
         
+    except HTTPException as http_ex:
+        # Re-raise HTTPExceptions (like 404) with their original status
+        raise http_ex
     except Exception as e:
+        # Log detailed error information for debugging
+        import traceback
+        print(f"❌ Sandbox preview error for project '{project_name}':")
+        print(f"   Error type: {type(e).__name__}")
+        print(f"   Error message: {str(e)}")
+        print(f"   Traceback: {traceback.format_exc()}")
+        
         error_html = f"""
         <html>
             <body style="font-family: Arial; padding: 20px; background: #1e1e1e; color: #fff;">
                 <h2>Preview Error</h2>
                 <p>Failed to generate preview: {str(e)}</p>
                 <p>Project: {project_name}</p>
+                <p style="color: #888; font-size: 0.9em;">Error type: {type(e).__name__}</p>
+                <hr style="border-color: #333;">
+                <p style="color: #888; font-size: 0.85em;">Check server logs for detailed information.</p>
             </body>
         </html>
         """
@@ -1295,6 +1308,78 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
     <script crossorigin src="https://unpkg.com/react-router@6/dist/umd/react-router.development.js"></script>
     <script crossorigin src="https://unpkg.com/react-router-dom@6/dist/umd/react-router-dom.development.js"></script>
     
+    <!-- Load Framer Motion for animations (with robust fallback) -->
+    <script src="https://cdn.jsdelivr.net/npm/framer-motion@10.16.16/dist/framer-motion.umd.min.js"></script>
+    <script>
+        // Robust motion fallback - ALWAYS create these to prevent ReferenceError
+        const createMotionComponent = (element) => {{
+            return function MotionComponent(props) {{
+                const {{ children, className, style, onClick, id, initial, animate, exit, whileHover, whileTap, whileInView, transition, variants, ...rest }} = props;
+                return React.createElement(element, {{ className, style, onClick, id, ...rest }}, children);
+            }};
+        }};
+        
+        // ALWAYS define motion globally - either from library or fallback
+        if (typeof motion === 'undefined') {{
+            window.motion = {{
+                div: createMotionComponent('div'),
+                span: createMotionComponent('span'),
+                section: createMotionComponent('section'),
+                header: createMotionComponent('header'),
+                nav: createMotionComponent('nav'),
+                main: createMotionComponent('main'),
+                footer: createMotionComponent('footer'),
+                article: createMotionComponent('article'),
+                aside: createMotionComponent('aside'),
+                h1: createMotionComponent('h1'),
+                h2: createMotionComponent('h2'),
+                h3: createMotionComponent('h3'),
+                h4: createMotionComponent('h4'),
+                p: createMotionComponent('p'),
+                a: createMotionComponent('a'),
+                button: createMotionComponent('button'),
+                input: createMotionComponent('input'),
+                form: createMotionComponent('form'),
+                ul: createMotionComponent('ul'),
+                li: createMotionComponent('li'),
+                img: createMotionComponent('img'),
+                svg: createMotionComponent('svg'),
+                path: createMotionComponent('path'),
+                label: createMotionComponent('label'),
+                textarea: createMotionComponent('textarea')
+            }};
+            console.log('✅ Motion fallback components created');
+        }} else {{
+            console.log('✅ Framer Motion library loaded');
+        }}
+        
+        // ALWAYS define AnimatePresence
+        if (typeof AnimatePresence === 'undefined') {{
+            window.AnimatePresence = function AnimatePresenceFallback({{ children, mode }}) {{
+                return children;
+            }};
+        }}
+        
+        // Define motion hooks
+        if (typeof useScroll === 'undefined') {{
+            window.useScroll = function useScrollFallback() {{
+                return {{ scrollYProgress: {{ get: () => 0, onChange: () => {{}} }} }};
+            }};
+        }}
+        
+        if (typeof useInView === 'undefined') {{
+            window.useInView = function useInViewFallback(ref, options) {{
+                return true;
+            }};
+        }}
+        
+        if (typeof useAnimation === 'undefined') {{
+            window.useAnimation = function useAnimationFallback() {{
+                return {{ start: () => {{}}, stop: () => {{}} }};
+            }};
+        }}
+    </script>
+    
     <!-- Load Babel transformer -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
@@ -1364,7 +1449,29 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
             throw new Error('React dependencies missing');
         }}
         
-        const {{ useState, useEffect, useCallback, useMemo, useRef }} = React;
+        // Destructure React hooks
+        const {{ useState, useEffect, useCallback, useMemo, useRef, useContext, useReducer, useLayoutEffect, useId, useTransition, useDeferredValue, useSyncExternalStore }} = React;
+        
+        // Make React hooks globally available for generated components
+        window.useState = useState;
+        window.useEffect = useEffect;
+        window.useCallback = useCallback;
+        window.useMemo = useMemo;
+        window.useRef = useRef;
+        window.useContext = useContext;
+        window.useReducer = useReducer;
+        window.useLayoutEffect = useLayoutEffect;
+        window.useId = useId;
+        window.useTransition = useTransition;
+        window.useDeferredValue = useDeferredValue;
+        window.useSyncExternalStore = useSyncExternalStore;
+        window.createContext = React.createContext;
+        window.forwardRef = React.forwardRef;
+        window.memo = React.memo;
+        window.lazy = React.lazy;
+        window.Suspense = React.Suspense;
+        window.Fragment = React.Fragment;
+        window.createElement = React.createElement;
         
         // Filter invalid props from DOM elements to prevent React warnings
         const INVALID_DOM_PROPS = new Set([
@@ -1586,6 +1693,68 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
         window.MoreHorizontal = createIcon('MoreHorizontal');
         window.MoreVertical = createIcon('MoreVertical');
         window.ExternalLink = createIcon('ExternalLink');
+        window.LogOut = createIcon('LogOut');
+        window.LogIn = createIcon('LogIn');
+        window.UserPlus = createIcon('UserPlus');
+        window.Settings2 = createIcon('Settings');
+        window.Loader = createIcon('Loader');
+        window.Loader2 = createIcon('Loader');
+        window.Truck = createIcon('Truck');
+        window.ShoppingBag = createIcon('ShoppingBag');
+        window.Tag = createIcon('Tag');
+        window.Store = createIcon('Store');
+        window.Wallet = createIcon('Wallet');
+        window.Receipt = createIcon('Receipt');
+        window.Gift = createIcon('Gift');
+        window.Sparkles = createIcon('Sparkles');
+        window.Award = createIcon('Award');
+        window.Zap = createIcon('Zap');
+        window.Target = createIcon('Target');
+        window.TrendingUp = createIcon('TrendingUp');
+        window.TrendingDown = createIcon('TrendingDown');
+        window.BarChart = createIcon('BarChart');
+        window.PieChart = createIcon('PieChart');
+        window.Activity = createIcon('Activity');
+        window.Archive = createIcon('Archive');
+        window.Bell = createIcon('Bell');
+        window.Bookmark = createIcon('Bookmark');
+        window.Briefcase = createIcon('Briefcase');
+        window.Camera = createIcon('Camera');
+        window.Clipboard = createIcon('Clipboard');
+        window.Code = createIcon('Code');
+        window.Compass = createIcon('Compass');
+        window.Copy = createIcon('Copy');
+        window.Database = createIcon('Database');
+        window.Grid = createIcon('Grid');
+        window.Layers = createIcon('Layers');
+        window.Layout = createIcon('Layout');
+        window.Link2 = createIcon('Link');
+        window.List = createIcon('List');
+        window.Monitor = createIcon('Monitor');
+        window.Printer = createIcon('Printer');
+        window.Repeat = createIcon('Repeat');
+        window.Rotate = createIcon('Rotate');
+        window.Scissors = createIcon('Scissors');
+        window.Send = createIcon('Send');
+        window.Sliders = createIcon('Sliders');
+        window.Smartphone = createIcon('Smartphone');
+        window.Tablet = createIcon('Tablet');
+        window.Terminal = createIcon('Terminal');
+        window.ThumbsUp = createIcon('ThumbsUp');
+        window.ThumbsDown = createIcon('ThumbsDown');
+        window.Tool = createIcon('Tool');
+        window.Umbrella = createIcon('Umbrella');
+        window.Video = createIcon('Video');
+        window.Voicemail = createIcon('Voicemail');
+        window.Watch = createIcon('Watch');
+        window.ZoomIn = createIcon('ZoomIn');
+        window.ZoomOut = createIcon('ZoomOut');
+        window.Facebook = createIcon('Facebook');
+        window.Twitter = createIcon('Twitter');
+        window.Instagram = createIcon('Instagram');
+        window.Linkedin = createIcon('Linkedin');
+        window.Github = createIcon('Github');
+        window.Youtube = createIcon('Youtube');
         
         // Console logger for debugging
         const originalConsoleLog = console.log;
@@ -1887,6 +2056,32 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
 def fix_jsx_content_for_sandbox(content: str, component_name: str, project_name: str) -> str:
     """Fix JSX content specifically for sandbox browser compilation"""
     import re
+    
+    # CRITICAL: Remove ALL React imports - React is provided globally
+    content = re.sub(r"import\s+React\s*,?\s*\{[^}]*\}\s*from\s*['\"]react['\"];?\s*\n?", '', content)
+    content = re.sub(r"import\s+React\s+from\s*['\"]react['\"];?\s*\n?", '', content)
+    content = re.sub(r"import\s*\{[^}]*\}\s*from\s*['\"]react['\"];?\s*\n?", '', content)
+    content = re.sub(r"import\s+\*\s+as\s+React\s+from\s*['\"]react['\"];?\s*\n?", '', content)
+    
+    # CRITICAL: Remove ALL framer-motion imports - motion is provided globally
+    content = re.sub(r"import\s+\{[^}]*\}\s+from\s+['\"]framer-motion['\"];?\s*\n?", '', content)
+    content = re.sub(r"import\s+\*\s+as\s+\w+\s+from\s+['\"]framer-motion['\"];?\s*\n?", '', content)
+    content = re.sub(r"import\s+motion\s+from\s+['\"]framer-motion['\"];?\s*\n?", '', content)
+    
+    # Remove any local motion fallback definitions since global ones exist
+    content = re.sub(r"const\s+motion\s*=\s*window\.motion\s*\|\|[^;]+;?\s*\n?", '', content)
+    content = re.sub(r"const\s+motion\s*=\s*\{[^}]*\};\s*\n?", '', content)
+    
+    # Remove Lucide icon imports - icons are provided globally
+    content = re.sub(r"import\s*\{[^}]*\}\s*from\s*['\"]lucide-react['\"];?\s*\n?", '', content)
+    
+    # Remove CSS imports - Tailwind is provided via CDN
+    content = re.sub(r"import\s+['\"][^'\"]*\.css['\"];?\s*\n?", '', content)
+    
+    # Remove clsx/tailwind-merge imports - cn is provided globally
+    content = re.sub(r"import\s*\{[^}]*\}\s*from\s*['\"]clsx['\"];?\s*\n?", '', content)
+    content = re.sub(r"import\s*\{[^}]*\}\s*from\s*['\"]tailwind-merge['\"];?\s*\n?", '', content)
+    content = re.sub(r"import\s*\{[^}]*cn[^}]*\}\s*from\s*['\"]\.+/lib/utils['\"];?\s*\n?", '', content)
     
     # Fix empty component functions
     if f'const {component_name} = () => (\n\n);' in content:

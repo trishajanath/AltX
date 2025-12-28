@@ -192,6 +192,24 @@ async def process_speech(audio: UploadFile = File(...)):
         with open(temp_file_path, "rb") as audio_file:
             audio_content = audio_file.read()
         
+        # Check audio size - if > ~1MB or 60 seconds, we should use async processing
+        # For now, limit sync processing and provide helpful error message
+        audio_size_mb = len(audio_content) / (1024 * 1024)
+        if audio_size_mb > 1.0:  # Rough estimate for 60 seconds
+            os.unlink(temp_file_path)
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "error": "Audio recording too long. Please keep recordings under 60 seconds.",
+                    "transcript": None,
+                    "suggestions": [
+                        "Try recording a shorter message (under 1 minute)",
+                        "Break your message into smaller parts",
+                        "Use text input for longer messages"
+                    ]
+                }
+            )
+        
         audio_data = speech.RecognitionAudio(content=audio_content)
         
         # Try different configurations - start with most likely to work

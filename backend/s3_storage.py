@@ -105,10 +105,12 @@ def get_project_from_s3(project_slug: str, user_id: str = 'anonymous') -> Option
         Dict with project files or None if not found
     """
     if not S3_BUCKET_NAME:
+        print("❌ S3_BUCKET_NAME environment variable is not set")
         raise ValueError("S3_BUCKET_NAME environment variable is not set")
     
     try:
         prefix = f"projects/{user_id}/{project_slug}/"
+        print(f"🔍 Searching S3 with prefix: {prefix}")
         
         response = s3_client.list_objects_v2(
             Bucket=S3_BUCKET_NAME,
@@ -116,8 +118,10 @@ def get_project_from_s3(project_slug: str, user_id: str = 'anonymous') -> Option
         )
         
         if 'Contents' not in response:
+            print(f"⚠️ No files found in S3 for prefix: {prefix}")
             return None
         
+        print(f"✅ Found {len(response['Contents'])} files in S3")
         files = []
         metadata = {}
         project_name = None
@@ -156,7 +160,14 @@ def get_project_from_s3(project_slug: str, user_id: str = 'anonymous') -> Option
         }
         
     except ClientError as e:
-        print(f"Error retrieving project from S3: {str(e)}")
+        error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+        error_message = e.response.get('Error', {}).get('Message', str(e))
+        print(f"❌ S3 ClientError ({error_code}): {error_message}")
+        print(f"   Prefix: {prefix}")
+        print(f"   Bucket: {S3_BUCKET_NAME}")
+        return None
+    except Exception as e:
+        print(f"❌ Unexpected error retrieving project from S3: {type(e).__name__}: {str(e)}")
         return None
 
 

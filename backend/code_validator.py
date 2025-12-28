@@ -215,12 +215,60 @@ class CodeValidator:
         return {'errors': errors, 'warnings': warnings}
     
     def _check_jsx_critical_issues(self, code: str) -> List[str]:
-        """Basic critical issue checks when ESLint is not available."""
+        """Comprehensive JSX/React validation for sandbox execution."""
         errors = []
         
-        # Only check for duplicate declarations - the most common critical issue
+        # ========== SYNTAX ERRORS ==========
+        
+        # Check for unclosed JSX tags
+        open_tags = re.findall(r'<(\w+)(?:\s[^>]*)?\s*(?<!/)>', code)
+        close_tags = re.findall(r'</(\w+)>', code)
+        self_closing = re.findall(r'<(\w+)[^>]*/>', code)
+        
+        # Count tags (excluding self-closing and HTML void elements)
+        void_elements = {'br', 'hr', 'img', 'input', 'meta', 'link', 'area', 'base', 'col', 'embed', 'param', 'source', 'track', 'wbr'}
+        for tag in set(open_tags):
+            if tag.lower() not in void_elements:
+                open_count = open_tags.count(tag)
+                close_count = close_tags.count(tag)
+                self_close_count = self_closing.count(tag)
+                if open_count > (close_count + self_close_count):
+                    errors.append(f"Unclosed JSX tag: <{tag}> opened {open_count} times but only closed {close_count + self_close_count} times")
+        
+        # Check for invalid JSX attribute syntax
+        invalid_attrs = re.findall(r'(\w+)=([^{"\'][^\s/>]+)', code)
+        for attr, value in invalid_attrs:
+            if attr not in ['className', 'style'] and not value.startswith('{'):
+                if not re.match(r'^\d+$', value):  # Allow numbers
+                    errors.append(f"Invalid JSX attribute syntax: {attr}={value} - use quotes or braces")
+        
+        # Check for class= instead of className=
+        if re.search(r'\sclass\s*=\s*["{]', code):
+            errors.append("Use 'className' instead of 'class' in JSX")
+        
+        # Check for for= instead of htmlFor=
+        if re.search(r'\sfor\s*=\s*["{]', code):
+            errors.append("Use 'htmlFor' instead of 'for' in JSX")
+        
+        # Check for onclick instead of onClick (and similar) - case-sensitive!
+        # Only flag lowercase HTML-style events, not properly camelCased React events
+        html_events = {
+            'onclick': 'onClick', 'onchange': 'onChange', 'onsubmit': 'onSubmit',
+            'onmouseover': 'onMouseOver', 'onmouseout': 'onMouseOut', 'onmouseenter': 'onMouseEnter',
+            'onmouseleave': 'onMouseLeave', 'onfocus': 'onFocus', 'onblur': 'onBlur',
+            'onkeydown': 'onKeyDown', 'onkeyup': 'onKeyUp', 'onkeypress': 'onKeyPress',
+            'oninput': 'onInput', 'ondrag': 'onDrag', 'ondrop': 'onDrop'
+        }
+        for html_event, react_event in html_events.items():
+            # Case-sensitive match - only flag exact lowercase matches
+            if re.search(rf'\s{html_event}\s*=', code):
+                errors.append(f"Use '{react_event}' instead of '{html_event}' in JSX")
+        
+        # ========== COMPONENT ERRORS ==========
+        
+        # Check for duplicate component declarations
         component_declarations = {}
-        for match in re.finditer(r'(?:const|function|class)\s+(\w+)\s*=', code):
+        for match in re.finditer(r'(?:const|function|class)\s+(\w+)\s*[=({]', code):
             comp_name = match.group(1)
             if comp_name[0].isupper():
                 if comp_name in component_declarations:
@@ -229,12 +277,77 @@ class CodeValidator:
                     component_declarations[comp_name] = match.start()
         
         # Check for components that are both imported and declared
-        import_matches = re.findall(r'import\s+{([^}]+)}\s+from', code)
+        import_matches = re.findall(r'import\s+\{([^}]+)\}\s+from', code)
         for import_match in import_matches:
-            imported_comps = [c.strip() for c in import_match.split(',')]
+            imported_comps = [c.strip().split(' as ')[0] for c in import_match.split(',')]
             for comp in imported_comps:
                 if comp in component_declarations:
-                    errors.append(f"Component '{comp}' is imported and declared locally")
+                    errors.append(f"Component '{comp}' is imported and declared locally - remove one")
+        
+        # ========== HOOKS ERRORS ==========
+        
+        # Check for hooks called conditionally (inside if/for/while)
+        hooks = ['useState', 'useEffect', 'useCallback', 'useMemo', 'useRef', 'useContext', 'useReducer', 'useLayoutEffect']
+        lines = code.split('\n')
+        in_conditional = False
+        brace_depth = 0
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            # Track conditional blocks
+            if re.match(r'^(if|for|while|switch)\s*\(', stripped):
+                in_conditional = True
+                brace_depth = 0
+            if in_conditional:
+                brace_depth += line.count('{') - line.count('}')
+                if brace_depth <= 0:
+                    in_conditional = False
+                for hook in hooks:
+                    if f'{hook}(' in line:
+                        errors.append(f"Hook '{hook}' called conditionally at line {i+1} - hooks must be called at top level")
+        
+        # Check for useEffect without dependency array when needed
+        use_effects = re.findall(r'useEffect\s*\(\s*\(\)\s*=>\s*\{([^}]*)\}(?:\s*,\s*(\[[^\]]*\]))?', code, re.DOTALL)
+        for effect_body, deps in use_effects:
+            if deps is None or deps == '':
+                # Check if effect uses any variables that should be dependencies
+                if re.search(r'\b(props|state|set\w+)\b', effect_body):
+                    errors.append("useEffect missing dependency array - this will run on every render")
+        
+        # ========== COMMON RUNTIME ERRORS ==========
+        
+        # Check for missing key props in lists
+        map_calls = re.findall(r'\.map\s*\(\s*(?:\([^)]*\)|[^=]+)\s*=>\s*(?:\(|{)?([^)]*(?:\([^)]*\)[^)]*)*)', code, re.DOTALL)
+        for map_content in map_calls:
+            if '<' in map_content and 'key=' not in map_content and 'key:' not in map_content:
+                errors.append("Missing 'key' prop in mapped JSX elements - each child in a list needs a unique key")
+        
+        # Check for undefined variables used in JSX
+        jsx_vars = re.findall(r'\{(\w+)(?:\.\w+)*\}', code)
+        defined_vars = set(re.findall(r'(?:const|let|var)\s+(?:\{[^}]+\}|\[?(\w+)\]?)\s*=', code))
+        defined_vars.update(re.findall(r'function\s+\w+\s*\(([^)]*)\)', code))  # function params
+        defined_vars.update(['true', 'false', 'null', 'undefined', 'console', 'window', 'document', 'Math', 'JSON', 'Date', 'Array', 'Object', 'String', 'Number', 'Boolean', 'Promise', 'Error', 'React', 'props', 'children'])
+        # Add common globals
+        defined_vars.update(['useState', 'useEffect', 'useCallback', 'useMemo', 'useRef', 'useContext', 'useReducer', 'useLayoutEffect', 'useNavigate', 'useLocation', 'useParams', 'Link', 'Router', 'Routes', 'Route', 'motion', 'AnimatePresence', 'clsx', 'cn'])
+        
+        # Check for potentially missing exports
+        if 'export default' not in code and 'export const' not in code and 'module.exports' not in code:
+            # Find the main component
+            main_comp = None
+            for comp in component_declarations:
+                main_comp = comp
+                break
+            if main_comp:
+                errors.append(f"Missing export statement - add 'export default {main_comp};' at the end")
+        
+        # Check for empty component returns
+        empty_returns = re.findall(r'return\s*\(\s*\n?\s*\);', code)
+        if empty_returns:
+            errors.append("Empty return statement in component - component must return valid JSX")
+        
+        # Check for incomplete arrow functions
+        incomplete_arrows = re.findall(r'const\s+\w+\s*=\s*\([^)]*\)\s*=>\s*\(\s*\);', code)
+        if incomplete_arrows:
+            errors.append("Empty arrow function component - must return valid JSX")
         
         return errors
     
@@ -595,6 +708,249 @@ def validate_generated_code(code: str, file_type: str, filename: str) -> Validat
     
     else:
         return ValidationResult(True, [], [], ["Unknown file type - basic validation only"])
+
+
+def auto_fix_jsx_for_sandbox(code: str, filename: str = "component.jsx") -> str:
+    """
+    Automatically fix common JSX issues for sandbox execution.
+    This function transforms code to work in a browser sandbox environment.
+    Fixes include: import removal, syntax fixes, React-specific fixes.
+    """
+    import re
+    
+    # ========== IMPORT REMOVAL (sandbox provides these globally) ==========
+    
+    # Remove React imports - React is provided globally in sandbox
+    code = re.sub(r"import\s+React\s*,?\s*\{[^}]*\}\s*from\s*['\"]react['\"];?\s*\n?", '', code)
+    code = re.sub(r"import\s+React\s+from\s*['\"]react['\"];?\s*\n?", '', code)
+    code = re.sub(r"import\s*\{[^}]*\}\s*from\s*['\"]react['\"];?\s*\n?", '', code)
+    code = re.sub(r"import\s+\*\s+as\s+React\s+from\s*['\"]react['\"];?\s*\n?", '', code)
+    
+    # Remove ALL framer-motion imports - motion is provided globally in sandbox
+    code = re.sub(r"import\s+\{[^}]*\}\s+from\s+['\"]framer-motion['\"];?\s*\n?", '', code)
+    code = re.sub(r"import\s+\*\s+as\s+\w+\s+from\s+['\"]framer-motion['\"];?\s*\n?", '', code)
+    code = re.sub(r"import\s+motion\s+from\s+['\"]framer-motion['\"];?\s*\n?", '', code)
+    
+    # Remove local motion fallback definitions (global ones exist in sandbox)
+    code = re.sub(r"const\s+motion\s*=\s*window\.motion\s*\|\|[^;]+;?\s*\n?", '', code)
+    code = re.sub(r"// Safe motion fallback[^\n]*\n(const\s+motion\s*=[^;]+;?\s*\n?)?", '', code)
+    
+    # Remove Lucide icon imports - icons are provided globally
+    code = re.sub(r"import\s*\{[^}]*\}\s*from\s*['\"]lucide-react['\"];?\s*\n?", '', code)
+    
+    # Remove react-router-dom imports - provided globally
+    code = re.sub(r"import\s+\{[^}]*\}\s+from\s+['\"]react-router-dom['\"];?\s*\n?", '', code)
+    code = re.sub(r"import\s+\*\s+as\s+\w+\s+from\s+['\"]react-router-dom['\"];?\s*\n?", '', code)
+    
+    # Remove clsx/tailwind-merge imports - cn is provided globally
+    code = re.sub(r"import\s*\{[^}]*\}\s*from\s*['\"]clsx['\"];?\s*\n?", '', code)
+    code = re.sub(r"import\s*\{[^}]*\}\s*from\s*['\"]tailwind-merge['\"];?\s*\n?", '', code)
+    code = re.sub(r"import\s*\{[^}]*cn[^}]*\}\s*from\s*['\"]\.+/lib/utils['\"];?\s*\n?", '', code)
+    code = re.sub(r"import\s*\{[^}]*\}\s*from\s*['\"]@/lib/utils['\"];?\s*\n?", '', code)
+    
+    # Remove CSS imports - Tailwind is provided via CDN
+    code = re.sub(r"import\s+['\"][^'\"]*\.css['\"];?\s*\n?", '', code)
+    
+    # Remove UI component imports - they'll be defined globally or inline
+    code = re.sub(r"import\s*\{[^}]*\}\s*from\s*['\"]\.+/components/ui/[^'\"]+['\"];?\s*\n?", '', code)
+    code = re.sub(r"import\s*\{[^}]*\}\s*from\s*['\"]@/components/ui/[^'\"]+['\"];?\s*\n?", '', code)
+    code = re.sub(r"import\s*\{[^}]*\}\s*from\s*['\"]\.+/components/[^'\"]+['\"];?\s*\n?", '', code)
+    code = re.sub(r"import\s*\{[^}]*\}\s*from\s*['\"]@/components/[^'\"]+['\"];?\s*\n?", '', code)
+    
+    # Remove generic relative imports that would fail in sandbox
+    code = re.sub(r"import\s+\w+\s+from\s*['\"]\.+/[^'\"]+['\"];?\s*\n?", '', code)
+    code = re.sub(r"import\s+\w+\s+from\s*['\"]@/[^'\"]+['\"];?\s*\n?", '', code)
+    
+    # Remove axios imports - provide a fetch-based fallback
+    code = re.sub(r"import\s+axios\s+from\s*['\"]axios['\"];?\s*\n?", '', code)
+    code = re.sub(r"import\s*\{[^}]*\}\s*from\s*['\"]axios['\"];?\s*\n?", '', code)
+    
+    # ========== JSX SYNTAX FIXES ==========
+    
+    # Fix class= to className=
+    code = re.sub(r'\sclass\s*=\s*(["{])', r' className=\1', code)
+    
+    # Fix for= to htmlFor=
+    code = re.sub(r'\sfor\s*=\s*(["{])', r' htmlFor=\1', code)
+    
+    # Fix onclick to onClick (and similar HTML event attributes)
+    html_events = {
+        'onclick': 'onClick', 'onchange': 'onChange', 'onsubmit': 'onSubmit',
+        'onmouseover': 'onMouseOver', 'onmouseout': 'onMouseOut', 'onmouseenter': 'onMouseEnter',
+        'onmouseleave': 'onMouseLeave', 'onfocus': 'onFocus', 'onblur': 'onBlur',
+        'onkeydown': 'onKeyDown', 'onkeyup': 'onKeyUp', 'onkeypress': 'onKeyPress',
+        'oninput': 'onInput', 'ondrag': 'onDrag', 'ondrop': 'onDrop'
+    }
+    for html_event, react_event in html_events.items():
+        code = re.sub(rf'\s{html_event}\s*=', f' {react_event}=', code, flags=re.IGNORECASE)
+    
+    # ========== EMPTY COMPONENT FIXES ==========
+    
+    # Fix empty arrow function components: const Component = () => ();
+    code = re.sub(
+        r'const\s+(\w+)\s*=\s*\(\)\s*=>\s*\(\s*\);',
+        r'const \1 = () => (\n  <div className="p-4 bg-gray-100 rounded-lg">\n    <h3 className="text-lg font-semibold">\1</h3>\n    <p className="text-gray-600">Component ready</p>\n  </div>\n);',
+        code
+    )
+    
+    # Fix empty arrow function with props: const Component = ({}) => ();
+    code = re.sub(
+        r'const\s+(\w+)\s*=\s*\(\{[^}]*\}\)\s*=>\s*\(\s*\);',
+        r'const \1 = (props) => (\n  <div className="p-4 bg-gray-100 rounded-lg">\n    <h3 className="text-lg font-semibold">\1</h3>\n    <p className="text-gray-600">Component ready</p>\n  </div>\n);',
+        code
+    )
+    
+    # Fix empty return: return ();
+    code = re.sub(
+        r'return\s*\(\s*\);',
+        r'return (\n    <div className="p-4 bg-gray-100 rounded-lg">\n      <p>Content placeholder</p>\n    </div>\n  );',
+        code
+    )
+    
+    # Fix empty return with newlines: return (\n\n);
+    code = re.sub(
+        r'return\s*\(\s*\n\s*\n?\s*\);',
+        r'return (\n    <div className="p-4 bg-gray-100 rounded-lg">\n      <p>Content placeholder</p>\n    </div>\n  );',
+        code
+    )
+    
+    # ========== ROUTER FIXES ==========
+    
+    # Normalize router names to use the simple Router provided by sandbox
+    code = code.replace('BrowserRouter', 'Router')
+    code = code.replace('HashRouter', 'Router')
+    code = code.replace('MemoryRouter', 'Router')
+    
+    # ========== ADD MISSING EXPORTS ==========
+    
+    # Check if there's a component but no export
+    if 'export default' not in code and 'export const' not in code:
+        # Find the main component (last defined component, or one matching filename)
+        component_names = re.findall(r'(?:const|function|class)\s+([A-Z]\w*)\s*[=({]', code)
+        if component_names:
+            # Prefer component matching filename
+            base_name = filename.replace('.jsx', '').replace('.js', '').replace('.tsx', '').replace('.ts', '')
+            main_component = None
+            for comp in component_names:
+                if comp.lower() == base_name.lower():
+                    main_component = comp
+                    break
+            if not main_component:
+                main_component = component_names[-1]  # Use last defined
+            
+            # Add export at the end
+            if main_component and f'export default {main_component}' not in code:
+                code = code.rstrip() + f'\n\nexport default {main_component};'
+    
+    # ========== REMOVE DUPLICATE COMPONENT DECLARATIONS ==========
+    
+    # Find all component/const declarations and remove duplicates
+    # Keep the FIRST declaration of each name
+    seen_declarations = {}
+    lines = code.split('\n')
+    cleaned_lines = []
+    i = 0
+    
+    while i < len(lines):
+        line = lines[i]
+        
+        # Match component declarations (const X = ..., function X(...), const X = () => ...)
+        match = re.match(r'^(const|let|var|function)\s+([A-Z][a-zA-Z0-9_]*)\s*[=(]', line.strip())
+        
+        if match:
+            decl_type = match.group(1)
+            comp_name = match.group(2)
+            
+            if comp_name in seen_declarations:
+                # This is a duplicate! Skip this entire declaration
+                # Need to find where it ends (handle multi-line declarations)
+                brace_count = 0
+                paren_count = 0
+                started = False
+                skip_lines = [i]
+                
+                for char in line:
+                    if char in '{(':
+                        started = True
+                        if char == '{':
+                            brace_count += 1
+                        else:
+                            paren_count += 1
+                    elif char in '})':
+                        if char == '}':
+                            brace_count -= 1
+                        else:
+                            paren_count -= 1
+                
+                # If not balanced, continue to find the end
+                while (brace_count > 0 or paren_count > 0 or not started) and i + 1 < len(lines):
+                    i += 1
+                    skip_lines.append(i)
+                    next_line = lines[i]
+                    for char in next_line:
+                        if char in '{(':
+                            started = True
+                            if char == '{':
+                                brace_count += 1
+                            else:
+                                paren_count += 1
+                        elif char in '})':
+                            if char == '}':
+                                brace_count -= 1
+                            else:
+                                paren_count -= 1
+                    
+                    # Check if declaration ends with semicolon
+                    if next_line.rstrip().endswith(';') and brace_count <= 0 and paren_count <= 0:
+                        break
+                
+                print(f"🔧 Removed duplicate declaration of '{comp_name}' (lines {skip_lines[0]+1}-{skip_lines[-1]+1})")
+                i += 1
+                continue
+            else:
+                seen_declarations[comp_name] = i
+        
+        cleaned_lines.append(line)
+        i += 1
+    
+    code = '\n'.join(cleaned_lines)
+    
+    # ========== CLEANUP ==========
+    
+    # Fix duplicate React imports (shouldn't exist after removal, but just in case)
+    react_imports = re.findall(r"import\s+React[^;]*;?\s*\n?", code)
+    if len(react_imports) > 1:
+        for import_stmt in react_imports[1:]:
+            code = code.replace(import_stmt, '')
+    
+    # Remove consecutive empty lines (more than 2)
+    code = re.sub(r'\n{4,}', '\n\n\n', code)
+    
+    # Remove empty lines at the start
+    code = code.lstrip('\n')
+    
+    # Add helpful comment if motion is used
+    if 'motion.' in code and 'const motion' not in code:
+        code = '// motion is provided globally by the sandbox environment\n' + code
+    
+    return code
+
+
+def validate_and_fix_for_sandbox(code: str, file_type: str, filename: str) -> tuple:
+    """
+    Validate code and apply automatic fixes for sandbox execution.
+    Returns (fixed_code, validation_result)
+    """
+    # First apply automatic fixes
+    if file_type in ["javascript", "jsx"]:
+        fixed_code = auto_fix_jsx_for_sandbox(code, filename)
+    else:
+        fixed_code = code
+    
+    # Then validate
+    result = validate_generated_code(fixed_code, file_type, filename)
+    
+    return fixed_code, result
 
 
 if __name__ == "__main__":

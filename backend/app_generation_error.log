@@ -1,0 +1,21 @@
+
+==================================================
+Project: web-ecommerce-grocery-277199
+Error: name 'useState' is not defined
+Details:
+Traceback (most recent call last):
+  File "C:\Users\Admin\Projects\AltX\backend\pure_ai_generator.py", line 959, in generate_app_jsx
+    app_code = await self.generate_single_file("frontend_app", plan, project_name)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Admin\Projects\AltX\backend\pure_ai_generator.py", line 1219, in generate_single_file
+    prompt = self._build_app_prompt(plan, project_name)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Admin\Projects\AltX\backend\pure_ai_generator.py", line 3703, in _build_app_prompt
+    import React, { useState, useEffect, createContext, useContext } from 'react';
+                    ^^^^^^^^
+NameError: name 'useState' is not defined
+
+
+==================================================
+Project: web-ecommerce-grocery-367775
+Error: name 'Button' is not defined

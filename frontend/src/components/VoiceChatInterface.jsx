@@ -85,10 +85,12 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
   const lastErrorTimeRef = useRef(0);
   const errorProcessingRef = useRef(false);
   const recognitionInstanceIdRef = useRef(0);
-  const lastMessageContentRef = useRef('');
+  const lastMessageContentRef = useRef('');  // Used for deduplication in addMessage
+  const scrollContentRef = useRef('');  // Used separately for scroll detection
   const prevConversationLengthRef = useRef(0);
   const userAtBottomRef = useRef(true); // Track if user is at bottom (ref-only, no re-renders)
   const projectHistoryLoadedRef = useRef(false); // Prevent multiple loads
+  const messageIdCounterRef = useRef(0); // Stable ID counter for messages
 
   // Initialize with AI welcome message
   useEffect(() => {
@@ -96,7 +98,9 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
     
     // Start with AI welcome message
     const welcomeMessage = 'Hi! What would you like to build today?';
+    messageIdCounterRef.current = 1; // Initialize counter
     setConversation([{
+      id: 'msg-0', // Stable ID for welcome message
       type: 'ai',
       content: welcomeMessage,
       timestamp: new Date()
@@ -202,21 +206,18 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
     const container = chatContainerRef.current;
     if (!container) return;
 
-    // Check if conversation changed (new message or content updated)
-    const conversationChanged = conversation.length !== prevConversationLengthRef.current ||
-                                (conversation.length > 0 && 
-                                 lastMessageContentRef.current !== conversation[conversation.length - 1].content);
+    // Only trigger scroll if a new message was added (not on every render)
+    const newMessageAdded = conversation.length > prevConversationLengthRef.current;
     
-    if (conversationChanged) {
+    // Update the previous length ref
+    prevConversationLengthRef.current = conversation.length;
+    
+    // Only scroll if: new message added AND user was at bottom
+    if (newMessageAdded && userAtBottomRef.current) {
       const lastMessage = conversation[conversation.length - 1];
-      console.log('Conversation changed, scrolling to bottom. Last message:', lastMessage?.content?.substring(0, 50));
+      console.log('New message added, scrolling to bottom. Last message:', lastMessage?.content?.substring(0, 50));
       
-      // Store last message content to detect updates
-      if (lastMessage) {
-        lastMessageContentRef.current = lastMessage.content;
-      }
-      
-      // Scroll the last message element into view instead of manipulating scrollTop
+      // Scroll the last message element into view
       const scrollToLastMessage = (attempt = 0) => {
         if (!container) return;
         
@@ -225,21 +226,20 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
         const lastMessageElement = messageElements[messageElements.length - 1];
         
         if (lastMessageElement) {
-          lastMessageElement.scrollIntoView({ behavior: 'auto', block: 'end' });
+          // Use smooth scroll for better UX
+          lastMessageElement.scrollIntoView({ behavior: 'smooth', block: 'end' });
           userAtBottomRef.current = true;
           console.log('✅ Scrolled to last message, attempt:', attempt);
-        } else if (attempt < 10) {
-          // Retry if message not rendered yet
+        } else if (attempt < 5) {
+          // Retry if message not rendered yet (reduced retries)
           requestAnimationFrame(() => scrollToLastMessage(attempt + 1));
         }
       };
       
-      // Start scroll with animation frame
-      requestAnimationFrame(() => scrollToLastMessage(0));
-      
-      prevConversationLengthRef.current = conversation.length;
+      // Use setTimeout to let React finish rendering before scrolling
+      setTimeout(() => scrollToLastMessage(0), 50);
     }
-  }, [conversation]);
+  }, [conversation.length]); // Only depend on conversation length, not the entire array
 
   // Suggestion chips for initial conversation
   const suggestionChips = [
@@ -250,8 +250,10 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
   ];
 
   const handleSuggestionClick = (prompt) => {
-    // Add user message to conversation
+    // Add user message to conversation with stable ID
+    messageIdCounterRef.current += 1;
     const userMessage = {
+      id: `msg-${messageIdCounterRef.current}`,
       type: 'user',
       content: prompt,
       timestamp: new Date()
@@ -262,7 +264,9 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
     // Check if in demo mode
     if (isDemo) {
       // Demo flow: Show thinking message instantly (no delays)
+      messageIdCounterRef.current += 1;
       const thinkingMessage = {
+        id: `msg-${messageIdCounterRef.current}`,
         type: 'ai',
         content: "Great! I'm designing that project for you right now...",
         timestamp: new Date()
@@ -299,7 +303,9 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
       
       // After a short delay, show the confirmation message
       setTimeout(() => {
+        messageIdCounterRef.current += 1;
         const confirmationMessage = {
+          id: `msg-${messageIdCounterRef.current}`,
           type: 'ai',
           content: `Okay, I've generated the first draft of your project. Would you like me to create this project for you?`,
           timestamp: new Date(),
@@ -1373,7 +1379,7 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
   };
 
   // Add message to conversation with deduplication
-  const addMessage = (type, content) => {
+  const addMessage = useCallback((type, content) => {
     // Prevent duplicate messages within 2 seconds
     const messageKey = `${type}:${content}`;
     if (lastMessageContentRef.current === messageKey) {
@@ -1390,13 +1396,18 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
       }
     }, 2000);
     
+    // Generate a stable unique ID for this message
+    messageIdCounterRef.current += 1;
+    const messageId = `msg-${messageIdCounterRef.current}`;
+    
     const message = {
+      id: messageId,
       type,
       content,
       timestamp: new Date()
     };
     setConversation(prev => [...prev, message]);
-  };
+  }, []);
 
   // Handle project generation
   const handleProjectGeneration = async (projectSpec) => {
@@ -1850,7 +1861,8 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
     }
   };
 
-const MainContent = () => (
+  // Main content as JSX element (NOT as a component function to prevent re-mounting)
+  const mainContent = (
   <>
     <div className="voice-chat-page" style={isDemo ? { background: 'transparent', padding: '20px' } : {}}>
         {/* --- Floating Settings Panel (remains hidden) --- */}
@@ -1890,7 +1902,7 @@ const MainContent = () => (
                 <div ref={chatContainerRef} className="chatbox-messages-area">
                   <div ref={chatContentRef} className="conversation-messages">
                     {conversation.map((message, index) => (
-                      <div key={`${index}-${message.timestamp || index}`} className={`message ${message.type} fade-in`}>
+                      <div key={message.id || `msg-${index}`} className={`message ${message.type} fade-in`}>
                         {message.type === 'ai' && <div className="ai-avatar"></div>}
                         <div className={`message-bubble`}>
                           {message.isConversion ? (
@@ -2266,11 +2278,11 @@ const MainContent = () => (
         </div>
       )}
   </>
-);
+  );
 
-  return isDemo ? <MainContent /> : (
+  return isDemo ? mainContent : (
     <PageWrapper>
-      <MainContent />
+      {mainContent}
     </PageWrapper>
   );
 };
