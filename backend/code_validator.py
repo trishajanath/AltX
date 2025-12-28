@@ -735,6 +735,27 @@ def auto_fix_jsx_for_sandbox(code: str, filename: str = "component.jsx") -> str:
     code = re.sub(r"const\s+motion\s*=\s*window\.motion\s*\|\|[^;]+;?\s*\n?", '', code)
     code = re.sub(r"// Safe motion fallback[^\n]*\n(const\s+motion\s*=[^;]+;?\s*\n?)?", '', code)
     
+    # Remove createMotionFallback and createMotionComponent helper functions
+    # These are often defined before the motion object - remove them
+    # Use DOTALL to match across newlines for complex arrow functions
+    code = re.sub(r"const\s+createMotionFallback\s*=\s*\([^)]*\)\s*=>\s*React\.forwardRef\([^;]+;", '// motion is provided globally by the sandbox environment', code, flags=re.DOTALL)
+    code = re.sub(r"const\s+createMotionFallback\s*=\s*\([^)]*\)\s*=>[^;]+;?\s*\n?", '', code)
+    code = re.sub(r"const\s+createMotionComponent\s*=\s*\([^)]*\)\s*=>[^;]+;?\s*\n?", '', code)
+    
+    # Remove const motion = { ... }; block - matches multi-line motion object definition
+    # Use a more comprehensive pattern that handles nested braces
+    code = re.sub(r"const\s+motion\s*=\s*\{[\s\S]*?\n\};?\s*\n?", '', code)
+    code = re.sub(r"const\s+motion\s*=\s*\{[^}]+\};?\s*\n?", '', code)
+    
+    # Remove useInView and useScroll fallback definitions - match the full line(s)
+    code = re.sub(r"const\s+useInView\s*=\s*[^;]+;?\s*\n?", '', code)
+    code = re.sub(r"const\s+useScroll\s*=\s*[^;]+;?\s*\n?", '', code)
+    
+    # Remove framer-motion related comments
+    code = re.sub(r"// SAFE FRAMER-MOTION FALLBACKS[^\n]*\n?", '', code)
+    code = re.sub(r"// 🚨🚨 CRITICAL: IMPORT UI COMPONENTS[^\n]*\n?", '', code)
+    code = re.sub(r"// Import utility functions[^\n]*\n?", '', code)
+    
     # Remove Lucide icon imports - icons are provided globally
     code = re.sub(r"import\s*\{[^}]*\}\s*from\s*['\"]lucide-react['\"];?\s*\n?", '', code)
     
@@ -772,6 +793,18 @@ def auto_fix_jsx_for_sandbox(code: str, filename: str = "component.jsx") -> str:
     
     # Fix for= to htmlFor=
     code = re.sub(r'\sfor\s*=\s*(["{])', r' htmlFor=\1', code)
+    
+    # ========== ARROW FUNCTION CORRUPTION FIXES ==========
+    
+    # Fix corrupted arrow functions: (e) = /> to (e) =>
+    # This happens when AI generates malformed arrow syntax
+    code = re.sub(r'\)\s*=\s*/>', r') =>', code)
+    
+    # Fix other arrow function corruptions: (e) = > to (e) =>
+    code = re.sub(r'\)\s*=\s+>', r') =>', code)
+    
+    # Fix arrow with extra spaces: ( e ) = > to (e) =>
+    code = re.sub(r'\(\s*(\w+)\s*\)\s*=\s*>', r'(\1) =>', code)
     
     # Fix onclick to onClick (and similar HTML event attributes)
     html_events = {
@@ -822,9 +855,11 @@ def auto_fix_jsx_for_sandbox(code: str, filename: str = "component.jsx") -> str:
     code = code.replace('MemoryRouter', 'Router')
     
     # ========== ADD MISSING EXPORTS ==========
+    # NOTE: This is for standalone files. For sandbox mode, exports are handled differently.
+    # Skip adding exports if window.App is already set (sandbox mode)
     
-    # Check if there's a component but no export
-    if 'export default' not in code and 'export const' not in code:
+    # Check if there's a component but no export, and NOT in sandbox mode
+    if 'export default' not in code and 'export const' not in code and 'window.App' not in code:
         # Find the main component (last defined component, or one matching filename)
         component_names = re.findall(r'(?:const|function|class)\s+([A-Z]\w*)\s*[=({]', code)
         if component_names:
@@ -844,6 +879,48 @@ def auto_fix_jsx_for_sandbox(code: str, filename: str = "component.jsx") -> str:
     
     # ========== REMOVE DUPLICATE COMPONENT DECLARATIONS ==========
     
+    # Define components that should NEVER be redeclared (they exist in template/sandbox)
+    # These are UI components, icons, and utilities provided by the sandbox
+    TEMPLATE_COMPONENTS = {
+        # UI Components (from sandbox)
+        'Button', 'Input', 'Card', 'Loading', 'AnimatedText', 'Navigation',
+        
+        # Icons (from sandbox - all Lucide icons)
+        'Star', 'User', 'ShoppingCart', 'X', 'Plus', 'Minus', 'Search',
+        'Heart', 'ChevronRight', 'ChevronLeft', 'ChevronDown', 'ChevronUp',
+        'Menu', 'Close', 'Check', 'ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown', 'Home',
+        'Settings', 'Bell', 'Mail', 'Phone', 'MapPin', 'Calendar',
+        'Clock', 'Filter', 'Grid', 'List', 'Eye', 'EyeOff', 'Lock',
+        'Unlock', 'Trash', 'Trash2', 'Edit', 'Save', 'Download', 'Upload', 'Share',
+        'Link', 'Link2', 'ExternalLink', 'Copy', 'Clipboard', 'Refresh', 'RefreshCw', 'Loader', 'Loader2',
+        'AlertCircle', 'AlertTriangle', 'Info', 'HelpCircle', 'XCircle',
+        'CheckCircle', 'PlusCircle', 'MinusCircle', 'Play', 'Pause', 'Stop',
+        'SkipForward', 'SkipBack', 'Volume', 'Volume2', 'VolumeX', 'Mic', 'MicOff',
+        'Camera', 'Image', 'Film', 'Music', 'Headphones', 'Speaker', 'Radio',
+        'Wifi', 'WifiOff', 'Battery', 'Bluetooth', 'Cast', 'Monitor', 'Smartphone', 'Tablet',
+        'Laptop', 'Server', 'Database', 'Cloud', 'CloudOff', 'Sun', 'Moon', 'Power',
+        'Sunrise', 'Sunset', 'Thermometer', 'Droplet', 'Wind', 'Umbrella',
+        'Zap', 'Activity', 'TrendingUp', 'TrendingDown', 'BarChart', 'PieChart', 'LineChart',
+        'Layers', 'Layout', 'Sidebar', 'PanelLeft', 'PanelRight', 'Terminal', 'Code',
+        'FileText', 'File', 'Folder', 'FolderOpen', 'Archive', 'Package',
+        'Box', 'Gift', 'ShoppingBag', 'CreditCard', 'DollarSign', 'Percent',
+        'Tag', 'Bookmark', 'Flag', 'Award', 'Trophy', 'Target', 'Crosshair',
+        'Compass', 'Map', 'Navigation2', 'Globe', 'Anchor', 'Truck', 'Car', 'Building',
+        'Facebook', 'Twitter', 'Instagram', 'Linkedin', 'Github', 'Youtube',
+        'MoreHorizontal', 'MoreVertical', 'LogOut', 'LogIn', 'UserPlus', 'Settings2',
+        'Send', 'MessageCircle', 'Sparkles', 'Receipt', 'Wallet', 'Store',
+        'Maximize', 'Minimize', 'RotateCcw', 'Rotate', 'Sliders',
+        'ThumbsUp', 'ThumbsDown', 'Tool', 'Video', 'Voicemail', 'Watch', 'ZoomIn', 'ZoomOut',
+        'Briefcase', 'Scissors', 'Printer', 'Repeat',
+        
+        # Router components (from sandbox)
+        'Router', 'BrowserRouter', 'HashRouter', 'MemoryRouter',
+        'Routes', 'Route', 'Link', 'NavLink', 'Navigate', 'Outlet',
+        
+        # Animation components (from sandbox fallbacks)
+        'AnimatePresence',
+    }
+    
     # Find all component/const declarations and remove duplicates
     # Keep the FIRST declaration of each name
     seen_declarations = {}
@@ -853,19 +930,33 @@ def auto_fix_jsx_for_sandbox(code: str, filename: str = "component.jsx") -> str:
     
     while i < len(lines):
         line = lines[i]
+        stripped = line.strip()
+        
+        # Skip comment lines when checking for declarations
+        if stripped.startswith('//') or stripped.startswith('/*') or stripped.startswith('*'):
+            cleaned_lines.append(line)
+            i += 1
+            continue
         
         # Match component declarations (const X = ..., function X(...), const X = () => ...)
-        match = re.match(r'^(const|let|var|function)\s+([A-Z][a-zA-Z0-9_]*)\s*[=(]', line.strip())
+        # Now matches anywhere in the stripped line, not just start
+        match = re.match(r'(const|let|var|function)\s+([A-Z][a-zA-Z0-9_]*)\s*[=(]', stripped)
         
         if match:
             decl_type = match.group(1)
             comp_name = match.group(2)
             
-            if comp_name in seen_declarations:
-                # This is a duplicate! Skip this entire declaration
+            # Check if this is a template component that should NEVER be redeclared
+            # OR if it's already been declared earlier in this file
+            is_duplicate = comp_name in seen_declarations
+            is_template_component = comp_name in TEMPLATE_COMPONENTS
+            
+            if is_duplicate or is_template_component:
+                # This is a duplicate or a template component! Skip this entire declaration
                 # Need to find where it ends (handle multi-line declarations)
                 brace_count = 0
                 paren_count = 0
+                angle_count = 0  # For JSX
                 started = False
                 skip_lines = [i]
                 
@@ -876,11 +967,16 @@ def auto_fix_jsx_for_sandbox(code: str, filename: str = "component.jsx") -> str:
                             brace_count += 1
                         else:
                             paren_count += 1
+                    elif char == '<':
+                        started = True
+                        angle_count += 1
                     elif char in '})':
                         if char == '}':
                             brace_count -= 1
                         else:
                             paren_count -= 1
+                    elif char == '>':
+                        angle_count = max(0, angle_count - 1)
                 
                 # If not balanced, continue to find the end
                 while (brace_count > 0 or paren_count > 0 or not started) and i + 1 < len(lines):
@@ -904,7 +1000,8 @@ def auto_fix_jsx_for_sandbox(code: str, filename: str = "component.jsx") -> str:
                     if next_line.rstrip().endswith(';') and brace_count <= 0 and paren_count <= 0:
                         break
                 
-                print(f"🔧 Removed duplicate declaration of '{comp_name}' (lines {skip_lines[0]+1}-{skip_lines[-1]+1})")
+                reason = "template component" if is_template_component else "duplicate"
+                print(f"🔧 Removed {reason} declaration of '{comp_name}' (lines {skip_lines[0]+1}-{skip_lines[-1]+1})")
                 i += 1
                 continue
             else:
@@ -914,6 +1011,22 @@ def auto_fix_jsx_for_sandbox(code: str, filename: str = "component.jsx") -> str:
         i += 1
     
     code = '\n'.join(cleaned_lines)
+    
+    # ========== UTILITY FUNCTION REMOVAL ==========
+    
+    # Remove cn utility function definitions (provided globally by sandbox)
+    # Match: const cn = (...) => { ... }
+    # Match: function cn(...) { ... }
+    # Match: const cn = (...inputs) => twMerge(clsx(...inputs))
+    code = re.sub(r'(?:const|let|var)\s+cn\s*=\s*\([^)]*\)\s*=>\s*\{[^}]*\}[;,]?\s*\n?', '', code)
+    code = re.sub(r'(?:const|let|var)\s+cn\s*=\s*\([^)]*\)\s*=>\s*twMerge\s*\([^)]*\)[;,]?\s*\n?', '', code)
+    code = re.sub(r'function\s+cn\s*\([^)]*\)\s*\{[^}]*\}[;,]?\s*\n?', '', code)
+    
+    # Remove clsx helper definitions
+    code = re.sub(r'(?:const|let|var)\s+clsx\s*=\s*[^;]+;?\s*\n?', '', code)
+    
+    # Remove twMerge helper definitions
+    code = re.sub(r'(?:const|let|var)\s+twMerge\s*=\s*[^;]+;?\s*\n?', '', code)
     
     # ========== CLEANUP ==========
     

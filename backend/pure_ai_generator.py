@@ -3253,42 +3253,237 @@ LAYOUT-SPECIFIC REQUIREMENTS:
 		
 		design_instructions += '"""'
 		
-		if design_features:
-			design_instructions += f"\n\n🎯 CUSTOM DESIGN REQUIREMENTS (USER-REQUESTED - MANDATORY TO IMPLEMENT):\n"
-			for design_feature in design_features:
-				design_instructions += f"- {design_feature}\n"
+		# Also check description for design preferences
+		description_lower = description.lower() if description else ''
+		all_user_text = ' '.join([description_lower] + [str(df).lower() for df in design_features + functional_features])
+		
+		if design_features or any(keyword in description_lower for keyword in ['design', 'color', 'theme', 'style', 'dark', 'light', 'modern', 'minimalist', 'elegant', 'bold']):
+			design_instructions += f"\n\n🎯 USER'S EXACT REQUIREMENTS (MANDATORY - DO NOT IGNORE!):\n"
+			design_instructions += f"📝 User Description: \"{description}\"\n"
+			if design_features:
+				design_instructions += f"🎨 Design Requests: {', '.join(design_features)}\n"
+			if functional_features:
+				design_instructions += f"⚙️ Features: {', '.join(functional_features)}\n"
 			
-			# Enhanced color/theme detection and handling
-			user_text_combined = ' '.join(str(df).lower() for df in design_features)
+			design_instructions += "\n⚠️ IMPORTANT: The design MUST reflect what the user described above!\n"
+			design_instructions += "- If they want dark theme → use dark backgrounds and light text\n"
+			design_instructions += "- If they mention a specific industry → use appropriate imagery and colors\n"
+			design_instructions += "- If they want minimalist → use clean layouts with lots of whitespace\n"
+			design_instructions += "- If they want bold → use strong colors and impactful typography\n"
 			
-			# Color scheme detection
-			if any(color in user_text_combined for color in ['blue', 'navy', 'cyan', 'teal']):
-				design_instructions += "- 🎨 USER REQUESTED BLUE THEME: Use bg-gradient-to-br from-blue-600 via-cyan-500 to-teal-400, blue-500 accents, blue-100 backgrounds\n"
-			elif any(color in user_text_combined for color in ['red', 'crimson', 'rose', 'pink']):
-				design_instructions += "- 🎨 USER REQUESTED RED/PINK THEME: Use bg-gradient-to-br from-red-500 via-pink-500 to-rose-400, red-500 accents, red-50 backgrounds\n"
-			elif any(color in user_text_combined for color in ['green', 'emerald', 'lime', 'mint']):
-				design_instructions += "- 🎨 USER REQUESTED GREEN THEME: Use bg-gradient-to-br from-green-500 via-emerald-500 to-teal-400, green-500 accents, green-50 backgrounds\n"
-			elif any(color in user_text_combined for color in ['purple', 'violet', 'indigo', 'lavender']):
-				design_instructions += "- 🎨 USER REQUESTED PURPLE THEME: Use bg-gradient-to-br from-purple-600 via-violet-500 to-indigo-400, purple-500 accents, purple-50 backgrounds\n"
-			elif any(color in user_text_combined for color in ['orange', 'amber', 'yellow', 'gold']):
-				design_instructions += "- 🎨 USER REQUESTED WARM THEME: Use bg-gradient-to-br from-amber-400 via-orange-500 to-red-600, orange-500 accents, amber-50 backgrounds\n"
-			elif any(theme in user_text_combined for theme in ['dark', 'black', 'midnight', 'night']):
-				design_instructions += "- 🎨 USER REQUESTED DARK THEME: Use bg-gray-900/bg-black main background, white text, dark cards with subtle borders\n"
-			elif any(theme in user_text_combined for theme in ['light', 'white', 'minimal', 'clean']):
-				design_instructions += "- 🎨 USER REQUESTED LIGHT THEME: Use bg-white/bg-gray-50 main background, dark text, light cards with soft shadows\n"
+			# Enhanced color/theme detection and handling (now including description)
+			user_text_combined = all_user_text
+			
+			# Color scheme detection with more patterns
+			if any(color in user_text_combined for color in ['blue', 'navy', 'cyan', 'teal', 'ocean', 'sky', 'azure']):
+				design_instructions += "\n🎨 DETECTED BLUE/OCEAN THEME: Use bg-gradient-to-br from-blue-600 via-cyan-500 to-teal-400, blue-500 accents, blue-100 backgrounds\n"
+			elif any(color in user_text_combined for color in ['red', 'crimson', 'rose', 'pink', 'cherry', 'ruby']):
+				design_instructions += "\n🎨 DETECTED RED/PINK THEME: Use bg-gradient-to-br from-red-500 via-pink-500 to-rose-400, red-500 accents, red-50 backgrounds\n"
+			elif any(color in user_text_combined for color in ['green', 'emerald', 'lime', 'mint', 'forest', 'sage', 'nature', 'eco']):
+				design_instructions += "\n🎨 DETECTED GREEN/NATURE THEME: Use bg-gradient-to-br from-green-500 via-emerald-500 to-teal-400, green-500 accents, green-50 backgrounds\n"
+			elif any(color in user_text_combined for color in ['purple', 'violet', 'indigo', 'lavender', 'royal', 'luxur']):
+				design_instructions += "\n🎨 DETECTED PURPLE/LUXURY THEME: Use bg-gradient-to-br from-purple-600 via-violet-500 to-indigo-400, purple-500 accents, purple-50 backgrounds\n"
+			elif any(color in user_text_combined for color in ['orange', 'amber', 'yellow', 'gold', 'sunset', 'warm', 'energetic']):
+				design_instructions += "\n🎨 DETECTED WARM/ENERGETIC THEME: Use bg-gradient-to-br from-amber-400 via-orange-500 to-red-600, orange-500 accents, amber-50 backgrounds\n"
+			elif any(theme in user_text_combined for theme in ['dark', 'black', 'midnight', 'night', 'sleek', 'professional']):
+				design_instructions += "\n🎨 DETECTED DARK/PROFESSIONAL THEME: Use bg-gray-900/bg-black main background, white text, dark cards with subtle borders\n"
+			elif any(theme in user_text_combined for theme in ['light', 'white', 'minimal', 'clean', 'simple', 'bright']):
+				design_instructions += "\n🎨 DETECTED LIGHT/MINIMAL THEME: Use bg-white/bg-gray-50 main background, dark text, light cards with soft shadows\n"
+			
+			# Industry-specific design guidance
+			if any(industry in user_text_combined for industry in ['medical', 'health', 'doctor', 'hospital', 'clinic']):
+				design_instructions += "\n🏥 MEDICAL INDUSTRY: Use calming blues/greens, professional feel, trust-inspiring design, clear navigation\n"
+			elif any(industry in user_text_combined for industry in ['finance', 'bank', 'money', 'investment', 'trading']):
+				design_instructions += "\n💰 FINANCE INDUSTRY: Use navy/gold colors, conservative typography, data visualizations, professional trust signals\n"
+			elif any(industry in user_text_combined for industry in ['food', 'restaurant', 'cafe', 'cook', 'recipe', 'meal']):
+				design_instructions += "\n🍕 FOOD/RESTAURANT INDUSTRY: Use warm appetizing colors (oranges, reds), beautiful food imagery, menu-style layouts\n"
+			elif any(industry in user_text_combined for industry in ['tech', 'software', 'startup', 'saas', 'app']):
+				design_instructions += "\n💻 TECH/STARTUP: Use modern gradients, glassmorphism, futuristic feel, clean data displays\n"
+			elif any(industry in user_text_combined for industry in ['fashion', 'clothing', 'style', 'boutique', 'luxury']):
+				design_instructions += "\n👗 FASHION/LUXURY: Use elegant typography, lots of whitespace, high-quality imagery, sophisticated color palette\n"
+			elif any(industry in user_text_combined for industry in ['fitness', 'gym', 'sport', 'workout', 'exercise']):
+				design_instructions += "\n💪 FITNESS/SPORTS: Use energetic colors (orange, red), bold typography, action imagery, motivational feel\n"
+			elif any(industry in user_text_combined for industry in ['education', 'school', 'learn', 'course', 'student']):
+				design_instructions += "\n📚 EDUCATION: Use friendly colors, clear hierarchy, accessible design, encouraging feel\n"
+			elif any(industry in user_text_combined for industry in ['travel', 'hotel', 'vacation', 'tour', 'flight']):
+				design_instructions += "\n✈️ TRAVEL/HOSPITALITY: Use inspiring imagery, dreamy colors, adventure feel, easy booking flows\n"
+		else:
+			# Default enhancement for projects without specific design mentions
+			design_instructions += f"\n\n🎯 PROJECT CONTEXT (ADAPT DESIGN ACCORDINGLY):\n"
+			design_instructions += f"📝 Description: \"{description}\"\n"
+			design_instructions += f"⚙️ Features: {', '.join(features_str)}\n"
+			design_instructions += "\n💡 Since no specific design was requested, create a modern, professional design that matches the project type!\n"
 		
 		return f"""🚨 CRITICAL ERROR PREVENTION - MUST FOLLOW:
-- NEVER import from 'framer-motion' directly - use the provided fallbacks in template below
-- NEVER use AnimatePresence, motion, useScroll without the fallback definitions
-- ALL framer-motion usage MUST use the safe fallbacks to prevent ReferenceError crashes
-- NEVER use 'exports', 'require', or 'module' in React components
-- ONLY use ES6 imports: import React, {{ useState }} from 'react'
-- NO CommonJS syntax - only ES modules
-- ALL components must be defined before use
-- NO undefined variables or functions
-- USE proper React patterns only
-- ALWAYS use React.createContext and React.useContext (NOT named imports)
-- CONSISTENT PATTERN: const AuthContext = React.createContext(null); const useAuth = () => React.useContext(AuthContext);
+
+🌐 BROWSER SANDBOX ENVIRONMENT - CRITICAL REQUIREMENTS:
+════════════════════════════════════════════════════════
+This code runs in a BROWSER SANDBOX with globals pre-defined.
+The following are ALREADY AVAILABLE GLOBALLY - DO NOT IMPORT OR REDEFINE:
+
+✅ REACT (Global): React, useState, useEffect, useCallback, useMemo, useRef, useContext, useReducer
+✅ ROUTER (Global): Router, Routes, Route, Link, NavLink, Navigate, useNavigate, useLocation, useParams
+✅ ANIMATION (Global): motion, AnimatePresence, useInView, useScroll
+✅ UI COMPONENTS (Global): Button, Input, Card, Loading, AnimatedText, Navigation
+✅ ICONS (Global): User, Search, Menu, X, Plus, Minus, Heart, Star, ShoppingCart, Trash2, Edit, Save, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Home, Settings, Bell, Mail, Phone, MapPin, etc.
+✅ UTILITIES (Global): cn (className utility)
+
+🚨 ABSOLUTE RULES FOR SANDBOX COMPATIBILITY:
+1. DO NOT use import statements - everything is global
+2. DO NOT use export statements - component is assigned to window.App
+3. DO NOT redefine motion, AnimatePresence, or any icons
+4. DO NOT import from 'react', 'react-router-dom', 'framer-motion', or 'lucide-react'
+5. USE motion.div, motion.span directly (they are global)
+6. USE Router, Routes, Route, Link, NavLink directly (they are global)
+7. USE Button, Input, Card, Loading directly (they are global)
+8. USE React.createContext and React.useContext (React is global)
+
+✅ CORRECT PATTERN:
+```jsx
+// NO IMPORTS NEEDED - everything is global!
+
+const AuthContext = React.createContext(null);
+const useAuth = () => React.useContext(AuthContext);
+
+const App = () => {{
+  const [user, setUser] = useState(null);
+  const navigate = useNavigate();
+  const location = useLocation();
+  
+  return (
+    <Router>
+      <motion.div className="min-h-screen">
+        <NavLink to="/" className={{location.pathname === '/' ? 'text-blue-500' : 'text-gray-600'}}>Home</NavLink>
+        <Button onClick={{() => navigate('/dashboard')}}>Go to Dashboard</Button>
+        <Routes>
+          <Route path="/" element={{<HomePage />}} />
+        </Routes>
+      </motion.div>
+    </Router>
+  );
+}};
+
+const AppWrapper = () => (
+  <Router>
+    <App />
+  </Router>
+);
+```
+
+❌ WRONG - WILL CAUSE ERRORS:
+```jsx
+import React, {{ useState }} from 'react';  // ❌ NO IMPORTS
+import {{ motion }} from 'framer-motion';   // ❌ motion is global
+import {{ ShoppingCart }} from 'lucide-react'; // ❌ icons are global
+export default App; // ❌ NO EXPORTS
+
+const motion = {{ div: ... }}; // ❌ DON'T REDEFINE - it's global!
+```
+
+📋 SANDBOX HTML TEMPLATE (Your code runs inside this):
+════════════════════════════════════════════════════════
+```html
+<!DOCTYPE html>
+<html>
+<head>
+  <script src="react@18/umd/react.production.min.js"></script>
+  <script src="react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="framer-motion/dist/framer-motion.umd.min.js"></script>
+  <script src="@babel/standalone/babel.min.js"></script>
+  <link href="tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    // ═══ THESE ARE ALREADY DEFINED BEFORE YOUR CODE RUNS ═══
+    const {{ useState, useEffect, useCallback, useMemo, useRef, useContext }} = React;
+    
+    // Router (hash-based, works without react-router-dom package)
+    // Router, Routes, Route, Link, NavLink, Navigate, useNavigate, useLocation, useParams
+    
+    // Motion (framer-motion loaded globally)
+    // motion.div, motion.span, motion.button, etc., AnimatePresence
+    
+    // Icons (simple SVG components)
+    // User, Search, Menu, X, Plus, Minus, Heart, Star, ShoppingCart, etc.
+    
+    // UI Components
+    // Button, Input, Card, Loading, AnimatedText, Navigation
+    
+    // Utilities
+    // cn() - className utility like clsx/tailwind-merge
+    
+    // ═══ YOUR App.jsx CODE GOES HERE (NO IMPORTS/EXPORTS!) ═══
+    
+    const App = () => {{
+      // Your component code...
+    }};
+    
+    const AppWrapper = () => (<Router><App /></Router>);
+    window.App = AppWrapper;
+    
+    // ═══ RENDERING (HANDLED BY SANDBOX) ═══
+    ReactDOM.createRoot(document.getElementById('root')).render(
+      React.createElement(window.App)
+    );
+  </script>
+</body>
+</html>
+```
+════════════════════════════════════════════════════════
+
+🎯 YOUR OUTPUT FORMAT - Generate ONLY the component code:
+```jsx
+// NO IMPORTS - everything is global!
+
+// Contexts (use React.createContext)
+const AuthContext = React.createContext(null);
+const useAuth = () => React.useContext(AuthContext);
+
+// Page Components
+const HomePage = () => (
+  <motion.div className="min-h-screen bg-gradient-to-br from-blue-600 to-purple-700">
+    <h1 className="text-4xl font-bold text-white">Welcome</h1>
+    <Button onClick={{() => navigate('/products')}}>Shop Now</Button>
+  </motion.div>
+);
+
+const ProductsPage = () => {{
+  const [products, setProducts] = useState([]);
+  const {{ addToCart }} = useCart();
+  // ... full implementation
+}};
+
+// Main App with Router
+const App = () => {{
+  const [user, setUser] = useState(null);
+  const [cart, setCart] = useState([]);
+  const location = useLocation();
+  
+  return (
+    <AuthContext.Provider value={{{{ user, setUser }}}}>
+      <nav>
+        <NavLink to="/">Home</NavLink>
+        <NavLink to="/products">Products</NavLink>
+      </nav>
+      <Routes>
+        <Route path="/" element={{<HomePage />}} />
+        <Route path="/products" element={{<ProductsPage />}} />
+      </Routes>
+    </AuthContext.Provider>
+  );
+}};
+
+// Wrapper with Router (REQUIRED)
+const AppWrapper = () => (
+  <Router>
+    <App />
+  </Router>
+);
+
+// NO EXPORT STATEMENT - sandbox assigns window.App = AppWrapper
+```
+════════════════════════════════════════════════════════
 
 🚨🚨🚨 CRITICAL: NO PLACEHOLDER OR FAKE CODE ALLOWED! 🚨🚨🚨
 ═══════════════════════════════════════════════════════════════════════
@@ -3565,7 +3760,8 @@ MANDATORY FULL-STACK INTEGRATION REQUIREMENTS:
    ```
 
 2. MULTI-PAGE APPLICATION WITH REACT ROUTER (ALWAYS INCLUDE):
-   - Import and configure React Router: import {{ BrowserRouter, Routes, Route, Link, Navigate, useNavigate }} from 'react-router-dom'
+   - Router components are GLOBAL - DO NOT import from 'react-router-dom'
+   - Use: Router, Routes, Route, Link, NavLink, Navigate, useNavigate, useLocation, useParams (all global)
    - Create 5-8 separate page components (HomePage, AboutPage, FeaturesPage, ContactPage, DashboardPage, ProfilePage, etc.)
    - Implement navigation menu with active route highlighting using useLocation()
    - Protected routes that require authentication with Navigate redirects

@@ -1230,11 +1230,22 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
     
     # Process component files properly for browser compilation
     components_code = ""
+    
+    # UI components that are provided globally by the sandbox - skip loading their separate files
+    SANDBOX_PROVIDED_COMPONENTS = {
+        'Button', 'Input', 'Card', 'Loading', 'AnimatedText', 'Navigation'
+    }
+    
     for file_path, content in files_content.items():
         # Include all JSX files in components folder (including subfolders like ui/)
         if "components/" in file_path and file_path.endswith(".jsx"):
             # Extract component name from filename
             component_name = file_path.split("/")[-1].replace(".jsx", "")
+            
+            # SKIP UI components that are provided globally by the sandbox
+            if component_name in SANDBOX_PROVIDED_COMPONENTS:
+                print(f"⏭️ Skipping {component_name}.jsx - provided globally by sandbox")
+                continue
             
             # Clean up the component content for browser compilation
             cleaned_content = content
@@ -1300,13 +1311,11 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
     <!-- SANDBOX PREVIEW ONLY: Using CDN for quick prototyping -->
     <!-- In production, use built assets with npm/yarn build -->
     
-    <!-- Load React first -->
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- Load React first - using production for stability -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     
-    <!-- Try to load React Router (with fallback handling) -->
-    <script crossorigin src="https://unpkg.com/react-router@6/dist/umd/react-router.development.js"></script>
-    <script crossorigin src="https://unpkg.com/react-router-dom@6/dist/umd/react-router-dom.development.js"></script>
+    <!-- Skip external React Router - we use our built-in simple router -->
     
     <!-- Load Framer Motion for animations (with robust fallback) -->
     <script src="https://cdn.jsdelivr.net/npm/framer-motion@10.16.16/dist/framer-motion.umd.min.js"></script>
@@ -1402,13 +1411,50 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
         console.log('✅ CommonJS globals defined for Babel compatibility');
     </script>
     
-    <!-- Load TailwindCSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Use pre-built Tailwind CSS instead of JIT CDN to avoid conflicts -->
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     
     <!-- Load clsx from CDN -->
     <script src="https://unpkg.com/clsx@2.0.0/dist/clsx.min.js"></script>
     
     <style>
+        /* Additional utility classes not in Tailwind 2.2 */
+        .bg-gray-900 {{ background-color: #111827; }}
+        .bg-gray-800 {{ background-color: #1f2937; }}
+        .bg-gray-700 {{ background-color: #374151; }}
+        .text-gray-100 {{ color: #f3f4f6; }}
+        .text-gray-200 {{ color: #e5e7eb; }}
+        .text-gray-300 {{ color: #d1d5db; }}
+        .text-gray-400 {{ color: #9ca3af; }}
+        .bg-indigo-600 {{ background-color: #4f46e5; }}
+        .bg-indigo-500 {{ background-color: #6366f1; }}
+        .text-indigo-400 {{ color: #818cf8; }}
+        .hover\\:bg-indigo-700:hover {{ background-color: #4338ca; }}
+        .from-indigo-600 {{ --tw-gradient-from: #4f46e5; }}
+        .via-purple-500 {{ --tw-gradient-stops: var(--tw-gradient-from), #a855f7, var(--tw-gradient-to, rgba(168, 85, 247, 0)); }}
+        .to-pink-500 {{ --tw-gradient-to: #ec4899; }}
+        .bg-gradient-to-r {{ background-image: linear-gradient(to right, var(--tw-gradient-stops)); }}
+        .bg-gradient-to-br {{ background-image: linear-gradient(to bottom right, var(--tw-gradient-stops)); }}
+        .backdrop-blur-md {{ backdrop-filter: blur(12px); }}
+        .backdrop-blur-lg {{ backdrop-filter: blur(16px); }}
+        .bg-opacity-80 {{ --tw-bg-opacity: 0.8; }}
+        .bg-opacity-90 {{ --tw-bg-opacity: 0.9; }}
+        .ring-2 {{ box-shadow: 0 0 0 2px var(--tw-ring-color); }}
+        .ring-indigo-400 {{ --tw-ring-color: #818cf8; }}
+        .transition-all {{ transition-property: all; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); transition-duration: 150ms; }}
+        .duration-300 {{ transition-duration: 300ms; }}
+        .animate-pulse {{ animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }}
+        .animate-spin {{ animation: spin 1s linear infinite; }}
+        @keyframes pulse {{ 0%, 100% {{ opacity: 1; }} 50% {{ opacity: .5; }} }}
+        @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+        .line-clamp-2 {{ display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }}
+        .aspect-square {{ aspect-ratio: 1 / 1; }}
+        .aspect-video {{ aspect-ratio: 16 / 9; }}
+        .scroll-smooth {{ scroll-behavior: smooth; }}
+        .snap-x {{ scroll-snap-type: x mandatory; }}
+        .snap-start {{ scroll-snap-align: start; }}
+        .scrollbar-hide {{ -ms-overflow-style: none; scrollbar-width: none; }}
+        .scrollbar-hide::-webkit-scrollbar {{ display: none; }}
         {index_css}
         body {{ margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif; }}
         #root {{ width: 100%; height: 100vh; }}
@@ -1473,26 +1519,21 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
         window.Fragment = React.Fragment;
         window.createElement = React.createElement;
         
-        // Filter invalid props from DOM elements to prevent React warnings
-        const INVALID_DOM_PROPS = new Set([
-            'as', 'variant', 'size', 'color', 'isActive', 'isDisabled', 'isLoading',
+        // Helper function to filter invalid props from DOM elements
+        // Using an array instead of Set to avoid potential conflicts with React internals
+        const INVALID_DOM_PROPS = ['as', 'variant', 'size', 'color', 'isActive', 'isDisabled', 'isLoading',
             'leftIcon', 'rightIcon', 'colorScheme', 'spacing', 'direction', 'align',
-            'justify', 'wrap', 'shouldWrapChildren', 'isTruncated', 'noOfLines'
-        ]);
+            'justify', 'wrap', 'shouldWrapChildren', 'isTruncated', 'noOfLines'];
         
-        const originalCreateElement = React.createElement;
-        React.createElement = function(type, props, ...children) {{
-            // Only filter props for native HTML elements (strings like 'div', 'button')
-            if (typeof type === 'string' && props) {{
-                const filteredProps = {{}};
-                for (const key in props) {{
-                    if (!INVALID_DOM_PROPS.has(key)) {{
-                        filteredProps[key] = props[key];
-                    }}
+        window.filterDomProps = (props) => {{
+            if (!props) return props;
+            const filteredProps = {{}};
+            for (const key in props) {{
+                if (!INVALID_DOM_PROPS.includes(key)) {{
+                    filteredProps[key] = props[key];
                 }}
-                return originalCreateElement.call(this, type, filteredProps, ...children);
             }}
-            return originalCreateElement.call(this, type, props, ...children);
+            return filteredProps;
         }};
         
         // Create a simple, reliable router that doesn't depend on external libraries
@@ -1547,11 +1588,52 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
                     onClick: handleClick,
                     className: className,
                     style: {{
-                        color: 'blue',
-                        textDecoration: 'underline',
                         cursor: 'pointer',
                         ...style
                     }},
+                    ...props
+                }}, children);
+            }};
+            
+            // NavLink - like Link but with active state awareness
+            const SimpleNavLink = ({{ to, children, className, style, activeClassName, activeStyle, ...props }}) => {{
+                const [currentPath, setCurrentPath] = useState(window.location.hash.slice(1) || '/');
+                
+                useEffect(() => {{
+                    const handleHashChange = () => setCurrentPath(window.location.hash.slice(1) || '/');
+                    window.addEventListener('hashchange', handleHashChange);
+                    return () => window.removeEventListener('hashchange', handleHashChange);
+                }}, []);
+                
+                const handleClick = (e) => {{
+                    e.preventDefault();
+                    window.location.hash = to;
+                }};
+                
+                const isActive = currentPath === to || (to !== '/' && currentPath.startsWith(to));
+                
+                // Handle className - can be string or function
+                let finalClassName = className;
+                if (typeof className === 'function') {{
+                    finalClassName = className({{ isActive }});
+                }} else if (isActive && activeClassName) {{
+                    finalClassName = `${{className || ''}} ${{activeClassName}}`.trim();
+                }}
+                
+                // Handle style - can be object or function
+                let finalStyle = style || {{}};
+                if (typeof style === 'function') {{
+                    finalStyle = style({{ isActive }});
+                }} else if (isActive && activeStyle) {{
+                    finalStyle = {{ ...style, ...activeStyle }};
+                }}
+                
+                return React.createElement('a', {{
+                    href: `#${{to}}`,
+                    onClick: handleClick,
+                    className: finalClassName,
+                    style: {{ cursor: 'pointer', ...finalStyle }},
+                    'aria-current': isActive ? 'page' : undefined,
                     ...props
                 }}, children);
             }};
@@ -1592,11 +1674,25 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
                 return location;
             }};
             
+            // Navigate component for declarative navigation (like react-router-dom's Navigate)
+            const SimpleNavigate = ({{ to, replace = false }}) => {{
+                useEffect(() => {{
+                    if (replace) {{
+                        window.location.replace('#' + to);
+                    }} else {{
+                        window.location.hash = to;
+                    }}
+                }}, [to, replace]);
+                return null;
+            }};
+            
             return {{
                 Router: SimpleRouter,
                 Routes: SimpleRoutes,
                 Route: SimpleRoute,
                 Link: SimpleLink,
+                NavLink: SimpleNavLink,
+                Navigate: SimpleNavigate,
                 useNavigate: useSimpleNavigate,
                 useParams: useSimpleParams,
                 useLocation: useSimpleLocation
@@ -1604,13 +1700,15 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
         }};
         
         // Always use the built-in simple hash router to avoid external deps
-        let Router, Routes, Route, Link, useNavigate, useParams, useLocation;
+        let Router, Routes, Route, Link, NavLink, Navigate, useNavigate, useParams, useLocation;
         console.log('✅ Using built-in simple hash router (no external history/react-router)');
         const simpleRouter = createSimpleRouter();
         Router = simpleRouter.Router;
         Routes = simpleRouter.Routes;
         Route = simpleRouter.Route;
         Link = simpleRouter.Link;
+        NavLink = simpleRouter.NavLink;
+        Navigate = simpleRouter.Navigate;
         useNavigate = simpleRouter.useNavigate;
         useParams = simpleRouter.useParams;
         useLocation = simpleRouter.useLocation;
@@ -1623,6 +1721,8 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
         window.Routes = Routes;
         window.Route = Route;
         window.Link = Link;
+        window.NavLink = NavLink;
+        window.Navigate = Navigate;
         window.useNavigate = useNavigate;
         window.useParams = useParams;
         window.useLocation = useLocation;
@@ -1755,6 +1855,182 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
         window.Linkedin = createIcon('Linkedin');
         window.Github = createIcon('Github');
         window.Youtube = createIcon('Youtube');
+        
+        // Audio/voice icons
+        window.Mic = createIcon('Mic');
+        window.MicOff = createIcon('MicOff');
+        window.Volume = createIcon('Volume');
+        window.VolumeX = createIcon('VolumeX');
+        window.Headphones = createIcon('Headphones');
+        window.Speaker = createIcon('Speaker');
+        window.Music = createIcon('Music');
+        window.Radio = createIcon('Radio');
+        
+        // Additional commonly used icons
+        window.ArrowRight = createIcon('ArrowRight');
+        window.ArrowLeft = createIcon('ArrowLeft');
+        window.ArrowUp = createIcon('ArrowUp');
+        window.ArrowDown = createIcon('ArrowDown');
+        window.RefreshCw = createIcon('RefreshCw');
+        window.RotateCcw = createIcon('RotateCcw');
+        window.Trash = createIcon('Trash');
+        window.XCircle = createIcon('XCircle');
+        window.PlusCircle = createIcon('PlusCircle');
+        window.MinusCircle = createIcon('MinusCircle');
+        window.HelpCircle = createIcon('HelpCircle');
+        window.AlertTriangle = createIcon('AlertTriangle');
+        window.Power = createIcon('Power');
+        window.Moon = createIcon('Moon');
+        window.Sun = createIcon('Sun');
+        window.Cloud = createIcon('Cloud');
+        window.CloudOff = createIcon('CloudOff');
+        window.Droplet = createIcon('Droplet');
+        window.Wind = createIcon('Wind');
+        window.Thermometer = createIcon('Thermometer');
+        window.Navigation2 = createIcon('Navigation2');
+        window.Anchor = createIcon('Anchor');
+        window.Car = createIcon('Car');
+        window.Home = createIcon('Home');
+        window.Building = createIcon('Building');
+        window.Server = createIcon('Server');
+        window.Box = createIcon('Box');
+        window.File = createIcon('File');
+        window.FolderOpen = createIcon('FolderOpen');
+        window.Sidebar = createIcon('Sidebar');
+        window.PanelLeft = createIcon('PanelLeft');
+        window.PanelRight = createIcon('PanelRight');
+        window.Maximize = createIcon('Maximize');
+        window.Minimize = createIcon('Minimize');
+        window.X2 = createIcon('X');
+        window.Refresh = createIcon('Refresh');
+        window.SkipForward = createIcon('SkipForward');
+        window.SkipBack = createIcon('SkipBack');
+        window.Stop = createIcon('Stop');
+        window.FastForward = createIcon('FastForward');
+        window.Rewind = createIcon('Rewind');
+        window.Film = createIcon('Film');
+        window.Cast = createIcon('Cast');
+        window.Bluetooth = createIcon('Bluetooth');
+        window.WifiOff = createIcon('WifiOff');
+        window.Laptop = createIcon('Laptop');
+        window.DollarSign = createIcon('DollarSign');
+        window.Percent = createIcon('Percent');
+        window.Flag = createIcon('Flag');
+        window.Trophy = createIcon('Trophy');
+        window.Crosshair = createIcon('Crosshair');
+        window.Map = createIcon('Map');
+        window.Sunrise = createIcon('Sunrise');
+        window.Sunset = createIcon('Sunset');
+        window.LineChart = createIcon('LineChart');
+        
+        // ========== UI COMPONENTS (SANDBOX GLOBALS) ==========
+        // These are essential UI components provided globally for the sandbox
+        
+        // Button Component - supports multiple variants and sizes
+        const Button = ({{ 
+            children, 
+            variant = 'default', 
+            size = 'md', 
+            disabled = false, 
+            onClick, 
+            className = '', 
+            type = 'button',
+            ...props 
+        }}) => {{
+            const baseClasses = 'inline-flex items-center justify-center font-medium rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed';
+            
+            const variants = {{
+                default: 'bg-blue-600 hover:bg-blue-700 text-white shadow-md hover:shadow-lg focus:ring-blue-500',
+                primary: 'bg-blue-600 hover:bg-blue-700 text-white shadow-md hover:shadow-lg focus:ring-blue-500',
+                secondary: 'bg-gray-200 hover:bg-gray-300 text-gray-800 focus:ring-gray-400',
+                outline: 'border-2 border-current bg-transparent hover:bg-gray-100 text-current focus:ring-gray-400',
+                ghost: 'bg-transparent hover:bg-gray-100 text-gray-700 focus:ring-gray-400',
+                accent: 'bg-purple-600 hover:bg-purple-700 text-white shadow-md hover:shadow-lg focus:ring-purple-500',
+                danger: 'bg-red-600 hover:bg-red-700 text-white shadow-md hover:shadow-lg focus:ring-red-500',
+                success: 'bg-green-600 hover:bg-green-700 text-white shadow-md hover:shadow-lg focus:ring-green-500',
+                link: 'bg-transparent text-blue-600 hover:text-blue-700 hover:underline p-0'
+            }};
+            
+            const sizes = {{
+                xs: 'px-2 py-1 text-xs',
+                sm: 'px-3 py-1.5 text-sm',
+                md: 'px-4 py-2 text-sm',
+                lg: 'px-6 py-3 text-base',
+                xl: 'px-8 py-4 text-lg'
+            }};
+            
+            const variantClass = variants[variant] || variants.default;
+            const sizeClass = sizes[size] || sizes.md;
+            
+            return React.createElement('button', {{
+                type,
+                className: `${{baseClasses}} ${{variantClass}} ${{sizeClass}} ${{className}}`,
+                disabled,
+                onClick,
+                ...props
+            }}, children);
+        }};
+        window.Button = Button;
+        
+        // Input Component - styled form input
+        const Input = ({{ 
+            type = 'text', 
+            placeholder = '', 
+            value, 
+            onChange, 
+            className = '', 
+            disabled = false,
+            ...props 
+        }}) => {{
+            const baseClasses = 'w-full px-4 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 disabled:bg-gray-100 disabled:cursor-not-allowed';
+            
+            return React.createElement('input', {{
+                type,
+                placeholder,
+                value,
+                onChange,
+                disabled,
+                className: `${{baseClasses}} ${{className}}`,
+                ...props
+            }});
+        }};
+        window.Input = Input;
+        
+        // Card Component - container with styling
+        const Card = ({{ children, className = '', ...props }}) => {{
+            const baseClasses = 'bg-white rounded-xl shadow-md border border-gray-100 overflow-hidden';
+            
+            return React.createElement('div', {{
+                className: `${{baseClasses}} ${{className}}`,
+                ...props
+            }}, children);
+        }};
+        window.Card = Card;
+        
+        // Loading Component - spinner/loading indicator
+        const Loading = ({{ size = 'md', className = '' }}) => {{
+            const sizes = {{
+                sm: 'w-4 h-4',
+                md: 'w-8 h-8',
+                lg: 'w-12 h-12'
+            }};
+            
+            return React.createElement('div', {{
+                className: `animate-spin rounded-full border-2 border-gray-200 border-t-blue-600 ${{sizes[size] || sizes.md}} ${{className}}`
+            }});
+        }};
+        window.Loading = Loading;
+        
+        // AnimatedText Component - text with animation support
+        const AnimatedText = ({{ children, className = '', as = 'span', ...props }}) => {{
+            return React.createElement(as, {{
+                className: `transition-all duration-300 ${{className}}`,
+                ...props
+            }}, children);
+        }};
+        window.AnimatedText = AnimatedText;
+        
+        console.log('✅ UI Components loaded: Button, Input, Card, Loading, AnimatedText');
         
         // Console logger for debugging
         const originalConsoleLog = console.log;
@@ -1962,56 +2238,29 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
             }};
         }}
         
-        // Basic tailwind-merge implementation for sandbox
+        // Basic tailwind-merge implementation for sandbox (simplified, no Set)
         window.twMerge = function(...inputs) {{
             const classString = window.clsx(...inputs);
             const classes = classString.split(' ').filter(Boolean);
             
-            // Basic conflict resolution for common Tailwind patterns
-            const conflictGroups = {{
-                // Spacing
-                margin: /^-?m[trblxy]?-/,
-                padding: /^p[trblxy]?-/,
-                // Colors
-                text: /^text-/,
-                bg: /^bg-/,
-                border: /^border-/,
-                // Layout
-                display: /^(block|inline|flex|grid|hidden)$/,
-                position: /^(static|fixed|absolute|relative|sticky)$/,
-                // Sizing
-                width: /^w-/,
-                height: /^h-/,
-                // Flexbox
-                justify: /^justify-/,
-                items: /^items-/,
-                // Spacing
-                gap: /^gap-/,
-                space: /^space-[xy]-/
-            }};
-            
+            // Simple deduplication using object instead of Set
+            const seenClasses = {{}};
             const result = [];
-            const seen = new Set();
             
-            // Process classes in reverse order (last wins)
-            for (let i = classes.length - 1; i >= 0; i--) {{
+            // Process classes in order, last occurrence wins for same prefix
+            for (let i = 0; i < classes.length; i++) {{
                 const cls = classes[i];
-                let conflicted = false;
-                
-                // Check for conflicts
-                for (const [group, pattern] of Object.entries(conflictGroups)) {{
-                    if (pattern.test(cls)) {{
-                        if (seen.has(group)) {{
-                            conflicted = true;
-                            break;
-                        }} else {{
-                            seen.add(group);
-                        }}
-                    }}
-                }}
-                
-                if (!conflicted) {{
-                    result.unshift(cls);
+                // Extract base class name (e.g., 'bg' from 'bg-red-500')
+                const base = cls.split('-')[0];
+                seenClasses[base + '_' + cls] = i;
+            }}
+            
+            // Add classes that weren't overridden
+            for (let i = 0; i < classes.length; i++) {{
+                const cls = classes[i];
+                const base = cls.split('-')[0];
+                if (seenClasses[base + '_' + cls] === i) {{
+                    result.push(cls);
                 }}
             }}
             
@@ -2056,6 +2305,11 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
 def fix_jsx_content_for_sandbox(content: str, component_name: str, project_name: str) -> str:
     """Fix JSX content specifically for sandbox browser compilation"""
     import re
+    from code_validator import auto_fix_jsx_for_sandbox
+    
+    # FIRST: Apply comprehensive auto-fix from code_validator
+    # This removes duplicate declarations of sandbox-provided components (Button, Card, etc.)
+    content = auto_fix_jsx_for_sandbox(content, f"{component_name}.jsx")
     
     # CRITICAL: Remove ALL React imports - React is provided globally
     content = re.sub(r"import\s+React\s*,?\s*\{[^}]*\}\s*from\s*['\"]react['\"];?\s*\n?", '', content)
@@ -2157,6 +2411,16 @@ def fix_jsx_content_for_sandbox(content: str, component_name: str, project_name:
         # This handles the malformed export structure
         content = re.sub(r'export const (\w+) = \(\{[^}]*\}\) => \{\s*\n\s*return \(\s*\n\s*\);?\s*\n\s*\};?', 
                         r'export const \1 = ({ tasks, onToggleTask, onDeleteTask }) => {\n  return (\n    <div className="space-y-2">\n      <h2 className="text-lg font-semibold">Task List</h2>\n      <p>Tasks will be displayed here</p>\n    </div>\n  );\n};', content)
+    
+    # CRITICAL: Remove ALL export statements for sandbox mode
+    # Browser scripts cannot use ES module exports
+    content = re.sub(r'\nexport\s+default\s+\w+;?\s*$', '', content)
+    content = re.sub(r'^export\s+default\s+\w+;?\s*$', '', content, flags=re.MULTILINE)
+    content = re.sub(r'\nexport\s+\{[^}]*\};?\s*$', '', content)
+    content = re.sub(r'^export\s+\{[^}]*\};?\s*$', '', content, flags=re.MULTILINE)
+    content = re.sub(r'^export\s+const\s+', 'const ', content, flags=re.MULTILINE)
+    content = re.sub(r'^export\s+function\s+', 'function ', content, flags=re.MULTILINE)
+    content = re.sub(r'^export\s+class\s+', 'class ', content, flags=re.MULTILINE)
     
     return content
 

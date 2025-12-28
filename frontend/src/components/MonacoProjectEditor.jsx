@@ -2214,6 +2214,16 @@ The changes are live in your preview.`
               <button 
                 style={{
                   ...styles.viewToggleButton,
+                  ...(layoutMode === 'code' ? styles.viewToggleButtonActive : {})
+                }}
+                onClick={() => setLayoutMode(layoutMode === 'code' ? 'preview' : 'code')}
+                title="View Generated Code"
+              >
+                {'</>'}
+              </button>
+              <button 
+                style={{
+                  ...styles.viewToggleButton,
                   ...(activeTab === 'settings' ? styles.viewToggleButtonActive : {})
                 }}
                 onClick={() => setActiveTab(activeTab === 'settings' ? 'preview' : 'settings')}

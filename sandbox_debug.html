@@ -1,0 +1,1751 @@
+﻿
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>e-commerce-help-working-820420 - Live Preview</title>
+    <!-- SANDBOX PREVIEW ONLY: Using CDN for quick prototyping -->
+    <!-- In production, use built assets with npm/yarn build -->
+    
+    <!-- Load React first - using production for stability -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Skip external React Router - we use our built-in simple router -->
+    
+    <!-- Load Framer Motion for animations (with robust fallback) -->
+    <script src="https://cdn.jsdelivr.net/npm/framer-motion@10.16.16/dist/framer-motion.umd.min.js"></script>
+    <script>
+        // Robust motion fallback - ALWAYS create these to prevent ReferenceError
+        const createMotionComponent = (element) => {
+            return function MotionComponent(props) {
+                const { children, className, style, onClick, id, initial, animate, exit, whileHover, whileTap, whileInView, transition, variants, ...rest } = props;
+                return React.createElement(element, { className, style, onClick, id, ...rest }, children);
+            };
+        };
+        
+        // ALWAYS define motion globally - either from library or fallback
+        if (typeof motion === 'undefined') {
+            window.motion = {
+                div: createMotionComponent('div'),
+                span: createMotionComponent('span'),
+                section: createMotionComponent('section'),
+                header: createMotionComponent('header'),
+                nav: createMotionComponent('nav'),
+                main: createMotionComponent('main'),
+                footer: createMotionComponent('footer'),
+                article: createMotionComponent('article'),
+                aside: createMotionComponent('aside'),
+                h1: createMotionComponent('h1'),
+                h2: createMotionComponent('h2'),
+                h3: createMotionComponent('h3'),
+                h4: createMotionComponent('h4'),
+                p: createMotionComponent('p'),
+                a: createMotionComponent('a'),
+                button: createMotionComponent('button'),
+                input: createMotionComponent('input'),
+                form: createMotionComponent('form'),
+                ul: createMotionComponent('ul'),
+                li: createMotionComponent('li'),
+                img: createMotionComponent('img'),
+                svg: createMotionComponent('svg'),
+                path: createMotionComponent('path'),
+                label: createMotionComponent('label'),
+                textarea: createMotionComponent('textarea')
+            };
+            console.log('✅ Motion fallback components created');
+        } else {
+            console.log('✅ Framer Motion library loaded');
+        }
+        
+        // ALWAYS define AnimatePresence
+        if (typeof AnimatePresence === 'undefined') {
+            window.AnimatePresence = function AnimatePresenceFallback({ children, mode }) {
+                return children;
+            };
+        }
+        
+        // Define motion hooks
+        if (typeof useScroll === 'undefined') {
+            window.useScroll = function useScrollFallback() {
+                return { scrollYProgress: { get: () => 0, onChange: () => {} } };
+            };
+        }
+        
+        if (typeof useInView === 'undefined') {
+            window.useInView = function useInViewFallback(ref, options) {
+                return true;
+            };
+        }
+        
+        if (typeof useAnimation === 'undefined') {
+            window.useAnimation = function useAnimationFallback() {
+                return { start: () => {}, stop: () => {} };
+            };
+        }
+    </script>
+    
+    <!-- Load Babel transformer -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Define CommonJS globals to prevent "exports is not defined" errors -->
+    <script>
+        // Babel standalone sometimes generates CommonJS output
+        // Define these globals to prevent errors
+        if (typeof exports === 'undefined') {
+            window.exports = {};
+        }
+        if (typeof module === 'undefined') {
+            window.module = { exports: {} };
+        }
+        if (typeof require === 'undefined') {
+            window.require = function(name) {
+                console.warn('require() called for:', name, '- returning empty object');
+                return {};
+            };
+        }
+        console.log('✅ CommonJS globals defined for Babel compatibility');
+    </script>
+    
+    <!-- Use pre-built Tailwind CSS instead of JIT CDN to avoid conflicts -->
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    
+    <!-- Load clsx from CDN -->
+    <script src="https://unpkg.com/clsx@2.0.0/dist/clsx.min.js"></script>
+    
+    <style>
+        /* Additional utility classes not in Tailwind 2.2 */
+        .bg-gray-900 { background-color: #111827; }
+        .bg-gray-800 { background-color: #1f2937; }
+        .bg-gray-700 { background-color: #374151; }
+        .text-gray-100 { color: #f3f4f6; }
+        .text-gray-200 { color: #e5e7eb; }
+        .text-gray-300 { color: #d1d5db; }
+        .text-gray-400 { color: #9ca3af; }
+        .bg-indigo-600 { background-color: #4f46e5; }
+        .bg-indigo-500 { background-color: #6366f1; }
+        .text-indigo-400 { color: #818cf8; }
+        .hover\:bg-indigo-700:hover { background-color: #4338ca; }
+        .from-indigo-600 { --tw-gradient-from: #4f46e5; }
+        .via-purple-500 { --tw-gradient-stops: var(--tw-gradient-from), #a855f7, var(--tw-gradient-to, rgba(168, 85, 247, 0)); }
+        .to-pink-500 { --tw-gradient-to: #ec4899; }
+        .bg-gradient-to-r { background-image: linear-gradient(to right, var(--tw-gradient-stops)); }
+        .bg-gradient-to-br { background-image: linear-gradient(to bottom right, var(--tw-gradient-stops)); }
+        .backdrop-blur-md { backdrop-filter: blur(12px); }
+        .backdrop-blur-lg { backdrop-filter: blur(16px); }
+        .bg-opacity-80 { --tw-bg-opacity: 0.8; }
+        .bg-opacity-90 { --tw-bg-opacity: 0.9; }
+        .ring-2 { box-shadow: 0 0 0 2px var(--tw-ring-color); }
+        .ring-indigo-400 { --tw-ring-color: #818cf8; }
+        .transition-all { transition-property: all; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); transition-duration: 150ms; }
+        .duration-300 { transition-duration: 300ms; }
+        .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        .animate-spin { animation: spin 1s linear infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .aspect-square { aspect-ratio: 1 / 1; }
+        .aspect-video { aspect-ratio: 16 / 9; }
+        .scroll-smooth { scroll-behavior: smooth; }
+        .snap-x { scroll-snap-type: x mandatory; }
+        .snap-start { scroll-snap-align: start; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        
+/* ===============================
+   UNIQUE LAYOUT: Neumorphic 3D Interface
+   Inspiration: iOS Design, Neumorphism Trend, Soft UI | Tokenized: #f59e0b, 4rem, Space Grotesk
+   =============================== */
+
+/* Neumorphic 3D Layout */
+.neumorphic-container { 
+    background: #e0e5ec; 
+    border-radius: 2rem; 
+    box-shadow: 9px 9px 16px #a3b1c6, -9px -9px 16px #ffffff; 
+}
+.neumorphic-card { 
+    background: #e0e5ec; 
+    border-radius: 1rem; 
+    box-shadow: inset 5px 5px 10px #a3b1c6, inset -5px -5px 10px #ffffff; 
+    transition: all 0.3s ease; 
+}
+.neumorphic-card:hover { 
+    box-shadow: 5px 5px 10px #a3b1c6, -5px -5px 10px #ffffff; 
+}
+
+
+/* Layout-Specific Utility Classes */
+.layout-neumorphic_3d {
+    /* Applied to body/main container for layout-specific styling */
+    position: relative;
+    overflow-x: hidden;
+}
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+}
+
+@layer components {{
+  /* Awwwards Glass Morphism */
+  .glass-morphism {{
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+  }}
+  
+  .glass-dark {{
+    background: rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }}
+  
+  /* Award-winning Gradients */
+  .gradient-text {{
+    @apply bg-gradient-to-r from-purple-400 via-pink-500 to-red-500 bg-clip-text text-transparent;
+  }}
+  
+  .gradient-vibrant {{
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  }}
+  
+  .gradient-mesh {{
+    background: radial-gradient(circle at 20% 50%, #ff6b6b 0%, transparent 50%),
+                radial-gradient(circle at 80% 20%, #4ecdc4 0%, transparent 50%),
+                radial-gradient(circle at 40% 80%, #45b7d1 0%, transparent 50%),
+                linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  }}
+  
+  /* Modern Shadows */
+  .shadow-glow {{
+    box-shadow: 0 0 30px rgba(139, 92, 246, 0.4);
+  }}
+  
+  .shadow-float {{
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+  }}
+  
+  .shadow-vibrant {{
+    box-shadow: 0 10px 40px rgba(124, 58, 237, 0.3);
+  }}
+  
+  /* Interactive Elements */
+  .btn-awwwards {{
+    @apply relative overflow-hidden px-8 py-4 rounded-2xl font-semibold text-white;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    transition: all 0.3s ease;
+  }}
+  
+  .btn-awwwards::before {{
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+    transition: left 0.5s;
+  }}
+  
+  .btn-awwwards:hover::before {{
+    left: 100%;
+  }}
+  
+  .btn-awwwards:hover {{
+    transform: translateY(-2px) scale(1.02);
+    box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
+  }}
+  
+  /* Card Animations */
+  .card-hover {
+    @apply transition-all duration-300 ease-out;
+  }
+  
+  .card-hover:hover {
+    transform: translateY(-8px) scale(1.02);
+    box-shadow: 0 25px 50px rgba(0, 0, 0, 0.15);
+  }
+  
+  /* Text Animations */
+  .text-reveal {
+    animation: textReveal 1s ease-out forwards;
+  }
+  
+  @keyframes textReveal {
+    from {
+      opacity: 0;
+      transform: translateY(30px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  
+  /* Floating Animation */
+  .float {
+    animation: float 6s ease-in-out infinite;
+  }
+  
+  @keyframes float {
+    0%, 100% { transform: translateY(0px); }
+    50% { transform: translateY(-20px); }
+  }
+  
+  /* Pulse Glow */
+  .pulse-glow {
+    animation: pulseGlow 2s ease-in-out infinite alternate;
+  }
+  
+  @keyframes pulseGlow {
+    from { box-shadow: 0 0 20px rgba(139, 92, 246, 0.3); }
+    to { box-shadow: 0 0 40px rgba(139, 92, 246, 0.6); }
+  }
+  
+  /* Mesh Background */
+  .mesh-bg {
+    background-image: 
+      radial-gradient(circle at 25% 25%, #ff6b6b 0%, transparent 50%),
+      radial-gradient(circle at 75% 75%, #4ecdc4 0%, transparent 50%),
+      radial-gradient(circle at 75% 25%, #45b7d1 0%, transparent 50%),
+      radial-gradient(circle at 25% 75%, #96ceb4 0%, transparent 50%);
+  }
+}
+
+@layer utilities {
+  .animate-fade-in-up {
+    animation: fadeInUp 0.6s ease-out forwards;
+  }
+  
+  .animate-slide-in-left {
+    animation: slideInLeft 0.6s ease-out forwards;
+  }
+  
+  .animate-bounce-in {
+    animation: bounceIn 0.8s cubic-bezier(0.68, -0.55, 0.265, 1.55) forwards;
+  }
+  
+  @keyframes fadeInUp {
+    from {
+      opacity: 0;
+      transform: translateY(30px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  
+  @keyframes slideInLeft {
+    from {
+      opacity: 0;
+      transform: translateX(-50px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+  
+  @keyframes bounceIn {
+    0% {
+      opacity: 0;
+      transform: scale(0.3);
+    }
+    50% {
+      opacity: 1;
+      transform: scale(1.05);
+    }
+    70% {
+      transform: scale(0.9);
+    }
+    100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+}
+        body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif; }
+        #root { width: 100%; height: 100vh; }
+        .error-boundary { 
+            padding: 20px; 
+            background: #fee; 
+            border: 1px solid #fcc; 
+            border-radius: 4px; 
+            margin: 20px;
+            color: #c33;
+        }
+        .preview-console {
+            position: fixed;
+            bottom: 0;
+            right: 0;
+            width: 300px;
+            height: 150px;
+            background: #000;
+            color: #0f0;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 12px;
+            overflow-y: auto;
+            z-index: 9999;
+            border: 1px solid #333;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <div id="preview-console" class="preview-console" style="display: none;"></div>
+    
+    <script type="text/babel">
+        // Wait for all dependencies to load
+        if (typeof React === 'undefined' || typeof ReactDOM === 'undefined') {
+            console.error('React not loaded properly');
+            document.body.innerHTML = '<div style="padding: 20px; color: red;">Error: React libraries not loaded</div>';
+            throw new Error('React dependencies missing');
+        }
+        
+        // Destructure React hooks
+        const { useState, useEffect, useCallback, useMemo, useRef, useContext, useReducer, useLayoutEffect, useId, useTransition, useDeferredValue, useSyncExternalStore } = React;
+        
+        // Make React hooks globally available for generated components
+        window.useState = useState;
+        window.useEffect = useEffect;
+        window.useCallback = useCallback;
+        window.useMemo = useMemo;
+        window.useRef = useRef;
+        window.useContext = useContext;
+        window.useReducer = useReducer;
+        window.useLayoutEffect = useLayoutEffect;
+        window.useId = useId;
+        window.useTransition = useTransition;
+        window.useDeferredValue = useDeferredValue;
+        window.useSyncExternalStore = useSyncExternalStore;
+        window.createContext = React.createContext;
+        window.forwardRef = React.forwardRef;
+        window.memo = React.memo;
+        window.lazy = React.lazy;
+        window.Suspense = React.Suspense;
+        window.Fragment = React.Fragment;
+        window.createElement = React.createElement;
+        
+        // Helper function to filter invalid props from DOM elements
+        // Using an array instead of Set to avoid potential conflicts with React internals
+        const INVALID_DOM_PROPS = ['as', 'variant', 'size', 'color', 'isActive', 'isDisabled', 'isLoading',
+            'leftIcon', 'rightIcon', 'colorScheme', 'spacing', 'direction', 'align',
+            'justify', 'wrap', 'shouldWrapChildren', 'isTruncated', 'noOfLines'];
+        
+        window.filterDomProps = (props) => {
+            if (!props) return props;
+            const filteredProps = {};
+            for (const key in props) {
+                if (!INVALID_DOM_PROPS.includes(key)) {
+                    filteredProps[key] = props[key];
+                }
+            }
+            return filteredProps;
+        };
+        
+        // Create a simple, reliable router that doesn't depend on external libraries
+        const createSimpleRouter = () => {
+            // Simple router implementation using hash-based routing
+            const SimpleRouter = ({ children }) => {
+                const [currentPath, setCurrentPath] = useState(window.location.hash.slice(1) || '/');
+                
+                useEffect(() => {
+                    const handleHashChange = () => {
+                        setCurrentPath(window.location.hash.slice(1) || '/');
+                    };
+                    
+                    window.addEventListener('hashchange', handleHashChange);
+                    return () => window.removeEventListener('hashchange', handleHashChange);
+                }, []);
+                
+                // Provide router context
+                return React.createElement('div', { 
+                    'data-router': 'simple',
+                    'data-current-path': currentPath 
+                }, children);
+            };
+            
+            const SimpleRoutes = ({ children }) => {
+                const currentPath = window.location.hash.slice(1) || '/';
+                const routes = React.Children.toArray(children);
+                
+                // Find matching route or return first one as default
+                const matchingRoute = routes.find(route => {
+                    if (route.props && route.props.path) {
+                        return route.props.path === currentPath;
+                    }
+                    return false;
+                }) || routes[0];
+                
+                return matchingRoute || React.createElement('div', null, 'No routes found');
+            };
+            
+            const SimpleRoute = ({ element, path, children }) => {
+                return element || children || React.createElement('div', null, `Route: ${path}`);
+            };
+            
+            const SimpleLink = ({ to, children, className, style, ...props }) => {
+                const handleClick = (e) => {
+                    e.preventDefault();
+                    window.location.hash = to;
+                };
+                
+                return React.createElement('a', {
+                    href: `#${to}`,
+                    onClick: handleClick,
+                    className: className,
+                    style: {
+                        cursor: 'pointer',
+                        ...style
+                    },
+                    ...props
+                }, children);
+            };
+            
+            // NavLink - like Link but with active state awareness
+            const SimpleNavLink = ({ to, children, className, style, activeClassName, activeStyle, ...props }) => {
+                const [currentPath, setCurrentPath] = useState(window.location.hash.slice(1) || '/');
+                
+                useEffect(() => {
+                    const handleHashChange = () => setCurrentPath(window.location.hash.slice(1) || '/');
+                    window.addEventListener('hashchange', handleHashChange);
+                    return () => window.removeEventListener('hashchange', handleHashChange);
+                }, []);
+                
+                const handleClick = (e) => {
+                    e.preventDefault();
+                    window.location.hash = to;
+                };
+                
+                const isActive = currentPath === to || (to !== '/' && currentPath.startsWith(to));
+                
+                // Handle className - can be string or function
+                let finalClassName = className;
+                if (typeof className === 'function') {
+                    finalClassName = className({ isActive });
+                } else if (isActive && activeClassName) {
+                    finalClassName = `${className || ''} ${activeClassName}`.trim();
+                }
+                
+                // Handle style - can be object or function
+                let finalStyle = style || {};
+                if (typeof style === 'function') {
+                    finalStyle = style({ isActive });
+                } else if (isActive && activeStyle) {
+                    finalStyle = { ...style, ...activeStyle };
+                }
+                
+                return React.createElement('a', {
+                    href: `#${to}`,
+                    onClick: handleClick,
+                    className: finalClassName,
+                    style: { cursor: 'pointer', ...finalStyle },
+                    'aria-current': isActive ? 'page' : undefined,
+                    ...props
+                }, children);
+            };
+            
+            const useSimpleNavigate = () => {
+                return useCallback((path) => {
+                    window.location.hash = path;
+                }, []);
+            };
+            
+            const useSimpleParams = () => {
+                // Simple params extraction from hash
+                const hash = window.location.hash.slice(1);
+                const segments = hash.split('/');
+                return { id: segments[segments.length - 1] || null };
+            };
+            
+            const useSimpleLocation = () => {
+                const [location, setLocation] = useState({
+                    pathname: window.location.hash.slice(1) || '/',
+                    hash: window.location.hash,
+                    search: ''
+                });
+                
+                useEffect(() => {
+                    const handleHashChange = () => {
+                        setLocation({
+                            pathname: window.location.hash.slice(1) || '/',
+                            hash: window.location.hash,
+                            search: ''
+                        });
+                    };
+                    
+                    window.addEventListener('hashchange', handleHashChange);
+                    return () => window.removeEventListener('hashchange', handleHashChange);
+                }, []);
+                
+                return location;
+            };
+            
+            // Navigate component for declarative navigation (like react-router-dom's Navigate)
+            const SimpleNavigate = ({ to, replace = false }) => {
+                useEffect(() => {
+                    if (replace) {
+                        window.location.replace('#' + to);
+                    } else {
+                        window.location.hash = to;
+                    }
+                }, [to, replace]);
+                return null;
+            };
+            
+            return {
+                Router: SimpleRouter,
+                Routes: SimpleRoutes,
+                Route: SimpleRoute,
+                Link: SimpleLink,
+                NavLink: SimpleNavLink,
+                Navigate: SimpleNavigate,
+                useNavigate: useSimpleNavigate,
+                useParams: useSimpleParams,
+                useLocation: useSimpleLocation
+            };
+        };
+        
+        // Always use the built-in simple hash router to avoid external deps
+        let Router, Routes, Route, Link, NavLink, Navigate, useNavigate, useParams, useLocation;
+        console.log('✅ Using built-in simple hash router (no external history/react-router)');
+        const simpleRouter = createSimpleRouter();
+        Router = simpleRouter.Router;
+        Routes = simpleRouter.Routes;
+        Route = simpleRouter.Route;
+        Link = simpleRouter.Link;
+        NavLink = simpleRouter.NavLink;
+        Navigate = simpleRouter.Navigate;
+        useNavigate = simpleRouter.useNavigate;
+        useParams = simpleRouter.useParams;
+        useLocation = simpleRouter.useLocation;
+        
+        // Make Router components available globally
+        window.Router = Router;
+        window.BrowserRouter = Router; // Use main Router as fallback
+        window.HashRouter = Router;    // Use main Router as fallback
+        window.MemoryRouter = Router;  // Use main Router as fallback
+        window.Routes = Routes;
+        window.Route = Route;
+        window.Link = Link;
+        window.NavLink = NavLink;
+        window.Navigate = Navigate;
+        window.useNavigate = useNavigate;
+        window.useParams = useParams;
+        window.useLocation = useLocation;
+        
+        // Create simple icon components as fallbacks
+        const createIcon = (name) => ({ size = 24, className = '', ...props }) => 
+            React.createElement('svg', {
+                width: size,
+                height: size,
+                viewBox: '0 0 24 24',
+                fill: 'none',
+                stroke: 'currentColor',
+                strokeWidth: 2,
+                strokeLinecap: 'round',
+                strokeLinejoin: 'round',
+                className: className,
+                ...props
+            }, React.createElement('title', null, name));
+        
+        // Create common icons
+        window.Home = createIcon('Home');
+        window.User = createIcon('User');
+        window.Settings = createIcon('Settings');
+        window.Search = createIcon('Search');
+        window.Menu = createIcon('Menu');
+        window.X = createIcon('X');
+        window.Plus = createIcon('Plus');
+        window.Minus = createIcon('Minus');
+        window.Edit = createIcon('Edit');
+        window.Trash2 = createIcon('Trash');
+        window.Save = createIcon('Save');
+        window.ChevronDown = createIcon('ChevronDown');
+        window.ChevronUp = createIcon('ChevronUp');
+        window.ChevronLeft = createIcon('ChevronLeft');
+        window.ChevronRight = createIcon('ChevronRight');
+        window.Heart = createIcon('Heart');
+        window.Star = createIcon('Star');
+        window.Eye = createIcon('Eye');
+        window.EyeOff = createIcon('EyeOff');
+        window.Lock = createIcon('Lock');
+        window.Unlock = createIcon('Unlock');
+        window.Mail = createIcon('Mail');
+        window.Phone = createIcon('Phone');
+        window.Calendar = createIcon('Calendar');
+        window.Clock = createIcon('Clock');
+        window.Download = createIcon('Download');
+        window.Upload = createIcon('Upload');
+        window.Share = createIcon('Share');
+        window.MessageCircle = createIcon('MessageCircle');
+        window.AlertCircle = createIcon('AlertCircle');
+        window.CheckCircle = createIcon('CheckCircle');
+        window.Info = createIcon('Info');
+        window.FileText = createIcon('FileText');
+        window.Folder = createIcon('Folder');
+        window.Image = createIcon('Image');
+        window.ShoppingCart = createIcon('ShoppingCart');
+        window.CreditCard = createIcon('CreditCard');
+        window.Package = createIcon('Package');
+        window.MapPin = createIcon('MapPin');
+        window.Globe = createIcon('Globe');
+        window.Play = createIcon('Play');
+        window.Pause = createIcon('Pause');
+        window.Volume2 = createIcon('Volume');
+        window.Battery = createIcon('Battery');
+        window.Wifi = createIcon('Wifi');
+        window.Filter = createIcon('Filter');
+        window.Sort = createIcon('Sort');
+        window.MoreHorizontal = createIcon('MoreHorizontal');
+        window.MoreVertical = createIcon('MoreVertical');
+        window.ExternalLink = createIcon('ExternalLink');
+        window.LogOut = createIcon('LogOut');
+        window.LogIn = createIcon('LogIn');
+        window.UserPlus = createIcon('UserPlus');
+        window.Settings2 = createIcon('Settings');
+        window.Loader = createIcon('Loader');
+        window.Loader2 = createIcon('Loader');
+        window.Truck = createIcon('Truck');
+        window.ShoppingBag = createIcon('ShoppingBag');
+        window.Tag = createIcon('Tag');
+        window.Store = createIcon('Store');
+        window.Wallet = createIcon('Wallet');
+        window.Receipt = createIcon('Receipt');
+        window.Gift = createIcon('Gift');
+        window.Sparkles = createIcon('Sparkles');
+        window.Award = createIcon('Award');
+        window.Zap = createIcon('Zap');
+        window.Target = createIcon('Target');
+        window.TrendingUp = createIcon('TrendingUp');
+        window.TrendingDown = createIcon('TrendingDown');
+        window.BarChart = createIcon('BarChart');
+        window.PieChart = createIcon('PieChart');
+        window.Activity = createIcon('Activity');
+        window.Archive = createIcon('Archive');
+        window.Bell = createIcon('Bell');
+        window.Bookmark = createIcon('Bookmark');
+        window.Briefcase = createIcon('Briefcase');
+        window.Camera = createIcon('Camera');
+        window.Clipboard = createIcon('Clipboard');
+        window.Code = createIcon('Code');
+        window.Compass = createIcon('Compass');
+        window.Copy = createIcon('Copy');
+        window.Database = createIcon('Database');
+        window.Grid = createIcon('Grid');
+        window.Layers = createIcon('Layers');
+        window.Layout = createIcon('Layout');
+        window.Link2 = createIcon('Link');
+        window.List = createIcon('List');
+        window.Monitor = createIcon('Monitor');
+        window.Printer = createIcon('Printer');
+        window.Repeat = createIcon('Repeat');
+        window.Rotate = createIcon('Rotate');
+        window.Scissors = createIcon('Scissors');
+        window.Send = createIcon('Send');
+        window.Sliders = createIcon('Sliders');
+        window.Smartphone = createIcon('Smartphone');
+        window.Tablet = createIcon('Tablet');
+        window.Terminal = createIcon('Terminal');
+        window.ThumbsUp = createIcon('ThumbsUp');
+        window.ThumbsDown = createIcon('ThumbsDown');
+        window.Tool = createIcon('Tool');
+        window.Umbrella = createIcon('Umbrella');
+        window.Video = createIcon('Video');
+        window.Voicemail = createIcon('Voicemail');
+        window.Watch = createIcon('Watch');
+        window.ZoomIn = createIcon('ZoomIn');
+        window.ZoomOut = createIcon('ZoomOut');
+        window.Facebook = createIcon('Facebook');
+        window.Twitter = createIcon('Twitter');
+        window.Instagram = createIcon('Instagram');
+        window.Linkedin = createIcon('Linkedin');
+        window.Github = createIcon('Github');
+        window.Youtube = createIcon('Youtube');
+        
+        // Audio/voice icons
+        window.Mic = createIcon('Mic');
+        window.MicOff = createIcon('MicOff');
+        window.Volume = createIcon('Volume');
+        window.VolumeX = createIcon('VolumeX');
+        window.Headphones = createIcon('Headphones');
+        window.Speaker = createIcon('Speaker');
+        window.Music = createIcon('Music');
+        window.Radio = createIcon('Radio');
+        
+        // Additional commonly used icons
+        window.ArrowRight = createIcon('ArrowRight');
+        window.ArrowLeft = createIcon('ArrowLeft');
+        window.ArrowUp = createIcon('ArrowUp');
+        window.ArrowDown = createIcon('ArrowDown');
+        window.RefreshCw = createIcon('RefreshCw');
+        window.RotateCcw = createIcon('RotateCcw');
+        window.Trash = createIcon('Trash');
+        window.XCircle = createIcon('XCircle');
+        window.PlusCircle = createIcon('PlusCircle');
+        window.MinusCircle = createIcon('MinusCircle');
+        window.HelpCircle = createIcon('HelpCircle');
+        window.AlertTriangle = createIcon('AlertTriangle');
+        window.Power = createIcon('Power');
+        window.Moon = createIcon('Moon');
+        window.Sun = createIcon('Sun');
+        window.Cloud = createIcon('Cloud');
+        window.CloudOff = createIcon('CloudOff');
+        window.Droplet = createIcon('Droplet');
+        window.Wind = createIcon('Wind');
+        window.Thermometer = createIcon('Thermometer');
+        window.Navigation2 = createIcon('Navigation2');
+        window.Anchor = createIcon('Anchor');
+        window.Car = createIcon('Car');
+        window.Home = createIcon('Home');
+        window.Building = createIcon('Building');
+        window.Server = createIcon('Server');
+        window.Box = createIcon('Box');
+        window.File = createIcon('File');
+        window.FolderOpen = createIcon('FolderOpen');
+        window.Sidebar = createIcon('Sidebar');
+        window.PanelLeft = createIcon('PanelLeft');
+        window.PanelRight = createIcon('PanelRight');
+        window.Maximize = createIcon('Maximize');
+        window.Minimize = createIcon('Minimize');
+        window.X2 = createIcon('X');
+        window.Refresh = createIcon('Refresh');
+        window.SkipForward = createIcon('SkipForward');
+        window.SkipBack = createIcon('SkipBack');
+        window.Stop = createIcon('Stop');
+        window.FastForward = createIcon('FastForward');
+        window.Rewind = createIcon('Rewind');
+        window.Film = createIcon('Film');
+        window.Cast = createIcon('Cast');
+        window.Bluetooth = createIcon('Bluetooth');
+        window.WifiOff = createIcon('WifiOff');
+        window.Laptop = createIcon('Laptop');
+        window.DollarSign = createIcon('DollarSign');
+        window.Percent = createIcon('Percent');
+        window.Flag = createIcon('Flag');
+        window.Trophy = createIcon('Trophy');
+        window.Crosshair = createIcon('Crosshair');
+        window.Map = createIcon('Map');
+        window.Sunrise = createIcon('Sunrise');
+        window.Sunset = createIcon('Sunset');
+        window.LineChart = createIcon('LineChart');
+        
+        // ========== UI COMPONENTS (SANDBOX GLOBALS) ==========
+        // These are essential UI components provided globally for the sandbox
+        
+        // Button Component - supports multiple variants and sizes
+        const Button = ({ 
+            children, 
+            variant = 'default', 
+            size = 'md', 
+            disabled = false, 
+            onClick, 
+            className = '', 
+            type = 'button',
+            ...props 
+        }) => {
+            const baseClasses = 'inline-flex items-center justify-center font-medium rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed';
+            
+            const variants = {
+                default: 'bg-blue-600 hover:bg-blue-700 text-white shadow-md hover:shadow-lg focus:ring-blue-500',
+                primary: 'bg-blue-600 hover:bg-blue-700 text-white shadow-md hover:shadow-lg focus:ring-blue-500',
+                secondary: 'bg-gray-200 hover:bg-gray-300 text-gray-800 focus:ring-gray-400',
+                outline: 'border-2 border-current bg-transparent hover:bg-gray-100 text-current focus:ring-gray-400',
+                ghost: 'bg-transparent hover:bg-gray-100 text-gray-700 focus:ring-gray-400',
+                accent: 'bg-purple-600 hover:bg-purple-700 text-white shadow-md hover:shadow-lg focus:ring-purple-500',
+                danger: 'bg-red-600 hover:bg-red-700 text-white shadow-md hover:shadow-lg focus:ring-red-500',
+                success: 'bg-green-600 hover:bg-green-700 text-white shadow-md hover:shadow-lg focus:ring-green-500',
+                link: 'bg-transparent text-blue-600 hover:text-blue-700 hover:underline p-0'
+            };
+            
+            const sizes = {
+                xs: 'px-2 py-1 text-xs',
+                sm: 'px-3 py-1.5 text-sm',
+                md: 'px-4 py-2 text-sm',
+                lg: 'px-6 py-3 text-base',
+                xl: 'px-8 py-4 text-lg'
+            };
+            
+            const variantClass = variants[variant] || variants.default;
+            const sizeClass = sizes[size] || sizes.md;
+            
+            return React.createElement('button', {
+                type,
+                className: `${baseClasses} ${variantClass} ${sizeClass} ${className}`,
+                disabled,
+                onClick,
+                ...props
+            }, children);
+        };
+        window.Button = Button;
+        
+        // Input Component - styled form input
+        const Input = ({ 
+            type = 'text', 
+            placeholder = '', 
+            value, 
+            onChange, 
+            className = '', 
+            disabled = false,
+            ...props 
+        }) => {
+            const baseClasses = 'w-full px-4 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 disabled:bg-gray-100 disabled:cursor-not-allowed';
+            
+            return React.createElement('input', {
+                type,
+                placeholder,
+                value,
+                onChange,
+                disabled,
+                className: `${baseClasses} ${className}`,
+                ...props
+            });
+        };
+        window.Input = Input;
+        
+        // Card Component - container with styling
+        const Card = ({ children, className = '', ...props }) => {
+            const baseClasses = 'bg-white rounded-xl shadow-md border border-gray-100 overflow-hidden';
+            
+            return React.createElement('div', {
+                className: `${baseClasses} ${className}`,
+                ...props
+            }, children);
+        };
+        window.Card = Card;
+        
+        // Loading Component - spinner/loading indicator
+        const Loading = ({ size = 'md', className = '' }) => {
+            const sizes = {
+                sm: 'w-4 h-4',
+                md: 'w-8 h-8',
+                lg: 'w-12 h-12'
+            };
+            
+            return React.createElement('div', {
+                className: `animate-spin rounded-full border-2 border-gray-200 border-t-blue-600 ${sizes[size] || sizes.md} ${className}`
+            });
+        };
+        window.Loading = Loading;
+        
+        // AnimatedText Component - text with animation support
+        const AnimatedText = ({ children, className = '', as = 'span', ...props }) => {
+            return React.createElement(as, {
+                className: `transition-all duration-300 ${className}`,
+                ...props
+            }, children);
+        };
+        window.AnimatedText = AnimatedText;
+        
+        console.log('✅ UI Components loaded: Button, Input, Card, Loading, AnimatedText');
+        
+        // Console logger for debugging
+        const originalConsoleLog = console.log;
+        const originalConsoleError = console.error;
+        const originalConsoleWarn = console.warn;
+        
+        const consoleDiv = document.getElementById('preview-console');
+        let logCount = 0;
+        
+        function addToConsole(message, type = 'log') {
+            if (logCount === 0) consoleDiv.style.display = 'block';
+            logCount++;
+            const entry = document.createElement('div');
+            entry.style.color = type === 'error' ? '#f66' : type === 'warn' ? '#fa0' : '#0f0';
+            entry.textContent = '[' + type.toUpperCase() + '] ' + message;
+            consoleDiv.appendChild(entry);
+            consoleDiv.scrollTop = consoleDiv.scrollHeight;
+        }
+        
+        console.log = function(...args) {
+            originalConsoleLog.apply(console, args);
+            addToConsole(args.join(' '), 'log');
+        };
+        
+        console.error = function(...args) {
+            originalConsoleError.apply(console, args);
+            addToConsole(args.join(' '), 'error');
+        };
+        
+        console.warn = function(...args) {
+            originalConsoleWarn.apply(console, args);
+            addToConsole(args.join(' '), 'warn');
+        };
+        
+        // Sandbox Error Boundary Component (renamed to avoid conflicts with app code)
+        class SandboxErrorBoundary extends React.Component {
+            constructor(props) {
+                super(props);
+                this.state = { hasError: false, error: null };
+            }
+            
+            static getDerivedStateFromError(error) {
+                console.error('React Error Boundary caught:', error);
+                return { hasError: true, error };
+            }
+            
+            componentDidCatch(error, errorInfo) {
+                console.error('React Error Details:', error, errorInfo);
+            }
+            
+            render() {
+                if (this.state.hasError) {
+                    return (
+                        <div className="error-boundary">
+                            <h2>Something went wrong in the preview</h2>
+                            <details>
+                                <summary>Error details</summary>
+                                <pre>{this.state.error?.toString()}</pre>
+                            </details>
+                        </div>
+                    );
+                }
+                return this.props.children;
+            }
+        }
+        
+        // Mock API calls for demo purposes with sample data
+        const mockFetch = (url, options) => {
+            console.log('Mock API call to:', url);
+            
+            // Parse the URL to determine the endpoint
+            const urlObj = new URL(url, window.location.origin);
+            const pathname = urlObj.pathname;
+            
+            // Mock data for different endpoints
+            let responseData = { message: 'Mock API response', data: [] };
+            
+            // Products endpoint
+            if (pathname.includes('/products')) {
+                responseData = [
+                    {
+                        id: 1,
+                        name: "Fresh Bananas",
+                        description: "Organic yellow bananas, perfect for snacks",
+                        price: 2.99,
+                        stock: 50,
+                        category: "fruits",
+                        image_url: "https://placehold.co/400x300/FFD700/FFFFFF/png?text=Bananas",
+                        created_at: "2024-01-01T00:00:00"
+                    },
+                    {
+                        id: 2,
+                        name: "Whole Milk",
+                        description: "Fresh dairy milk, 1 gallon",
+                        price: 3.49,
+                        stock: 25,
+                        category: "dairy",
+                        image_url: "https://placehold.co/400x300/87CEEB/FFFFFF/png?text=Milk",
+                        created_at: "2024-01-01T00:00:00"
+                    },
+                    {
+                        id: 3,
+                        name: "Bread Loaf",
+                        description: "Whole wheat bread loaf",
+                        price: 2.79,
+                        stock: 30,
+                        category: "bakery",
+                        image_url: "https://placehold.co/400x300/DEB887/FFFFFF/png?text=Bread",
+                        created_at: "2024-01-01T00:00:00"
+                    },
+                    {
+                        id: 4,
+                        name: "Fresh Apples",
+                        description: "Crisp red apples, locally grown",
+                        price: 4.99,
+                        stock: 40,
+                        category: "fruits",
+                        image_url: "https://placehold.co/400x300/DC143C/FFFFFF/png?text=Apples",
+                        created_at: "2024-01-01T00:00:00"
+                    },
+                    {
+                        id: 5,
+                        name: "Greek Yogurt",
+                        description: "Creamy Greek yogurt, high protein",
+                        price: 5.99,
+                        stock: 20,
+                        category: "dairy",
+                        image_url: "https://placehold.co/400x300/F0F8FF/000000/png?text=Yogurt",
+                        created_at: "2024-01-01T00:00:00"
+                    },
+                    {
+                        id: 6,
+                        name: "Chocolate Cake",
+                        description: "Rich chocolate layer cake",
+                        price: 12.99,
+                        stock: 15,
+                        category: "bakery",
+                        image_url: "https://placehold.co/400x300/8B4513/FFFFFF/png?text=Cake",
+                        created_at: "2024-01-01T00:00:00"
+                    }
+                ];
+            }
+            // Orders endpoint
+            else if (pathname.includes('/orders')) {
+                responseData = [
+                    {
+                        id: 1,
+                        user_id: 1,
+                        status: "pending",
+                        total_amount: 15.47,
+                        created_at: "2024-01-15T10:30:00",
+                        items: [
+                            { product_id: 1, quantity: 2, price: 2.99 },
+                            { product_id: 2, quantity: 1, price: 3.49 }
+                        ]
+                    }
+                ];
+            }
+            // Users endpoint
+            else if (pathname.includes('/users')) {
+                responseData = [
+                    {
+                        id: 1,
+                        email: "demo@example.com",
+                        full_name: "Demo User",
+                        is_active: true,
+                        created_at: "2024-01-01T00:00:00"
+                    }
+                ];
+            }
+            // Health check
+            else if (pathname.includes('/health')) {
+                responseData = { status: "healthy", service: "mock-api" };
+            }
+            
+            return Promise.resolve({
+                ok: true,
+                status: 200,
+                statusText: 'OK',
+                json: () => Promise.resolve(responseData),
+                text: () => Promise.resolve(JSON.stringify(responseData))
+            });
+        };
+        
+        // Replace fetch with mock for demo
+        window.fetch = mockFetch;
+        
+        // Create utility functions for className manipulation
+        
+        // Fallback clsx implementation if CDN fails
+        if (typeof window.clsx === 'undefined') {
+            window.clsx = function(...inputs) {
+                const classes = [];
+                for (const input of inputs) {
+                    if (!input) continue;
+                    if (typeof input === 'string') {
+                        classes.push(input);
+                    } else if (typeof input === 'object') {
+                        for (const [key, value] of Object.entries(input)) {
+                            if (value) classes.push(key);
+                        }
+                    }
+                }
+                return classes.join(' ');
+            };
+        }
+        
+        // Basic tailwind-merge implementation for sandbox (simplified, no Set)
+        window.twMerge = function(...inputs) {
+            const classString = window.clsx(...inputs);
+            const classes = classString.split(' ').filter(Boolean);
+            
+            // Simple deduplication using object instead of Set
+            const seenClasses = {};
+            const result = [];
+            
+            // Process classes in order, last occurrence wins for same prefix
+            for (let i = 0; i < classes.length; i++) {
+                const cls = classes[i];
+                // Extract base class name (e.g., 'bg' from 'bg-red-500')
+                const base = cls.split('-')[0];
+                seenClasses[base + '_' + cls] = i;
+            }
+            
+            // Add classes that weren't overridden
+            for (let i = 0; i < classes.length; i++) {
+                const cls = classes[i];
+                const base = cls.split('-')[0];
+                if (seenClasses[base + '_' + cls] === i) {
+                    result.push(cls);
+                }
+            }
+            
+            return result.join(' ');
+        };
+        
+        // Create cn function (className utility)
+        window.cn = function(...inputs) {
+            return window.twMerge(...inputs);
+        };
+        
+        
+        
+        // motion is provided globally by the sandbox environment
+// motion is provided globally by the sandbox environment
+
+// CONTEXT DEFINITIONS
+const AuthContext = React.createContext(null);
+const useAuth = () => React.useContext(AuthContext);
+const CartContext = React.createContext(null);
+const useCart = () => React.useContext(CartContext);
+const NotificationContext = React.createContext(null);
+const useNotification = () => React.useContext(NotificationContext);
+
+// ICON COMPONENTS
+
+// MOCK DATA
+const initialProducts = [
+    { id: 1, name: 'Organic Avocados', price: 4.99, image: 'https://images.unsplash.com/photo-1523049673857-eb18f1d7b578?w=400&h=400&q=80&auto=format&fit=crop', category: 'Produce', tags: ['organic', 'vegan'], description: 'Creamy and delicious Hass avocados, perfect for toast or guacamole.' },
+    { id: 2, name: '30-Minute Pasta Night Kit', price: 19.99, image: 'https://images.unsplash.com/photo-1621996346565-e326b20f5412?w=400&h=600&q=80&auto=format&fit=crop', category: 'Meal Kit', tags: [], description: 'Everything you need for a quick and tasty pasta dinner. Serves 2.' },
+    { id: 3, name: 'Artisan Sourdough Bread', price: 6.50, image: 'https://images.unsplash.com/photo-1534620808146-d33bb39128b2?w=400&h=500&q=80&auto=format&fit=crop', category: 'Bakery', tags: ['vegan'], description: 'Freshly baked sourdough with a perfect crust and soft interior.' },
+    { id: 4, name: 'Gluten-Free Oat Milk', price: 3.99, image: 'https://images.unsplash.com/photo-1631499943473-7354436b69a0?w=400&h=400&q=80&auto=format&fit=crop', category: 'Dairy Alternatives', tags: ['gluten-free', 'vegan'], description: 'A smooth and creamy dairy-free alternative for your coffee or cereal.' },
+    { id: 5, name: 'Weekend Brunch Kit', price: 29.99, image: 'https://images.unsplash.com/photo-1555941048-52b66724595b?w=400&h=550&q=80&auto=format&fit=crop', category: 'Meal Kit', tags: [], description: 'Pancake mix, organic maple syrup, premium bacon, and fresh orange juice.' },
+    { id: 6, name: 'Free-Range Organic Eggs', price: 5.99, image: 'https://images.unsplash.com/photo-1598965675045-45c5b9208782?w=400&h=300&q=80&auto=format&fit=crop', category: 'Dairy & Eggs', tags: ['organic'], description: 'A dozen large brown eggs from pasture-raised hens.' },
+    { id: 7, name: 'Gourmet Coffee Beans', price: 14.99, image: 'https://images.unsplash.com/photo-1559496417-e7f25cb247f3?w=400&h=400&q=80&auto=format&fit=crop', category: 'Pantry', tags: ['organic'], description: 'Single-origin whole bean coffee with notes of chocolate and citrus.' },
+    { id: 8, name: 'Vegan Taco Tuesday Kit', price: 22.50, image: 'https://images.unsplash.com/photo-1552332386-f8dd00dc2f85?w=400&h=600&q=80&auto=format&fit=crop', category: 'Meal Kit', tags: ['vegan'], description: 'Plant-based protein, tortillas, salsa, and all the fixings for a delicious taco night.' },
+    { id: 9, name: 'Fresh Berry Medley', price: 7.99, image: 'https://images.unsplash.com/photo-1596405392823-5a24e455a141?w=400&h=300&q=80&auto=format&fit=crop', category: 'Produce', tags: ['organic', 'vegan'], description: 'A mix of fresh, seasonal berries. Perfect for snacking or toppings.' },
+];
+
+const dietaryFilters = ['organic', 'vegan', 'gluten-free'];
+
+// HELPER COMPONENTS
+const Toast = ({ message, type, onClose }) => (
+  <motion.div
+    initial={{ opacity: 0, y: 50, scale: 0.3 }}
+    animate={{ opacity: 1, y: 0, scale: 1 }}
+    exit={{ opacity: 0, scale: 0.5, transition: { duration: 0.2 } }}
+    className={cn(
+      "fixed bottom-5 right-5 p-4 rounded-lg shadow-2xl z-[100] text-white flex items-center",
+      type === 'success' ? 'bg-gradient-to-br from-green-500 to-emerald-600' : 'bg-gradient-to-br from-red-500 to-rose-600'
+    )}
+  >
+    <span>{message}</span>
+    <button onClick={onClose} className="ml-4 p-1 rounded-full hover:bg-white/20 transition-colors"><X /></button>
+  </motion.div>
+);
+
+const Modal = ({ isOpen, onClose, children, title }) => {
+  useEffect(() => {
+    const handleEsc = (event) => {
+      if (event.keyCode === 27) onClose();
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [onClose]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <motion.div
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.9 }}
+        onClick={(e) => e.stopPropagation()}
+        className="bg-white/90 backdrop-blur-lg rounded-2xl shadow-2xl max-w-md w-full max-h-[90vh] overflow-y-auto ring-1 ring-white/20"
+      >
+        <div className="flex items-center justify-between p-4 border-b border-white/20">
+          <h2 className="text-xl font-bold tracking-tight text-slate-800">{title}</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-red-500 transition-colors"><X /></button>
+        </div>
+        <div className="p-6">{children}</div>
+      </motion.div>
+    </div>
+  );
+};
+
+// AUTHENTICATION COMPONENTS
+const AuthModal = ({ mode, isOpen, onClose, onSwitch, onSuccess }) => {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const showNotification = useNotification();
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    // Simulate API call
+    setTimeout(() => {
+      if (mode === 'login') {
+        if (email && password) {
+          const user = { name: name || email.split('@')[0], email };
+          onSuccess(user);
+          onClose();
+        } else {
+          setError('Please fill in all fields.');
+        }
+      } else { // signup
+        if (email && password && name) {
+          const user = { name, email };
+          onSuccess(user);
+          onClose();
+        } else {
+          setError('Please fill in all fields.');
+        }
+      }
+      setLoading(false);
+    }, 1000);
+  };
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title={mode === 'login' ? 'Welcome Back' : 'Create Account'}>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        {error && <p className="text-red-500 text-sm bg-red-50 p-3 rounded-md">{error}</p>}
+        {mode === 'signup' && (
+          <Input type="text" placeholder="Full Name" value={name} onChange={(e) => setName(e.target.value)} required />
+        )}
+        <Input type="email" placeholder="Email Address" value={email} onChange={(e) => setEmail(e.target.value)} required />
+        <Input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+        <Button type="submit" className="w-full bg-gradient-to-br from-red-500 via-pink-500 to-rose-400 text-white hover:shadow-lg hover:shadow-pink-500/30" disabled={loading}>
+          {loading ? <Loading /> : (mode === 'login' ? 'Log In' : 'Sign Up')}
+        </Button>
+        <p className="text-center text-sm text-slate-500">
+          {mode === 'login' ? "Don't have an account? " : "Already have an account? "}
+          <button type="button" onClick={onSwitch} className="font-semibold text-pink-500 hover:underline">
+            {mode === 'login' ? 'Sign Up' : 'Log In'}
+          </button>
+        </p>
+      </form>
+    </Modal>
+  );
+};
+
+// E-COMMERCE COMPONENTS
+const CartModal = ({ isOpen, onClose }) => {
+    const { cart, updateQuantity, removeFromCart, clearCart } = useCart();
+    const showNotification = useNotification();
+    const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+
+    const handleCheckout = () => {
+        showNotification('Checkout is not implemented yet.', 'error');
+        onClose();
+        clearCart();
+        showNotification('Your cart has been cleared for this demo.', 'success');
+    };
+
+    return (
+        <Modal isOpen={isOpen} onClose={onClose} title="Your Cart">
+            {cart.length === 0 ? (
+                <div className="text-center py-10">
+                    <ShoppingCart className="mx-auto h-12 w-12 text-slate-300" />
+                    <p className="mt-4 text-slate-500">Your cart is empty.</p>
+                </div>
+            ) : (
+                <div className="flex flex-col h-full">
+                    <div className="flex-grow overflow-y-auto -mr-6 pr-6">
+                        {cart.map(item => (
+                            <div key={item.id} className="flex items-center space-x-4 py-4 border-b border-slate-200">
+                                <img src={item.image} alt={item.name} className="w-16 h-16 rounded-md object-cover" />
+                                <div className="flex-grow">
+                                    <p className="font-semibold text-slate-800">{item.name}</p>
+                                    <p className="text-sm text-slate-500">${item.price.toFixed(2)}</p>
+                                </div>
+                                <div className="flex items-center space-x-2">
+                                    <button onClick={() => updateQuantity(item.id, item.quantity - 1)} className="p-1 rounded-full bg-slate-100 hover:bg-slate-200"><Minus className="w-4 h-4" /></button>
+                                    <span>{item.quantity}</span>
+                                    <button onClick={() => updateQuantity(item.id, item.quantity + 1)} className="p-1 rounded-full bg-slate-100 hover:bg-slate-200"><Plus className="w-4 h-4" /></button>
+                                </div>
+                                <button onClick={() => removeFromCart(item.id)} className="text-slate-400 hover:text-red-500"><Trash2 className="w-5 h-5" /></button>
+                            </div>
+                        ))}
+                    </div>
+                    <div className="pt-6 border-t border-slate-200">
+                        <div className="flex justify-between items-center font-bold text-lg">
+                            <span>Total</span>
+                            <span>${total.toFixed(2)}</span>
+                        </div>
+                        <div className="mt-4">
+                            <h3 className="font-semibold mb-2">Precision Delivery Scheduling</h3>
+                            <Input type="datetime-local" className="w-full" />
+                        </div>
+                        <Button onClick={handleCheckout} className="w-full mt-4 bg-gradient-to-br from-red-500 via-pink-500 to-rose-400 text-white">Proceed to Checkout</Button>
+                    </div>
+                </div>
+            )}
+        </Modal>
+    );
+};
+
+const ProductCard = ({ product }) => {
+    const { addToCart } = useCart();
+    return (
+        <motion.div className="masonry-item bg-white/80 backdrop-blur-md rounded-2xl shadow-lg overflow-hidden ring-1 ring-black/5">
+            <img src={product.image} alt={product.name} className="w-full h-auto object-cover" />
+            <div className="p-4">
+                <h3 className="font-bold text-lg tracking-tight text-slate-800">{product.name}</h3>
+                <p className="text-slate-600 text-sm mt-1 leading-relaxed">{product.description}</p>
+                <div className="flex flex-wrap gap-2 mt-3">
+                    {product.tags.map(tag => (
+                        <span key={tag} className="text-xs font-semibold bg-pink-100 text-pink-700 px-2 py-1 rounded-full">{tag}</span>
+                    ))}
+                </div>
+                <div className="flex justify-between items-center mt-4">
+                    <p className="text-xl font-bold text-slate-900">${product.price.toFixed(2)}</p>
+                    <Button onClick={() => addToCart(product)} size="sm" className="bg-slate-800 hover:bg-slate-900 text-white">Add</Button>
+                </div>
+            </div>
+        </motion.div>
+    );
+};
+
+// PAGE COMPONENTS
+const HomePage = () => {
+    const navigate = useNavigate();
+    return (
+        <div className="relative min-h-screen flex items-center justify-center text-center overflow-hidden bg-rose-50">
+            <div className="absolute inset-0 bg-gradient-to-br from-red-500/10 via-pink-500/10 to-rose-400/10"></div>
+            <div className="absolute top-0 left-0 w-72 h-72 bg-red-200 rounded-full filter blur-3xl opacity-50 animate-blob"></div>
+            <div className="absolute bottom-0 right-0 w-72 h-72 bg-pink-200 rounded-full filter blur-3xl opacity-50 animate-blob animation-delay-2000"></div>
+            <div className="relative z-10 p-8">
+                <motion.h1 
+                    className="text-5xl md:text-7xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-br from-red-600 via-pink-500 to-rose-500"
+                >
+                    Groceries, Simplified.
+                </motion.h1>
+                <motion.p className="mt-6 max-w-2xl mx-auto text-lg text-slate-600 leading-relaxed">
+                    Save time for what matters. One-click restocks, curated meal kits, and precision delivery for busy professionals.
+                </motion.p>
+                <motion.div className="mt-10 flex justify-center gap-4">
+                    <Button onClick={() => navigate('/products')} size="lg" className="bg-gradient-to-br from-red-500 via-pink-500 to-rose-400 text-white shadow-lg shadow-pink-500/30 hover:-translate-y-1 transition-transform">
+                        Start Shopping
+                    </Button>
+                </motion.div>
+            </div>
+        </div>
+    );
+};
+
+const ProductsPage = () => {
+    const [products, setProducts] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [searchTerm, setSearchTerm] = useState('');
+    const [activeFilters, setActiveFilters] = useState([]);
+
+    useEffect(() => {
+        setLoading(true);
+        // Simulate API fetch
+        setTimeout(() => {
+            setProducts(initialProducts);
+            setLoading(false);
+        }, 500);
+    }, []);
+
+    const handleFilterToggle = (filter) => {
+        setActiveFilters(prev => 
+            prev.includes(filter) ? prev.filter(f => f !== filter) : [...prev, filter]
+        );
+    };
+
+    const filteredProducts = products.filter(p => {
+        const matchesSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase());
+        const matchesFilters = activeFilters.length === 0 || activeFilters.every(f => p.tags.includes(f));
+        return matchesSearch && matchesFilters;
+    });
+
+    return (
+        <div className="bg-rose-50 min-h-screen">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+                <div className="text-center mb-12">
+                    <h1 className="text-4xl font-bold tracking-tight text-slate-900">Discover Your Favorites</h1>
+                    <p className="mt-4 max-w-2xl mx-auto text-lg text-slate-600">From fresh produce to chef-curated meal kits, find everything you need.</p>
+                </div>
+
+                <div className="sticky top-[70px] z-30 bg-rose-50/80 backdrop-blur-md py-4 mb-8 rounded-xl">
+                    <div className="flex flex-col md:flex-row gap-4">
+                        <div className="relative flex-grow">
+                            <Input 
+                                type="text"
+                                placeholder="Search for products..."
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                                className="pl-10 w-full"
+                            />
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                        </div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                            {dietaryFilters.map(filter => (
+                                <button 
+                                    key={filter}
+                                    onClick={() => handleFilterToggle(filter)}
+                                    className={cn(
+                                        "px-4 py-2 rounded-full text-sm font-semibold transition-all duration-200",
+                                        activeFilters.includes(filter) 
+                                            ? 'bg-red-500 text-white shadow-md' 
+                                            : 'bg-white text-slate-700 hover:bg-slate-100'
+                                    )}
+                                >
+                                    {filter.charAt(0).toUpperCase() + filter.slice(1)}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+
+                {loading ? (
+                    <div className="flex justify-center items-center h-64"><Loading /></div>
+                ) : (
+                    <div className="masonry-container">
+                        {filteredProducts.map(product => (
+                            <ProductCard key={product.id} product={product} />
+                        ))}
+                    </div>
+                )}
+                 {filteredProducts.length === 0 && !loading && (
+                    <div className="text-center py-16 text-slate-500">
+                        <p className="text-lg font-semibold">No products found</p>
+                        <p>Try adjusting your search or filters.</p>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
+
+const ProfilePage = () => {
+    const { user, logout } = useAuth();
+    const showNotification = useNotification();
+    const navigate = useNavigate();
+
+    const handleRestock = () => {
+        showNotification("One-Click 'Restock' feature coming soon!", "success");
+    };
+    
+    const handleLogout = () => {
+        logout();
+        navigate('/');
+    }
+
+    return (
+        <div className="bg-rose-50 min-h-screen py-12">
+            <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+                <h1 className="text-4xl font-bold tracking-tight text-slate-900 mb-8">Your Account</h1>
+                <Card className="p-8 bg-white/80 backdrop-blur-md">
+                    <h2 className="text-2xl font-bold text-slate-800">Welcome, {user?.name}!</h2>
+                    <p className="text-slate-600 mt-2">Manage your orders, lists, and subscriptions here.</p>
+                    
+                    <div className="grid md:grid-cols-2 gap-6 mt-8">
+                        <Card className="p-6 bg-rose-100/50">
+                            <h3 className="font-bold text-lg text-rose-800">One-Click 'Restock'</h3>
+                            <p className="text-sm text-rose-700 mt-2">Reorder your weekly essentials in a single click.</p>
+                            <Button onClick={handleRestock} className="mt-4 bg-rose-500 text-white">Restock Now</Button>
+                        </Card>
+                        <Card className="p-6 bg-pink-100/50">
+                            <h3 className="font-bold text-lg text-pink-800">Smart Subscriptions</h3>
+                            <p className="text-sm text-pink-700 mt-2">Set up recurring deliveries and never run out.</p>
+                            <Button className="mt-4 bg-pink-500 text-white">Manage Auto-Pilot</Button>
+                        </Card>
+                    </div>
+                    <div className="mt-8">
+                        <Button variant="outline" onClick={handleLogout}>Log Out</Button>
+                    </div>
+                </Card>
+            </div>
+        </div>
+    );
+};
+
+const ProtectedRoute = ({ children }) => {
+    const { user } = useAuth();
+    if (!user) {
+        return <Navigate to="/" />;
+    }
+    return children;
+};
+
+// MAIN APP COMPONENT
+const App = () => {
+    const [user, setUser] = useState(null);
+    const [cart, setCart] = useState([]);
+    const [notifications, setNotifications] = useState([]);
+    const [authMode, setAuthMode] = useState('login');
+    const [isAuthModalOpen, setAuthModalOpen] = useState(false);
+    const [isCartModalOpen, setCartModalOpen] = useState(false);
+    const location = useLocation();
+
+    useEffect(() => {
+        const savedUser = localStorage.getItem('user');
+        if (savedUser) setUser(JSON.parse(savedUser));
+        const savedCart = localStorage.getItem('cart');
+        if (savedCart) setCart(JSON.parse(savedCart));
+    }, []);
+
+    useEffect(() => {
+        localStorage.setItem('user', JSON.stringify(user));
+    }, [user]);
+
+    useEffect(() => {
+        localStorage.setItem('cart', JSON.stringify(cart));
+    }, [cart]);
+
+    const showNotification = (message, type = 'success') => {
+        const id = Date.now();
+        setNotifications(prev => [...prev, { id, message, type }]);
+        setTimeout(() => {
+            setNotifications(prev => prev.filter(n => n.id !== id));
+        }, 3000);
+    };
+
+    const handleAuthSuccess = (userData) => {
+        setUser(userData);
+        showNotification(authMode === 'login' ? 'Login successful!' : 'Welcome!', 'success');
+    };
+
+    const handleLogout = () => {
+        setUser(null);
+        showNotification('You have been logged out.', 'success');
+    };
+
+    const handleOpenAuthModal = (mode) => {
+        setAuthMode(mode);
+        setAuthModalOpen(true);
+    };
+
+    const addToCart = (product) => {
+        setCart(prev => {
+            const existing = prev.find(item => item.id === product.id);
+            if (existing) {
+                return prev.map(item => item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item);
+            }
+            return [...prev, { ...product, quantity: 1 }];
+        });
+        showNotification(`${product.name} added to cart!`, 'success');
+    };
+
+    const removeFromCart = (productId) => {
+        setCart(prev => prev.filter(item => item.id !== productId));
+    };
+
+    const updateQuantity = (productId, quantity) => {
+        if (quantity < 1) {
+            removeFromCart(productId);
+        } else {
+            setCart(prev => prev.map(item => item.id === productId ? { ...item, quantity } : item));
+        }
+    };
+    
+    const clearCart = () => setCart([]);
+
+    const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
+
+    return (
+        <AuthContext.Provider value={{ user, logout: handleLogout }}>
+            <CartContext.Provider value={{ cart, addToCart, removeFromCart, updateQuantity, clearCart, cartCount }}>
+                <NotificationContext.Provider value={showNotification}>
+                    <div className="font-sans antialiased text-slate-800">
+                        <header className="sticky top-0 z-40 w-full bg-white/80 backdrop-blur-md border-b border-slate-200/80">
+                            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                                <div className="flex items-center justify-between h-16">
+                                    <Link to="/" className="text-2xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-br from-red-600 to-pink-500">
+                                        Freshly
+                                    </Link>
+                                    <nav className="hidden md:flex items-center space-x-6">
+                                        <NavLink to="/" className={location.pathname === '/' ? 'text-pink-500' : 'text-slate-600'}>Home</NavLink>
+                                        <NavLink to="/products" className={location.pathname === '/products' ? 'text-pink-500' : 'text-slate-600'}>Products</NavLink>
+                                        {user && <NavLink to="/profile" className={location.pathname === '/profile' ? 'text-pink-500' : 'text-slate-600'}>Profile</NavLink>}
+                                    </nav>
+                                    <div className="flex items-center space-x-4">
+                                        <button onClick={() => setCartModalOpen(true)} className="relative text-slate-600 hover:text-pink-500 transition-colors">
+                                            <ShoppingCart />
+                                            {cartCount > 0 && (
+                                                <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center animate-pulse">
+                                                    {cartCount}
+                                                </span>
+                                            )}
+                                        </button>
+                                        {user ? (
+                                            <Link to="/profile" className="flex items-center space-x-2">
+                                                <span className="font-semibold hidden sm:inline">{user.name}</span>
+                                                <User className="text-slate-600" />
+                                            </Link>
+                                        ) : (
+                                            <div className="hidden md:flex items-center space-x-2">
+                                                <Button variant="ghost" onClick={() => handleOpenAuthModal('login')}>Log In</Button>
+                                                <Button onClick={() => handleOpenAuthModal('signup')} className="bg-slate-800 hover:bg-slate-900 text-white">Sign Up</Button>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </header>
+
+                        <main>
+                            <Routes>
+                                <Route path="/" element={<HomePage />} />
+                                <Route path="/products" element={<ProductsPage />} />
+                                <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
+                                <Route path="*" element={<Navigate to="/" />} />
+                            </Routes>
+                        </main>
+
+                        <AuthModal
+                            isOpen={isAuthModalOpen}
+                            onClose={() => setAuthModalOpen(false)}
+                            mode={authMode}
+                            onSwitch={() => setAuthMode(authMode === 'login' ? 'signup' : 'login')}
+                            onSuccess={handleAuthSuccess}
+                        />
+                        <CartModal isOpen={isCartModalOpen} onClose={() => setCartModalOpen(false)} />
+
+                        <AnimatePresence>
+                            {notifications.map(n => (
+                                <Toast key={n.id} {...n} onClose={() => setNotifications(p => p.filter(item => item.id !== n.id))} />
+                            ))}
+                        </AnimatePresence>
+                    </div>
+                </NotificationContext.Provider>
+            </CartContext.Provider>
+        </AuthContext.Provider>
+    );
+};
+
+const AppWrapper = () => (
+    <Router>
+        <App />
+    </Router>
+);
+
+window.App =  AppWrapper;
+
+export default App;
+        
+        // Render the app
+        try {
+            if (typeof window.App === 'function') {
+                const root = ReactDOM.createRoot(document.getElementById('root'));
+                root.render(
+                    React.createElement(SandboxErrorBoundary, null,
+                        React.createElement(window.App)
+                    )
+                );
+            } else {
+                throw new Error('App component not found or not a function');
+            }
+        } catch (error) {
+            console.error('Failed to render app:', error);
+            document.getElementById('root').innerHTML = 
+                '<div class="error-boundary">' +
+                '<h2>Failed to render the application</h2>' +
+                '<p>' + error.message + '</p>' +
+                '<p>Check the console for more details.</p>' +
+                '</div>';
+        }
+    </script>
+</body>
+</html>
+    
