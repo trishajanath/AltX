@@ -218,21 +218,35 @@ class AIValidationAgent:
 						issues_found.append("Missing export statement")
 						# Try to fix by adding a simple export if it's a component
 						if 'function ' in content or 'const ' in content or 'class ' in content:
-							# Find component/function names and suggest export
-							lines = content.split('\n')
-							for line in lines:
-								if 'function ' in line or 'const ' in line:
-									# Extract potential component name
-									if 'function' in line:
-										name_part = line.split('function')[1].split('(')[0].strip()
-									elif 'const' in line and '=>' in line:
-										name_part = line.split('const')[1].split('=')[0].strip()
-									else:
-										continue
-									if name_part and name_part[0].isupper():  # Component naming convention
-										fixed_content = content + f'\n\nexport default {name_part};'
-										fixes_applied.append(f"Added export default {name_part}")
-										break
+							# For App.jsx, always export App
+							file_name = file_path.stem  # Get filename without extension
+							if file_name == 'App':
+								fixed_content = content + f'\n\nexport default App;'
+								fixes_applied.append(f"Added export default App")
+							else:
+								# Find component/function names - search from END of file to find main component
+								lines = content.split('\n')
+								component_name = None
+								for line in reversed(lines):
+									if 'function ' in line or 'const ' in line:
+										# Extract potential component name
+										if 'function' in line:
+											name_part = line.split('function')[1].split('(')[0].strip()
+										elif 'const' in line and '=' in line:
+											name_part = line.split('const')[1].split('=')[0].strip()
+										else:
+											continue
+										if name_part and name_part[0].isupper():  # Component naming convention
+											component_name = name_part
+											break
+								
+								# If no component found searching from end, try the filename as component name
+								if not component_name and file_name and file_name[0].isupper():
+									component_name = file_name
+								
+								if component_name:
+									fixed_content = content + f'\n\nexport default {component_name};'
+									fixes_applied.append(f"Added export default {component_name}")
 				elif file_path.suffix == '.json':
 					# JSON syntax check
 					try:
@@ -1540,58 +1554,58 @@ ReactDOM.createRoot(document.getElementById('root')).render(
   }
 }
 
-@layer components {{
+@layer components {
   /* Awwwards Glass Morphism */
-  .glass-morphism {{
+  .glass-morphism {
     background: rgba(255, 255, 255, 0.1);
     backdrop-filter: blur(20px);
     border: 1px solid rgba(255, 255, 255, 0.2);
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-  }}
+  }
   
-  .glass-dark {{
+  .glass-dark {
     background: rgba(0, 0, 0, 0.2);
     backdrop-filter: blur(20px);
     border: 1px solid rgba(255, 255, 255, 0.1);
-  }}
+  }
   
   /* Award-winning Gradients */
-  .gradient-text {{
+  .gradient-text {
     @apply bg-gradient-to-r from-purple-400 via-pink-500 to-red-500 bg-clip-text text-transparent;
-  }}
+  }
   
-  .gradient-vibrant {{
+  .gradient-vibrant {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  }}
+  }
   
-  .gradient-mesh {{
+  .gradient-mesh {
     background: radial-gradient(circle at 20% 50%, #ff6b6b 0%, transparent 50%),
                 radial-gradient(circle at 80% 20%, #4ecdc4 0%, transparent 50%),
                 radial-gradient(circle at 40% 80%, #45b7d1 0%, transparent 50%),
                 linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-  }}
+  }
   
   /* Modern Shadows */
-  .shadow-glow {{
+  .shadow-glow {
     box-shadow: 0 0 30px rgba(139, 92, 246, 0.4);
-  }}
+  }
   
-  .shadow-float {{
+  .shadow-float {
     box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
-  }}
+  }
   
-  .shadow-vibrant {{
+  .shadow-vibrant {
     box-shadow: 0 10px 40px rgba(124, 58, 237, 0.3);
-  }}
+  }
   
   /* Interactive Elements */
-  .btn-awwwards {{
+  .btn-awwwards {
     @apply relative overflow-hidden px-8 py-4 rounded-2xl font-semibold text-white;
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     transition: all 0.3s ease;
-  }}
+  }
   
-  .btn-awwwards::before {{
+  .btn-awwwards::before {
     content: '';
     position: absolute;
     top: 0;
@@ -1600,16 +1614,16 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     height: 100%;
     background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
     transition: left 0.5s;
-  }}
+  }
   
-  .btn-awwwards:hover::before {{
+  .btn-awwwards:hover::before {
     left: 100%;
-  }}
+  }
   
-  .btn-awwwards:hover {{
+  .btn-awwwards:hover {
     transform: translateY(-2px) scale(1.02);
     box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
-  }}
+  }
   
   /* Card Animations */
   .card-hover {
@@ -2130,11 +2144,14 @@ export default defineConfig({
 			project_type = project_spec.get("project_type", "web app")
 			features = project_spec.get("features", [])
 			tech_stack = project_spec.get("tech_stack", [])
+			# NEW: Extract user-provided documentation context
+			documentation_context = project_spec.get("documentation_context", "")
 		else:
 			idea = str(project_spec)
 			project_type = "web app"
 			features = []
 			tech_stack = []
+			documentation_context = ""
 		
 		# Build detailed prompt with user specifications
 		spec_details = f"Project Type: {project_type}\n"
@@ -2143,10 +2160,30 @@ export default defineConfig({
 		if tech_stack:
 			spec_details += f"Tech Stack: {', '.join(tech_stack)}\n"
 		
+		# Add documentation context if provided by user
+		doc_section = ""
+		if documentation_context:
+			doc_section = f"""
+=== USER PROVIDED DOCUMENTATION ===
+The user has uploaded reference documents (PDFs, images, specifications) to guide this project.
+Use this information to create accurate, specific features and designs.
+
+{documentation_context}
+
+IMPORTANT: 
+- Base the features, UI design, and functionality on this documentation
+- Use exact terminology, field names, and workflows described in the documents
+- If images show UI mockups, replicate the layout, colors, and components shown
+- Extract any business rules, validation requirements, or data models described
+=== END USER DOCUMENTATION ===
+
+"""
+		
 		return (
 			f"Create a COMPREHENSIVE, MULTI-PAGE, PRODUCTION-READY project plan in JSON for: {idea}\n"
 			f"Project: {project_name}\n"
 			f"{spec_details}\n"
+			f"{doc_section}"
 			"🎯 MANDATORY REQUIREMENTS:\n"
 			"- Generate 5-8 SPECIFIC, DETAILED features (not generic)\n"
 			"- Create 6-10 separate page components (Home, About, Features, Contact, etc.)\n"
@@ -2155,8 +2192,9 @@ export default defineConfig({
 			"- Plan for REAL IMAGES from Unsplash API (never use placeholder URLs)\n"
 			"- Include working authentication (login/signup/logout)\n"
 			"- Add shopping cart for e-commerce projects (fully functional)\n"
-			"- Include REAL data examples and use cases\n\n"
-			"JSON format:\n"
+			"- Include REAL data examples and use cases\n"
+			+ ("- CRITICAL: Use the user's documentation to define exact features, UI, and data models\n" if documentation_context else "") +
+			"\nJSON format:\n"
 			"{\n"
 			"  \"app_type\": \"Specific app category (e.g., E-commerce Platform, Task Manager, Analytics Dashboard)\",\n"
 			"  \"description\": \"Detailed description of what the app does and its value proposition\",\n"

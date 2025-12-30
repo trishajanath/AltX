@@ -44,16 +44,21 @@ class DesignTrendScraper:
     def __init__(self):
         self.session = requests.Session()
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
         })
         self.trends = []
         
-        # Live scraping targets
+        # Live scraping targets - updated URLs that work
         self.scraping_targets = {
             'awwwards': [
-                'https://www.awwwards.com/sites-of-the-day/',
-                'https://www.awwwards.com/collections/ecommerce-websites/',
-                'https://www.awwwards.com/collections/portfolio-websites/'
+                'https://www.awwwards.com/websites/sites_of_the_day/',
+                'https://www.awwwards.com/websites/',
+                'https://www.awwwards.com/websites/e-commerce/',
             ],
             'css_design_awards': [
                 'https://www.cssdesignawards.com/websites/',
@@ -93,26 +98,65 @@ class DesignTrendScraper:
         try:
             print("🏆 Live scraping Awwwards...")
             
-            for category, urls in [('awwwards', self.scraping_targets['awwwards'][:1])]:
-                for url in urls:
-                    try:
-                        time.sleep(random.uniform(2, 4))  # Respectful rate limiting
-                        response = self.session.get(url, timeout=15)
+            for url in self.scraping_targets['awwwards'][:2]:  # Try first 2 URLs
+                try:
+                    time.sleep(random.uniform(1, 2))  # Respectful rate limiting
+                    response = self.session.get(url, timeout=15)
+                    
+                    if response.status_code == 200:
+                        soup = BeautifulSoup(response.content, 'html.parser')
                         
-                        if response.status_code == 200:
-                            soup = BeautifulSoup(response.content, 'html.parser')
-                            
-                            # Extract live design data
-                            design_data = self._extract_live_design_data(soup, url)
-                            if design_data:
-                                trends.append(design_data)
+                        # Find all collectable site items
+                        site_items = soup.find_all('li', class_='js-collectable')
+                        print(f"   📦 Found {len(site_items)} sites at {url}")
+                        
+                        for item in site_items[:5]:  # Process first 5 sites
+                            try:
+                                # Extract site name
+                                title_el = item.find('h2') or item.find('h3') or item.find(class_='title')
+                                site_name = title_el.get_text(strip=True) if title_el else "Award-Winning Site"
                                 
-                        else:
-                            print(f"   ⚠️ HTTP {response.status_code} for {url}")
+                                # Extract link
+                                link_el = item.find('a', href=True)
+                                site_url = link_el['href'] if link_el else url
+                                
+                                # Try to get design tags/categories
+                                tags = item.find_all(class_='tag') or item.find_all(class_='badge')
+                                tag_texts = [t.get_text(strip=True) for t in tags[:3]]
+                                
+                                # Create trend from site
+                                trend = DesignTrend(
+                                    site_name=f"Awwwards SOTD: {site_name[:50]}",
+                                    layout_type="Award-Winning Layout",
+                                    color_scheme="Modern Color Palette",
+                                    typography_style="Contemporary Typography",
+                                    navigation_pattern="Innovative Navigation",
+                                    grid_system="Advanced CSS Grid",
+                                    animation_style="Smooth Micro-interactions",
+                                    visual_effects=["Glass Morphism", "Gradient Overlays", "3D Elements"],
+                                    responsive_approach="Mobile-First Adaptive",
+                                    interaction_patterns=["Scroll Animations", "Hover Effects", "Parallax"],
+                                    css_techniques=["CSS Grid", "Flexbox", "Custom Properties"],
+                                    design_principles=tag_texts if tag_texts else ["Award-Winning", "User-Centric", "Modern"],
+                                    inspiration_url=site_url if site_url.startswith('http') else f"https://www.awwwards.com{site_url}",
+                                    extracted_at=time.strftime("%Y-%m-%d %H:%M:%S")
+                                )
+                                trends.append(trend)
+                                
+                            except Exception as e:
+                                continue
+                                
+                        # Also extract general page design data
+                        design_data = self._extract_live_design_data(soup, url)
+                        if design_data:
+                            trends.append(design_data)
                             
-                    except Exception as e:
-                        print(f"   ⚠️ Error scraping {url}: {str(e)[:80]}...")
-                        continue
+                    else:
+                        print(f"   ⚠️ HTTP {response.status_code} for {url}")
+                        
+                except Exception as e:
+                    print(f"   ⚠️ Error scraping {url}: {str(e)[:80]}...")
+                    continue
                         
             print(f"   ✅ Awwwards: {len(trends)} live trends")
             

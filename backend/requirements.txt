@@ -52,6 +52,10 @@ pyaudio
 google-cloud-speech
 google-cloud-texttospeech
 
+# PDF Processing (for document upload)
+PyPDF2
+Pillow
+
 # Web Automation and Testing
 playwright==1.44.0
 docker==7.0.0

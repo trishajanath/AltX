@@ -1426,6 +1426,76 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
         .text-gray-200 {{ color: #e5e7eb; }}
         .text-gray-300 {{ color: #d1d5db; }}
         .text-gray-400 {{ color: #9ca3af; }}
+        
+        /* Slate colors (Tailwind v3) */
+        .bg-slate-900 {{ background-color: #0f172a; }}
+        .bg-slate-800 {{ background-color: #1e293b; }}
+        .bg-slate-800\/60 {{ background-color: rgba(30, 41, 59, 0.6); }}
+        .bg-slate-900\/50 {{ background-color: rgba(15, 23, 42, 0.5); }}
+        .bg-slate-700 {{ background-color: #334155; }}
+        .bg-slate-600 {{ background-color: #475569; }}
+        .bg-slate-500 {{ background-color: #64748b; }}
+        .text-slate-100 {{ color: #f1f5f9; }}
+        .text-slate-200 {{ color: #e2e8f0; }}
+        .text-slate-300 {{ color: #cbd5e1; }}
+        .text-slate-400 {{ color: #94a3b8; }}
+        .text-slate-500 {{ color: #64748b; }}
+        .border-slate-700 {{ border-color: #334155; }}
+        .border-slate-600 {{ border-color: #475569; }}
+        .ring-slate-700 {{ --tw-ring-color: #334155; }}
+        .hover\\:bg-slate-700:hover {{ background-color: #334155; }}
+        .hover\\:bg-slate-800:hover {{ background-color: #1e293b; }}
+        .hover\\:text-slate-100:hover {{ color: #f1f5f9; }}
+        
+        /* Cyan colors */
+        .text-cyan-400 {{ color: #22d3ee; }}
+        .text-cyan-500 {{ color: #06b6d4; }}
+        .bg-cyan-500 {{ background-color: #06b6d4; }}
+        .bg-cyan-600 {{ background-color: #0891b2; }}
+        .from-cyan-500 {{ --tw-gradient-from: #06b6d4; }}
+        .to-blue-600 {{ --tw-gradient-to: #2563eb; }}
+        .to-cyan-400 {{ --tw-gradient-to: #22d3ee; }}
+        
+        /* Ring utilities */
+        .ring-1 {{ box-shadow: 0 0 0 1px var(--tw-ring-color); }}
+        .ring-white\\/10 {{ --tw-ring-color: rgba(255, 255, 255, 0.1); }}
+        
+        /* Emerald colors */
+        .bg-emerald-500 {{ background-color: #10b981; }}
+        .bg-emerald-600 {{ background-color: #059669; }}
+        .text-emerald-400 {{ color: #34d399; }}
+        .from-emerald-500 {{ --tw-gradient-from: #10b981; }}
+        .to-emerald-600 {{ --tw-gradient-to: #059669; }}
+        
+        /* Additional gradients */
+        .from-green-500 {{ --tw-gradient-from: #22c55e; }}
+        .to-green-600 {{ --tw-gradient-to: #16a34a; }}
+        .from-red-500 {{ --tw-gradient-from: #ef4444; }}
+        .to-red-600 {{ --tw-gradient-to: #dc2626; }}
+        .from-pink-600 {{ --tw-gradient-from: #db2777; }}
+        .to-pink-500 {{ --tw-gradient-to: #ec4899; }}
+        
+        /* White opacity utilities */
+        .bg-white\\/10 {{ background-color: rgba(255, 255, 255, 0.1); }}
+        .bg-white\\/20 {{ background-color: rgba(255, 255, 255, 0.2); }}
+        .hover\\:bg-white\\/10:hover {{ background-color: rgba(255, 255, 255, 0.1); }}
+        .hover\\:bg-white\\/20:hover {{ background-color: rgba(255, 255, 255, 0.2); }}
+        
+        /* Backdrop blur */
+        .backdrop-blur-sm {{ backdrop-filter: blur(4px); }}
+        .backdrop-blur {{ backdrop-filter: blur(8px); }}
+        
+        /* Focus ring utilities */
+        .focus\\:ring-cyan-500\\/50:focus {{ --tw-ring-color: rgba(6, 182, 212, 0.5); }}
+        .focus\\:ring-white\\/20:focus {{ --tw-ring-color: rgba(255, 255, 255, 0.2); }}
+        
+        /* Border opacity */
+        .border-cyan-400\\/50 {{ border-color: rgba(34, 211, 238, 0.5); }}
+        .border-slate-600\\/50 {{ border-color: rgba(71, 85, 105, 0.5); }}
+        
+        /* Slate background with opacity */
+        .bg-slate-800\\/50 {{ background-color: rgba(30, 41, 59, 0.5); }}
+        
         .bg-indigo-600 {{ background-color: #4f46e5; }}
         .bg-indigo-500 {{ background-color: #6366f1; }}
         .text-indigo-400 {{ color: #818cf8; }}
@@ -1960,7 +2030,7 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
             }};
             
             const variantClass = variants[variant] || variants.default;
-            const sizeClass = sizes[size] || sizes.md;
+            const sizeClass = sizes && sizes[size] ? sizes[size] : (sizes ? sizes.md : '');
             
             return React.createElement('button', {{
                 type,
@@ -2014,9 +2084,10 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
                 md: 'w-8 h-8',
                 lg: 'w-12 h-12'
             }};
+            const sizeClass = sizes && sizes[size] ? sizes[size] : (sizes ? sizes.md : '');
             
             return React.createElement('div', {{
-                className: `animate-spin rounded-full border-2 border-gray-200 border-t-blue-600 ${{sizes[size] || sizes.md}} ${{className}}`
+                className: `animate-spin rounded-full border-2 border-gray-200 border-t-blue-600 ${{sizeClass}} ${{className}}`
             }});
         }};
         window.Loading = Loading;

@@ -6,12 +6,30 @@ import json
 import tempfile
 import asyncio
 import time
+import base64
+import io
 from pathlib import Path
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form
 from fastapi.responses import JSONResponse, Response
 import google.generativeai as genai
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
+
+# Try to import PDF processing
+try:
+    import PyPDF2
+    PDF_AVAILABLE = True
+except ImportError:
+    PDF_AVAILABLE = False
+    print("⚠️  PyPDF2 not available - PDF text extraction disabled")
+
+# Try to import image processing
+try:
+    from PIL import Image
+    PILLOW_AVAILABLE = True
+except ImportError:
+    PILLOW_AVAILABLE = False
+    print("⚠️  Pillow not available - image processing disabled")
 
 # Try to import Google Cloud services
 try:
@@ -37,12 +55,140 @@ class ChatMessage(BaseModel):
     message: str
     conversation_history: List[Dict[str, Any]] = []
 
+class ChatMessageWithDocs(BaseModel):
+    """Chat message that may include extracted documentation context"""
+    message: str
+    conversation_history: List[Dict[str, Any]] = []
+    documentation_context: Optional[str] = None  # Extracted text from uploaded files
+
 class ProjectSpec(BaseModel):
     description: str
     type: str
     features: List[str]
     tech_stack: Dict[str, str]
     target_audience: str
+
+# Helper functions for file processing
+def extract_text_from_pdf(file_content: bytes) -> str:
+    """Extract text content from a PDF file."""
+    if not PDF_AVAILABLE:
+        return "[PDF processing not available - please describe your requirements in text]"
+    
+    try:
+        pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_content))
+        text_content = []
+        
+        for page_num, page in enumerate(pdf_reader.pages):
+            page_text = page.extract_text()
+            if page_text:
+                text_content.append(f"--- Page {page_num + 1} ---\n{page_text}")
+        
+        extracted_text = "\n\n".join(text_content)
+        
+        # Limit text length to prevent token overflow
+        max_chars = 15000
+        if len(extracted_text) > max_chars:
+            extracted_text = extracted_text[:max_chars] + f"\n\n[... Document truncated. Showing first {max_chars} characters of {len(extracted_text)} total ...]"
+        
+        return extracted_text if extracted_text else "[PDF contained no extractable text]"
+    except Exception as e:
+        print(f"❌ PDF extraction error: {e}")
+        return f"[Error extracting PDF content: {str(e)}]"
+
+def describe_image_with_gemini(image_content: bytes, mime_type: str) -> str:
+    """Use Gemini to describe/analyze an uploaded image for context."""
+    try:
+        # Use Gemini vision model to describe the image
+        vision_model = genai.GenerativeModel('gemini-2.5-flash')
+        
+        # Create image part for Gemini
+        image_part = {
+            "mime_type": mime_type,
+            "data": base64.b64encode(image_content).decode('utf-8')
+        }
+        
+        prompt = """Analyze this image and extract any useful information for building a software application. 
+Look for:
+1. UI/UX design mockups or wireframes
+2. Text content, labels, or descriptions
+3. Color schemes, themes, or branding
+4. Layout structure and components
+5. Any specifications or requirements shown
+
+Provide a detailed description that would help an AI generate code for a similar application."""
+
+        response = vision_model.generate_content([prompt, image_part])
+        
+        if response.text:
+            return f"[Image Analysis]\n{response.text}"
+        else:
+            return "[Could not analyze image content]"
+    except Exception as e:
+        print(f"❌ Image analysis error: {e}")
+        return f"[Error analyzing image: {str(e)}]"
+
+async def process_uploaded_files(files: List[UploadFile]) -> str:
+    """Process uploaded files and extract documentation context."""
+    if not files:
+        return ""
+    
+    documentation_parts = []
+    
+    for file in files:
+        try:
+            content = await file.read()
+            filename = file.filename or "unnamed_file"
+            content_type = file.content_type or ""
+            
+            print(f"📄 Processing uploaded file: {filename} ({content_type}, {len(content)} bytes)")
+            
+            if content_type == "application/pdf" or filename.lower().endswith('.pdf'):
+                # Extract text from PDF
+                extracted = extract_text_from_pdf(content)
+                documentation_parts.append(f"\n📄 **Document: {filename}**\n{extracted}")
+                
+            elif content_type.startswith("image/"):
+                # Analyze image with Gemini vision
+                extracted = describe_image_with_gemini(content, content_type)
+                documentation_parts.append(f"\n🖼️ **Image: {filename}**\n{extracted}")
+                
+            else:
+                # Try to read as text
+                try:
+                    text_content = content.decode('utf-8')
+                    if len(text_content) > 10000:
+                        text_content = text_content[:10000] + "\n[... content truncated ...]"
+                    documentation_parts.append(f"\n📝 **File: {filename}**\n{text_content}")
+                except:
+                    documentation_parts.append(f"\n📎 **File: {filename}** [Binary file - content not extractable]")
+                    
+        except Exception as e:
+            print(f"❌ Error processing file {file.filename}: {e}")
+            documentation_parts.append(f"\n❌ **File: {file.filename}** [Error: {str(e)}]")
+    
+    if documentation_parts:
+        return "\n\n=== USER PROVIDED DOCUMENTATION ===\n" + "\n".join(documentation_parts) + "\n=== END DOCUMENTATION ===\n"
+    
+    return ""
+
+# Store documentation context for project generation (keyed by session/user)
+_documentation_context_store: Dict[str, str] = {}
+
+def store_documentation_context(session_id: str, context: str):
+    """Store documentation context for later use in project generation."""
+    if context:
+        _documentation_context_store[session_id] = context
+        print(f"📚 Stored documentation context for session {session_id} ({len(context)} chars)")
+
+def get_documentation_context(session_id: str) -> Optional[str]:
+    """Retrieve stored documentation context."""
+    return _documentation_context_store.get(session_id)
+
+def clear_documentation_context(session_id: str):
+    """Clear documentation context after project generation."""
+    if session_id in _documentation_context_store:
+        del _documentation_context_store[session_id]
+        print(f"🧹 Cleared documentation context for session {session_id}")
 
 # Initialize Gemini for conversation
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
@@ -302,6 +448,219 @@ async def process_speech(audio: UploadFile = File(...)):
                 "fallback_message": "You can type your message below instead of using voice"
             }
         )
+
+@router.post("/chat-with-files")
+async def chat_with_ai_and_files(
+    message: str = Form(...),
+    conversation_history: str = Form("[]"),
+    files: List[UploadFile] = File(default=[])
+):
+    """Handle conversation with AI assistant, including file uploads for documentation.
+    
+    This endpoint accepts multipart form data with optional file attachments.
+    Files (images, PDFs) will be processed and their content used as context
+    for the AI to generate better applications.
+    """
+    try:
+        # Parse conversation history from JSON string
+        try:
+            history = json.loads(conversation_history)
+        except json.JSONDecodeError:
+            history = []
+        
+        # Process any uploaded files
+        documentation_context = ""
+        if files and len(files) > 0:
+            # Filter out empty file uploads
+            actual_files = [f for f in files if f.filename and f.size > 0]
+            if actual_files:
+                print(f"📎 Processing {len(actual_files)} uploaded files for chat context")
+                documentation_context = await process_uploaded_files(actual_files)
+                
+                # Store context for project generation
+                # Use a simple session ID based on conversation length for now
+                session_id = f"chat_{len(history)}_{hash(message)}"
+                store_documentation_context(session_id, documentation_context)
+        
+        # Build conversation context
+        conversation_context = ""
+        for msg in history[-10:]:  # Last 10 messages for context
+            if msg.get('type') == 'user':
+                conversation_context += f"User: {msg.get('content', '')}\n"
+            elif msg.get('type') == 'ai':
+                conversation_context += f"Assistant: {msg.get('content', '')}\n"
+        
+        # Add documentation context if available
+        if documentation_context:
+            conversation_context = documentation_context + "\n\n" + conversation_context
+            print(f"📚 Added {len(documentation_context)} chars of documentation context")
+        
+        # Add current message
+        conversation_context += f"User: {message}\n"
+        
+        # Check if we have enough info for a summary
+        has_project_type = any(keyword in conversation_context.lower() for keyword in ['grocery', 'app', 'website', 'mobile', 'web app', 'application'])
+        has_tech_stack = any(keyword in conversation_context.lower() for keyword in ['react', 'fastapi', 'javascript', 'python', 'node'])
+        has_design_prefs = any(keyword in conversation_context.lower() for keyword in ['black', 'white', 'color', 'theme', 'style', 'design'])
+        user_said_nope = 'nope' in message.lower() or 'no' in message.lower()
+        
+        should_create_summary = has_project_type and has_tech_stack and has_design_prefs and user_said_nope
+        
+        print(f"DEBUG Summary Check: type={has_project_type}, tech={has_tech_stack}, design={has_design_prefs}, nope={user_said_nope}")
+        print(f"DEBUG Should create summary: {should_create_summary}")
+        print(f"DEBUG Has documentation: {len(documentation_context) > 0}")
+        
+        # Build enhanced prompt with documentation awareness
+        doc_instruction = ""
+        if documentation_context:
+            doc_instruction = """
+
+IMPORTANT: The user has provided documentation (PDFs, images, or text files) as reference material.
+Use this documentation to:
+1. Understand the specific features, UI designs, or requirements they want
+2. Extract any color schemes, branding, or design patterns from images
+3. Reference specific pages or sections from PDFs when discussing features
+4. Incorporate exact terminology and requirements from the documentation
+
+When you create the PROJECT SUMMARY, include features and designs based on the provided documentation.
+"""
+        
+        summary_instruction = """
+        
+IMPORTANT: Based on the conversation, if you have collected:
+1. Project type/purpose 
+2. Technology stack
+3. Design preferences
+4. User indicated no additional requirements
+
+Then you MUST create a PROJECT SUMMARY in this format:
+"PROJECT SUMMARY:
+📱 Type: [type from conversation]
+🎯 Purpose: [purpose from conversation] 
+⭐ Features: [basic features + design preferences]
+💻 Tech: [tech stack from conversation]
+🎨 Style: [design preferences from conversation]
+
+Does this look good? Say 'yes' to generate your app!"
+""" if should_create_summary else ""
+        
+        prompt = f"""Conversation so far:
+{conversation_context}
+
+CRITICAL INSTRUCTIONS: 
+- ALWAYS respond in English unless the user has explicitly requested another language
+- If the transcribed text seems like broken English or poor translation, treat it as English and respond in clear English
+- Never respond in Hindi, Urdu, or any Indian language unless explicitly requested
+- Keep responses friendly, professional, and focused on gathering app requirements
+- Use simple, clear English{doc_instruction}{summary_instruction}
+
+Response:"""
+        
+        response = conversation_model.generate_content(
+            prompt,
+            generation_config={
+                "temperature": 0.7,
+                "top_p": 0.8,
+                "max_output_tokens": 2048
+            },
+            safety_settings=[
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+            ]
+        )
+        
+        # Extract AI response
+        ai_response = ""
+        if response.candidates and len(response.candidates) > 0:
+            try:
+                ai_response = response.text if response.text else "I'm ready to help you build your app! What would you like to create?"
+            except Exception as e:
+                print(f"⚠️ Error accessing response.text: {e}")
+                ai_response = "I'm ready to help you build your app! What would you like to create?"
+        else:
+            ai_response = "I'm your AI assistant and I'm ready to help you build amazing projects! What kind of app would you like to create today!"
+        
+        # Force English response
+        ai_response = _ensure_english_response(ai_response, message)
+        
+        # Check if this is a project confirmation
+        should_generate = False
+        project_spec = None
+        
+        user_msg_lower = message.lower()
+        confirmation_words = ['yes', 'looks good', 'generate', 'build it', 'create it', 'perfect', 'correct', 'sounds good']
+        has_project_summary = "PROJECT SUMMARY:" in conversation_context
+        is_confirmation = any(word in user_msg_lower for word in confirmation_words)
+        
+        if is_confirmation and has_project_summary:
+            should_generate = True
+            
+            project_description = ""
+            project_type = "web app"
+            features = []
+            tech_stack = ["React", "FastAPI"]
+            
+            # Parse the PROJECT SUMMARY
+            try:
+                summary_start = conversation_context.find("PROJECT SUMMARY:")
+                if summary_start != -1:
+                    summary_section = conversation_context[summary_start:summary_start + 1000]
+                    
+                    if "Type:" in summary_section:
+                        type_line = summary_section.split("Type:")[1].split("\n")[0].strip()
+                        project_type = type_line.replace("📱", "").replace("💻", "").strip()
+                    
+                    if "Purpose:" in summary_section:
+                        purpose_line = summary_section.split("Purpose:")[1].split("\n")[0].strip()
+                        project_description = purpose_line.replace("🎯", "").strip()
+                    
+                    if "Features:" in summary_section:
+                        features_line = summary_section.split("Features:")[1].split("\n")[0].strip()
+                        features = [f.strip() for f in features_line.replace("⭐", "").split(",") if f.strip()]
+                    
+                    if "Style:" in summary_section:
+                        style_line = summary_section.split("Style:")[1].split("\n")[0].strip()
+                        style_features = style_line.replace("🎨", "").strip()
+                        if style_features:
+                            features.append(f"Design: {style_features}")
+                    
+                    if "Tech:" in summary_section:
+                        tech_line = summary_section.split("Tech:")[1].split("\n")[0].strip()
+                        tech_parts = tech_line.replace("💻", "").split(",")
+                        if len(tech_parts) >= 2:
+                            tech_stack = [t.strip() for t in tech_parts if t.strip()]
+            except Exception as e:
+                print(f"Error parsing project summary: {e}")
+            
+            project_spec = {
+                "description": project_description or "AI-generated application",
+                "type": project_type,
+                "features": features,
+                "tech_stack": tech_stack,
+                "conversation_history": history,
+                "documentation_context": documentation_context if documentation_context else None
+            }
+            
+            print(f"DEBUG: Final project_spec with docs: {bool(documentation_context)}")
+        
+        return {
+            "response": ai_response,
+            "should_generate": should_generate,
+            "project_spec": project_spec,
+            "has_documentation": len(documentation_context) > 0
+        }
+        
+    except Exception as e:
+        print(f"❌ Chat with files error: {e}")
+        import traceback
+        print(f"Full traceback: {traceback.format_exc()}")
+        return {
+            "response": "I'm having a technical issue. Could you try again?",
+            "should_generate": False,
+            "project_spec": None
+        }
 
 @router.post("/chat")
 async def chat_with_ai(chat_data: ChatMessage):

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Mic, MicOff, Scan, Database, UploadCloud, Volume2, VolumeX, MessageCircle, Loader, Play, Square, Settings, BrainCircuit, ArrowRight, X } from 'lucide-react';
+import { Mic, MicOff, Scan, Database, UploadCloud, Volume2, VolumeX, MessageCircle, Loader, Play, Square, Settings, BrainCircuit, ArrowRight, X, Paperclip, FileText, Image } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { apiUrl } from '../config/api';
@@ -1181,7 +1181,7 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
   };
 
   // Send message to AI assistant
-  const sendToAI = async (message) => {
+  const sendToAI = async (message, filesToSend = []) => {
     // Skip API call in demo mode
     if (isDemo) {
       return;
@@ -1190,16 +1190,39 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
     setIsLoading(true);
     
     try {
-      const response = await authenticatedFetch('http://localhost:8000/api/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          message: message,
-          conversation_history: conversation.filter(msg => msg.type !== 'system')
-        })
-      });
+      let response;
+      
+      // If there are files, use FormData for multipart upload with dedicated endpoint
+      if (filesToSend.length > 0) {
+        const formData = new FormData();
+        formData.append('message', message);
+        formData.append('conversation_history', JSON.stringify(
+          conversation.filter(msg => msg.type !== 'system')
+        ));
+        
+        // Append each file
+        filesToSend.forEach((file, index) => {
+          formData.append('files', file);
+        });
+        
+        // Use the file-enabled endpoint - don't set Content-Type header, browser will set it with boundary
+        response = await authenticatedFetch('http://localhost:8000/api/chat-with-files', {
+          method: 'POST',
+          body: formData
+        });
+      } else {
+        // Standard JSON request without files
+        response = await authenticatedFetch('http://localhost:8000/api/chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            message: message,
+            conversation_history: conversation.filter(msg => msg.type !== 'system')
+          })
+        });
+      }
       
       if (!response.ok) {
         throw new Error('AI chat failed');
@@ -1541,6 +1564,43 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
   const [textInput, setTextInput] = useState('');
   const textInputRef = useRef(null);
   
+  // File upload state for images and PDFs (user documentation)
+  const [uploadedFiles, setUploadedFiles] = useState([]);
+  const fileInputRef = useRef(null);
+  
+  // Handle file upload selection
+  const handleFileUpload = useCallback((e) => {
+    const files = Array.from(e.target.files);
+    const validFiles = files.filter(file => {
+      const isImage = file.type.startsWith('image/');
+      const isPDF = file.type === 'application/pdf';
+      const isValidSize = file.size <= 10 * 1024 * 1024; // 10MB limit
+      return (isImage || isPDF) && isValidSize;
+    });
+    
+    if (validFiles.length !== files.length) {
+      addMessage('system', 'Some files were skipped. Only images and PDFs under 10MB are allowed.');
+    }
+    
+    setUploadedFiles(prev => [...prev, ...validFiles]);
+    // Reset input to allow re-uploading same file
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  }, [addMessage]);
+  
+  // Remove uploaded file
+  const removeUploadedFile = useCallback((index) => {
+    setUploadedFiles(prev => prev.filter((_, i) => i !== index));
+  }, []);
+  
+  // Get file icon based on type
+  const getFileIcon = (file) => {
+    if (file.type === 'application/pdf') return '📄';
+    if (file.type.startsWith('image/')) return '🖼️';
+    return '📎';
+  };
+  
   // Stable text input handler to prevent focus loss
   const handleTextInputChange = useCallback((e) => {
     setTextInput(e.target.value);
@@ -1756,28 +1816,36 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
   const sendTextMessage = useCallback(() => {
     if (!textInput.trim() || isLoading || isDemo) return; // Disabled in demo mode
     
-    addMessage('user', textInput);
+    // Show user message with file attachment info
+    const fileInfo = uploadedFiles.length > 0 
+      ? ` [${uploadedFiles.length} file(s) attached: ${uploadedFiles.map(f => f.name).join(', ')}]`
+      : '';
+    addMessage('user', textInput + fileInfo);
 
-    // Handle AI based on the current mode
+    // Capture files before clearing
+    const filesToSend = [...uploadedFiles];
+    
+    // Handle AI based on the current mode, including files
     switch (currentMode) {
       case 'voice':
-        sendToAI(textInput);
+        sendToAI(textInput, filesToSend);
         break;
       case 'scan_website':
-        sendToAI(`Scanning website: ${textInput}`);
+        sendToAI(`Scanning website: ${textInput}`, filesToSend);
         break;
       case 'scan_repo':
-        sendToAI(`Scanning repository: ${textInput}`);
+        sendToAI(`Scanning repository: ${textInput}`, filesToSend);
         break;
       case 'deploy':
-        sendToAI(`Starting deployment for: ${textInput}`);
+        sendToAI(`Starting deployment for: ${textInput}`, filesToSend);
         break;
       default:
-        sendToAI(textInput);
+        sendToAI(textInput, filesToSend);
     }
     
     setTextInput('');
-  }, [textInput, isLoading, isDemo, currentMode, sendToAI, addMessage]);
+    setUploadedFiles([]); // Clear files after sending
+  }, [textInput, isLoading, isDemo, currentMode, sendToAI, addMessage, uploadedFiles]);
 
   // Helper to get placeholder text for the current mode
   const getPlaceholder = () => {
@@ -2062,6 +2130,27 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
 
                 {/* Chat Input Bar */}
                 <div className="chatbox-input-bar">
+                  {/* File preview area - show attached files above input */}
+                  {uploadedFiles.length > 0 && (
+                    <div className="attached-files-preview">
+                      {uploadedFiles.map((file, index) => (
+                        <div key={index} className="attached-file-chip">
+                          <span className="file-icon">
+                            {file.type === 'application/pdf' ? <FileText size={14} /> : <Image size={14} />}
+                          </span>
+                          <span className="file-name">{file.name.length > 20 ? file.name.substring(0, 17) + '...' : file.name}</span>
+                          <button 
+                            className="remove-file-btn"
+                            onClick={() => removeUploadedFile(index)}
+                            title="Remove file"
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  
                   <div className="main-input-controls">
                     {/* Mic Button (left side - always visible) */}
                     <button
@@ -2073,6 +2162,29 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
                     >
                       {isRecording ? <Square size={18} /> : <Mic size={18} />}
                     </button>
+                    
+                    {/* File Upload Button */}
+                    <button
+                      className={`side-control-btn file-upload-btn ${uploadedFiles.length > 0 ? 'has-files' : ''}`}
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={isLoading || isDemo}
+                      title="Attach images or PDFs (documentation for AI)"
+                    >
+                      <Paperclip size={18} />
+                      {uploadedFiles.length > 0 && (
+                        <span className="file-count-badge">{uploadedFiles.length}</span>
+                      )}
+                    </button>
+                    
+                    {/* Hidden file input */}
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*,.pdf,application/pdf"
+                      multiple
+                      onChange={handleFileUpload}
+                      style={{ display: 'none' }}
+                    />
 
                     {/* Text Input (adapts to mode) */}
                     <div className="hero-text-input-container">
@@ -2087,7 +2199,9 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
                             sendTextMessage();
                           }
                         }}
-                        placeholder={isDemo ? 'Click a suggestion above to try the demo' : getPlaceholder()}
+                        placeholder={uploadedFiles.length > 0 
+                          ? `Describe your app (${uploadedFiles.length} file(s) will be used as reference)...`
+                          : (isDemo ? 'Click a suggestion above to try the demo' : getPlaceholder())}
                         className="hero-text-input"
                         disabled={isLoading || isDemo}
                         autoComplete="off"
