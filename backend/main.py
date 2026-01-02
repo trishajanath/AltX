@@ -95,6 +95,25 @@ except ImportError as e:
 from scanner.hybrid_crawler import crawl_hybrid 
 from nlp_suggester import suggest_fixes
 import ai_assistant
+
+# Import Website Analyzer for "build a website like X" feature
+try:
+    from website_analyzer import (
+        WebsiteAnalyzer,
+        WebsiteAnalysis,
+        analyze_website_for_inspiration,
+        get_inspiration_prompt_context,
+        website_analyzer,
+        POPULAR_SITES
+    )
+    WEBSITE_ANALYZER_AVAILABLE = True
+    print("✅ Website Analyzer loaded - 'like X' feature enabled")
+except ImportError as e:
+    WEBSITE_ANALYZER_AVAILABLE = False
+    website_analyzer = None
+    POPULAR_SITES = {}
+    print(f"⚠️ Website Analyzer not available: {e}")
+
 try:
     from ai_assistant import github_client
 except ImportError:
@@ -930,6 +949,137 @@ Provide clear, practical, and actionable responses. Be concise but thorough."""
                     del manager.project_connections[chat_project_name]
         finally:
             print(f"💬 Chat WebSocket cleaned up: {project_name}")
+
+# --- Website Analyzer Endpoints for "Build like X" feature ---
+@app.get("/api/website-analyzer/popular-sites")
+async def get_popular_sites():
+    """Get list of popular websites that can be used as inspiration"""
+    if not WEBSITE_ANALYZER_AVAILABLE:
+        return {"available": False, "sites": {}}
+    
+    return {
+        "available": True,
+        "sites": POPULAR_SITES,
+        "categories": {
+            "ecommerce": ["amazon", "ebay", "shopify", "etsy", "walmart", "alibaba"],
+            "social": ["twitter", "facebook", "instagram", "linkedin", "pinterest", "reddit"],
+            "tech": ["github", "notion", "slack", "discord", "figma", "canva"],
+            "streaming": ["netflix", "spotify", "youtube", "twitch"],
+            "travel": ["airbnb", "booking", "expedia", "tripadvisor"],
+            "food": ["doordash", "ubereats", "grubhub", "instacart"],
+            "finance": ["stripe", "paypal", "robinhood", "coinbase"],
+        }
+    }
+
+
+@app.post("/api/website-analyzer/analyze")
+async def analyze_website_endpoint(request: dict = Body(...)):
+    """Analyze a website to extract design patterns for inspiration"""
+    if not WEBSITE_ANALYZER_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Website analyzer not available")
+    
+    url = request.get("url", "")
+    site_name = request.get("site_name", "")
+    take_screenshot = request.get("take_screenshot", False)  # Screenshots can be slow
+    
+    if not url:
+        # Try to get from site_name
+        if site_name and site_name.lower() in POPULAR_SITES:
+            url = POPULAR_SITES[site_name.lower()]
+        else:
+            raise HTTPException(status_code=400, detail="URL or known site_name required")
+    
+    try:
+        analysis = await website_analyzer.analyze_website(url, site_name, take_screenshot)
+        
+        return {
+            "success": True,
+            "analysis": {
+                "website_name": analysis.website_name,
+                "website_url": analysis.website_url,
+                "analysis_quality": analysis.analysis_quality,
+                "layout_type": analysis.layout_type,
+                "grid_system": analysis.grid_system,
+                "page_structure": analysis.page_structure,
+                "color_palette": analysis.color_palette,
+                "primary_colors": analysis.primary_colors,
+                "background_style": analysis.background_style,
+                "font_families": analysis.font_families,
+                "navigation_type": analysis.navigation_type,
+                "has_search": analysis.has_search,
+                "has_cart": analysis.has_cart,
+                "has_user_menu": analysis.has_user_menu,
+                "components": analysis.components,
+                "hero_section": analysis.hero_section,
+                "features": analysis.features,
+                "css_techniques": analysis.css_techniques,
+                "animation_styles": analysis.animation_styles,
+                "design_suggestions": analysis.design_suggestions,
+                "screenshot_available": analysis.screenshot_base64 is not None,
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+
+
+@app.post("/api/website-analyzer/extract-reference")
+async def extract_website_reference(request: dict = Body(...)):
+    """Extract website reference from a user prompt like 'build a website like Amazon'"""
+    if not WEBSITE_ANALYZER_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Website analyzer not available")
+    
+    prompt = request.get("prompt", "")
+    
+    if not prompt:
+        raise HTTPException(status_code=400, detail="Prompt required")
+    
+    site_ref = website_analyzer.extract_website_reference(prompt)
+    
+    if site_ref:
+        site_name, url = site_ref
+        return {
+            "found": True,
+            "site_name": site_name,
+            "url": url,
+            "message": f"Detected reference to {site_name} - will analyze for design inspiration"
+        }
+    else:
+        return {
+            "found": False,
+            "site_name": None,
+            "url": None,
+            "message": "No website reference found in prompt"
+        }
+
+
+@app.get("/api/website-analyzer/screenshot/{site_name}")
+async def get_website_screenshot(site_name: str):
+    """Get a screenshot of a popular website (if available)"""
+    if not WEBSITE_ANALYZER_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Website analyzer not available")
+    
+    url = POPULAR_SITES.get(site_name.lower())
+    if not url:
+        raise HTTPException(status_code=404, detail=f"Unknown site: {site_name}")
+    
+    try:
+        screenshot = await website_analyzer._capture_screenshot(url)
+        
+        if screenshot:
+            return {
+                "success": True,
+                "site_name": site_name,
+                "screenshot_base64": screenshot,
+                "content_type": "image/png"
+            }
+        else:
+            return {
+                "success": False,
+                "message": "Screenshot capture not available or failed"
+            }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Screenshot failed: {str(e)}")
+
 
 # --- Enhanced Project Structure Creation ---
 @app.post("/api/create-project-structure")

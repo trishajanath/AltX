@@ -1,36 +1,12 @@
 """Pure AI generator that relies exclusively on Gemini outputs.
 
 This module intentionally avoids deterministic fallbacks. If Gemini declines
-to produce content, the requ		# Check if the response was blocked (anything other than STOP/1 is problematic)
-		if finish_reason is not None and finish_reason != 1:
-			# Handle specific cases
-			if finish_reason == 2:  # MAX_TOKENS
-				# For debugg			+ "* Use React 18 functional components with hooks.\n"
-			"* TailwindCSS utility classes for styling (CDN version in HTML).\n"
-			"* App.jsx must orchestrate layout and import all generated components.\n"
-			"* Each component file should default-export a component whose name matches the sanitized component identifier (see JSON payload) and implement the described purpose.\n"
-			"* main.jsx must bootstrap React with ReactDOM.createRoot and import index.css.\n"
-			"* package.json must include scripts (dev, build, preview) and dependencies for React, ReactDOM, Vite.\n"
-			"* Include inline TailwindCSS via CDN in index.html.\n"
-			"* Components should make direct fetch calls to `http://localhost:8000/api`.\n"
-			"* Provide responsive design and loading/error states.\n"
-			"* Keep code concise but functional.\n\n" see what we got before the truncation
-				text = self._candidate_text(candidate)
-				print(f"DEBUG: Truncated response length: {len(text)} chars")
-				print(f"DEBUG: Response preview: {text[:500]}...")
-				print(f"DEBUG: Response ending: ...{text[-500:]}")
-				raise ModelGenerationError("Gemini response was truncated due to token limit. Try reducing the request complexity.")
-			
-			# Try to get the FinishReason enum for better error messages
-			try:
-				finish_reason_name = getattr(candidate, "FinishReason", None)
-				if finish_reason_name:
-					for attr_name in dir(finish_reason_name):
-						if not attr_name.startswith('_') and getattr(finish_reason_name, attr_name) == finish_reason:
-							raise ModelGenerationError(f"Gemini blocked the request (finish_reason={attr_name})")
-			except:
-				pass
-			raise ModelGenerationError(f"Gemini blocked the request (finish_reason={finish_reason})")e caller must handle the error.
+to produce content, the caller must handle the error.
+
+Enhanced with Website Analyzer integration:
+- When user says "build a website like Amazon", scrapes Amazon for design patterns
+- Extracts colors, layout, typography, components from target website
+- Creates similar but unique design based on analysis
 """
 
 from __future__ import annotations
@@ -51,6 +27,20 @@ from google.generativeai.types import (
     HarmCategory,
 )
 from code_validator import CodeValidator, validate_generated_code, auto_fix_jsx_for_sandbox, validate_and_fix_for_sandbox
+
+# Import website analyzer for "build a website like X" feature
+try:
+    from website_analyzer import (
+        WebsiteAnalyzer, 
+        WebsiteAnalysis, 
+        analyze_website_for_inspiration,
+        get_inspiration_prompt_context,
+        website_analyzer
+    )
+    WEBSITE_ANALYZER_AVAILABLE = True
+except ImportError:
+    WEBSITE_ANALYZER_AVAILABLE = False
+    print("⚠️ Website analyzer not available - 'like X' feature disabled")
 
 class ModelGenerationError(RuntimeError):
 	"""Raised when Gemini refuses to generate the requested content."""
@@ -868,9 +858,42 @@ class PureAIGenerator:
 		else:
 			idea = str(project_spec)
 			project_spec = {"idea": idea}
+		
+		# 🌐 NEW: Check for website reference and analyze if found
+		website_inspiration_context = ""
+		if WEBSITE_ANALYZER_AVAILABLE:
+			try:
+				print("🔍 Checking for website reference in idea...")
+				website_analysis = await analyze_website_for_inspiration(idea)
+				
+				if website_analysis and website_analysis.analysis_quality != "failed":
+					print(f"🎨 Found website inspiration: {website_analysis.website_name}")
+					print(f"   Layout: {website_analysis.layout_type}")
+					print(f"   Colors: {website_analysis.primary_colors[:3]}")
+					print(f"   Components: {[c['name'] for c in website_analysis.components[:5]]}")
+					
+					# Convert analysis to prompt context
+					website_inspiration_context = get_inspiration_prompt_context(website_analysis)
+					
+					# Store in project_spec for downstream use
+					project_spec["website_inspiration_context"] = website_inspiration_context
+					project_spec["website_analysis"] = {
+						"name": website_analysis.website_name,
+						"url": website_analysis.website_url,
+						"layout": website_analysis.layout_type,
+						"colors": website_analysis.primary_colors,
+						"features": website_analysis.features,
+						"suggestions": website_analysis.design_suggestions
+					}
+					
+					print(f"✅ Website analysis complete - will create inspired but unique design")
+				else:
+					print("ℹ️ No website reference detected or analysis failed")
+			except Exception as e:
+				print(f"⚠️ Website analysis error (continuing without): {e}")
 			
 		request = GenerationRequest(
-			prompt=self._build_plan_prompt(project_spec, project_name),
+			prompt=self._build_plan_prompt(project_spec, project_name, website_inspiration_context),
 			config_overrides={
 				"response_mime_type": "application/json",
 				"max_output_tokens": 16384,  # Increased for comprehensive plans
@@ -2137,7 +2160,7 @@ export default defineConfig({
 		return files_created
 
 	@staticmethod
-	def _build_plan_prompt(project_spec, project_name: str) -> str:
+	def _build_plan_prompt(project_spec, project_name: str, website_inspiration_context: str = "") -> str:
 		# Extract details from project specification
 		if isinstance(project_spec, dict):
 			idea = project_spec.get("idea", "")
@@ -2146,6 +2169,8 @@ export default defineConfig({
 			tech_stack = project_spec.get("tech_stack", [])
 			# NEW: Extract user-provided documentation context
 			documentation_context = project_spec.get("documentation_context", "")
+			# NEW: Get website inspiration context if passed in spec
+			website_inspiration_context = project_spec.get("website_inspiration_context", website_inspiration_context)
 		else:
 			idea = str(project_spec)
 			project_type = "web app"
@@ -2159,6 +2184,14 @@ export default defineConfig({
 			spec_details += f"Required Features: {', '.join(features)}\n"
 		if tech_stack:
 			spec_details += f"Tech Stack: {', '.join(tech_stack)}\n"
+		
+		# Add website inspiration section if available
+		website_section = ""
+		if website_inspiration_context:
+			website_section = f"""
+{website_inspiration_context}
+
+"""
 		
 		# Add documentation context if provided by user
 		doc_section = ""
@@ -2183,6 +2216,7 @@ IMPORTANT:
 			f"Create a COMPREHENSIVE, MULTI-PAGE, PRODUCTION-READY project plan in JSON for: {idea}\n"
 			f"Project: {project_name}\n"
 			f"{spec_details}\n"
+			f"{website_section}"
 			f"{doc_section}"
 			"🎯 MANDATORY REQUIREMENTS:\n"
 			"- Generate 5-8 SPECIFIC, DETAILED features (not generic)\n"
@@ -2193,7 +2227,8 @@ IMPORTANT:
 			"- Include working authentication (login/signup/logout)\n"
 			"- Add shopping cart for e-commerce projects (fully functional)\n"
 			"- Include REAL data examples and use cases\n"
-			+ ("- CRITICAL: Use the user's documentation to define exact features, UI, and data models\n" if documentation_context else "") +
+			+ ("- CRITICAL: Use the user's documentation to define exact features, UI, and data models\n" if documentation_context else "")
+			+ ("- CRITICAL: Create a SIMILAR but UNIQUE design inspired by the analyzed website - do NOT copy exactly\n" if website_inspiration_context else "") +
 			"\nJSON format:\n"
 			"{\n"
 			"  \"app_type\": \"Specific app category (e.g., E-commerce Platform, Task Manager, Analytics Dashboard)\",\n"
@@ -3366,6 +3401,63 @@ The following are ALREADY AVAILABLE GLOBALLY - DO NOT IMPORT OR REDEFINE:
 ✅ ICONS (Global): User, Search, Menu, X, Plus, Minus, Heart, Star, ShoppingCart, Trash2, Edit, Save, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Home, Settings, Bell, Mail, Phone, MapPin, etc.
 ✅ UTILITIES (Global): cn (className utility)
 
+🎨🎨🎨 CRITICAL: BUTTON VISIBILITY & PROFESSIONAL STYLING 🎨🎨🎨
+════════════════════════════════════════════════════════════════
+⚠️ PROBLEM: Buttons appearing as plain text/invisible are UNACCEPTABLE!
+⚠️ EVERY button must be VISUALLY OBVIOUS with proper background colors and styling!
+
+✅ CORRECT BUTTON PATTERNS (Always use these):
+```jsx
+// CTA/Primary Buttons - MUST have solid background color
+<Button onClick={{() => navigate('/products')}} variant="primary" className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-semibold shadow-lg">
+  Start Shopping
+</Button>
+
+// Or use button element directly with full styling:
+<button 
+  onClick={{handleAction}}
+  className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-bold px-8 py-4 rounded-xl shadow-xl hover:shadow-2xl transform hover:scale-105 transition-all duration-300"
+>
+  Get Started
+</button>
+
+// Secondary buttons - visible outline
+<button 
+  onClick={{handleSecondary}}
+  className="border-2 border-blue-600 text-blue-600 hover:bg-blue-600 hover:text-white px-6 py-3 rounded-lg font-semibold transition-all"
+>
+  Learn More
+</button>
+
+// Ghost/text buttons - still must be visible!
+<button 
+  onClick={{handleGhost}}
+  className="text-blue-600 hover:text-blue-800 font-semibold underline-offset-4 hover:underline"
+>
+  View Details
+</button>
+```
+
+❌ WRONG - INVISIBLE/UNSTYLED BUTTONS (NEVER DO THIS):
+```jsx
+// ❌ No background color - button looks like plain text!
+<button onClick={{handler}}>Click Me</button>
+
+// ❌ Only text styling - no visual button appearance!
+<button className="text-gray-600">Submit</button>
+
+// ❌ Link styled as invisible button!
+<span onClick={{handler}}>Start Shopping</span>
+```
+
+🎨 MANDATORY BUTTON STYLING CLASSES:
+- PRIMARY: bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-semibold shadow-lg
+- GRADIENT: bg-gradient-to-r from-blue-600 to-purple-600 text-white px-8 py-4 rounded-xl shadow-xl
+- SECONDARY: border-2 border-blue-600 text-blue-600 hover:bg-blue-600 hover:text-white px-6 py-3 rounded-lg
+- DANGER: bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg
+- SUCCESS: bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg
+- ADD HOVER EFFECTS: hover:scale-105 transition-all duration-300
+
 🚨 ABSOLUTE RULES FOR SANDBOX COMPATIBILITY:
 1. DO NOT use import statements - everything is global
 2. DO NOT use export statements - component is assigned to window.App
@@ -4483,21 +4575,21 @@ const App = () => {{
                 <div className="max-w-7xl mx-auto px-4 text-center">
                   <h1 className="text-5xl font-bold mb-6">{project_name}</h1>
                   <p className="text-xl mb-8">{description}</p>
-                  <div className="space-x-4">
+                  <div className="flex justify-center gap-4 flex-wrap">
                     {{!user && (
                       <>
-                        <Button variant="outline" onClick={{() => setShowSignup(true)}} className="text-white border-white hover:bg-white hover:text-blue-600">
+                        <button onClick={{() => setShowSignup(true)}} className="bg-white text-blue-600 hover:bg-gray-100 font-bold px-8 py-4 rounded-xl shadow-xl hover:shadow-2xl transform hover:scale-105 transition-all duration-300">
                           Get Started
-                        </Button>
-                        <Button variant="ghost" onClick={{() => setShowLogin(true)}} className="text-white hover:bg-white/10">
+                        </button>
+                        <button onClick={{() => setShowLogin(true)}} className="border-2 border-white text-white hover:bg-white hover:text-blue-600 font-bold px-8 py-4 rounded-xl transition-all duration-300">
                           Learn More
-                        </Button>
+                        </button>
                       </>
                     )}}
                     {{user && (
-                      <Button variant="outline" className="text-white border-white hover:bg-white hover:text-blue-600">
+                      <button className="bg-white text-blue-600 font-bold px-8 py-4 rounded-xl shadow-xl">
                         Welcome back, {{user.name}}!
-                      </Button>
+                      </button>
                     )}}
                   </div>
                 </div>
@@ -4552,6 +4644,58 @@ IMPORTANT RULES:
 - Test all component references before using
 - STRICTLY FOLLOW all design requirements specified above
 - Apply design preferences to ALL sections (background colors, text colors, etc.)
+
+🎨🎨🎨 PROFESSIONAL DESIGN QUALITY REQUIREMENTS 🎨🎨🎨
+═══════════════════════════════════════════════════════════════
+Your output MUST look like a PROFESSIONAL, POLISHED website - not a basic prototype!
+
+✅ HERO SECTION MUST HAVE:
+- Full-width gradient or image background (min-h-[60vh] or min-h-screen)
+- Large, bold headline (text-4xl md:text-6xl font-bold)
+- Descriptive subheading (text-xl text-gray-600)
+- TWO VISIBLE CTA BUTTONS with contrasting colors:
+  - Primary: bg-blue-600 text-white px-8 py-4 rounded-xl font-bold shadow-xl hover:shadow-2xl
+  - Secondary: border-2 border-blue-600 text-blue-600 px-8 py-4 rounded-xl font-bold hover:bg-blue-600 hover:text-white
+
+✅ NAVIGATION MUST HAVE:
+- Fixed/sticky header with backdrop-blur effect
+- Logo on left, menu items center or right
+- Properly styled nav links with hover effects
+- Mobile hamburger menu that works
+
+✅ CARD COMPONENTS MUST HAVE:
+- Rounded corners (rounded-xl or rounded-2xl)
+- Shadows (shadow-lg hover:shadow-xl)
+- Proper padding (p-6)
+- Hover animations (hover:-translate-y-1 transition-all)
+- Clear visual hierarchy
+
+✅ ALL BUTTONS MUST BE VISIBLE WITH:
+- Solid background colors (bg-blue-600, bg-purple-600, bg-green-600, etc.)
+- Proper padding (px-6 py-3 minimum)
+- Rounded corners (rounded-lg or rounded-xl)
+- Hover effects (hover:bg-blue-700, hover:scale-105)
+- Font weight (font-semibold or font-bold)
+- Shadows for depth (shadow-lg)
+
+✅ RESPONSIVE DESIGN:
+- Use Tailwind breakpoints (sm:, md:, lg:, xl:)
+- Mobile-first approach
+- Flexible grid layouts (grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3)
+- Proper spacing that adjusts (p-4 md:p-8 lg:p-12)
+
+✅ IMAGES:
+- Use REAL Unsplash images: https://images.unsplash.com/photo-{id}?w=800&h=600&q=80&fit=crop
+- Proper aspect ratios (aspect-video, aspect-square)
+- Object-fit (object-cover)
+- Rounded corners (rounded-xl)
+
+❌ NEVER GENERATE:
+- Plain text buttons without background colors
+- Invisible or hard-to-see interactive elements
+- Basic unstyled layouts
+- Missing hover states
+- Prototype-quality designs
 
 🚨🚨🚨 FINAL CRITICAL CHECK - VERIFY BEFORE GENERATING 🚨🚨🚨
 ═══════════════════════════════════════════════════════════════

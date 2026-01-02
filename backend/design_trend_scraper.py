@@ -8,6 +8,8 @@ Scrapes design trends from:
 - Dribbble  
 - Site Inspire
 - Land-book.com
+
+Also integrates with website_analyzer.py for "build a website like X" feature.
 """
 
 import requests
@@ -19,6 +21,17 @@ from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, asdict
 from urllib.parse import urljoin, urlparse
 import re
+
+# Import website analyzer for integration
+try:
+    from website_analyzer import (
+        WebsiteAnalyzer, 
+        analyze_website_for_inspiration,
+        get_inspiration_prompt_context
+    )
+    WEBSITE_ANALYZER_AVAILABLE = True
+except ImportError:
+    WEBSITE_ANALYZER_AVAILABLE = False
 
 @dataclass
 class DesignTrend:
