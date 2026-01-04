@@ -3934,21 +3934,21 @@ const HomePage = () => (
 const ProjectsPage = () => (
   <div className="min-h-screen">
     <h1>My Projects</h1>
-    {/* FULL project listing with cards, details, etc. */}
+    {{/* FULL project listing with cards, details, etc. */}}
   </div>
 );
 
 const AboutPage = () => (
   <div className="min-h-screen">
     <h1>About Me</h1>
-    {/* FULL about content - bio, skills, experience */}
+    {{/* FULL about content - bio, skills, experience */}}
   </div>
 );
 
 const ContactPage = () => (
   <div className="min-h-screen">
     <h1>Contact</h1>
-    {/* FULL contact form that works */}
+    {{/* FULL contact form that works */}}
   </div>
 );
 
@@ -3959,7 +3959,7 @@ const App = () => {{
   
   return (
     <div>
-      {/* Navigation - EVERY link navigates to a REAL page */}
+      {{/* Navigation - EVERY link navigates to a REAL page */}}
       <nav>
         <Link to="/" className={{location.pathname === '/' ? 'text-blue-500 font-bold' : 'text-gray-600'}}>Home</Link>
         <Link to="/projects" className={{location.pathname === '/projects' ? 'text-blue-500 font-bold' : 'text-gray-600'}}>Projects</Link>
@@ -3967,7 +3967,7 @@ const App = () => {{
         <Link to="/contact" className={{location.pathname === '/contact' ? 'text-blue-500 font-bold' : 'text-gray-600'}}>Contact</Link>
       </nav>
       
-      {/* Routes - EVERY route renders a DIFFERENT page component */}
+      {{/* Routes - EVERY route renders a DIFFERENT page component */}}
       <Routes>
         <Route path="/" element={{<HomePage />}} />
         <Route path="/projects" element={{<ProjectsPage />}} />

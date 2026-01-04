@@ -2963,6 +2963,7 @@ async def ai_project_assistant(request: dict = Body(...)):
         user_message = request.get("user_message")
         tech_stack = request.get("tech_stack", [])
         re_run = bool(request.get("re_run", False))
+        user_id = request.get("user_id", "anonymous")  # Get user_id for S3 multi-tenancy
 
         if not project_name:
             raise HTTPException(status_code=400, detail="project_name is required")
@@ -3889,8 +3890,53 @@ RESPOND WITH ONLY JSON NOW:"""
             
             changes = valid_changes
 
+            # Load project files from S3 for editing (primary source)
+            from s3_storage import get_project_from_s3, upload_project_to_s3, s3_client, S3_BUCKET_NAME
+            
+            s3_project_data = None
+            s3_files_map = {}  # Map file paths to their S3 content
+            actual_user_id = user_id  # Track which user_id actually works
+            
+            try:
+                s3_project_data = get_project_from_s3(project_slug=project_slug, user_id=user_id)
+                
+                # If not found with provided user_id, try to find project under any user
+                if not s3_project_data or not s3_project_data.get('files'):
+                    print(f"⚠️ Project not found for user_id={user_id}, searching all users...")
+                    
+                    # Search for the project across all user folders
+                    response = s3_client.list_objects_v2(Bucket=S3_BUCKET_NAME, Prefix='projects/', Delimiter='/')
+                    if 'CommonPrefixes' in response:
+                        for prefix in response['CommonPrefixes']:
+                            user_prefix = prefix['Prefix']  # e.g., 'projects/user123/'
+                            # Extract user_id from prefix
+                            try_user_id = user_prefix.replace('projects/', '').rstrip('/')
+                            
+                            # Check if this user has the project
+                            project_check = s3_client.list_objects_v2(
+                                Bucket=S3_BUCKET_NAME, 
+                                Prefix=f'{user_prefix}{project_slug}/',
+                                MaxKeys=1
+                            )
+                            if 'Contents' in project_check:
+                                print(f"✅ Found project under user_id={try_user_id}")
+                                actual_user_id = try_user_id
+                                s3_project_data = get_project_from_s3(project_slug=project_slug, user_id=actual_user_id)
+                                break
+                
+                if s3_project_data and s3_project_data.get('files'):
+                    for f in s3_project_data['files']:
+                        s3_files_map[f['path']] = f['content']
+                    print(f"☁️ Loaded {len(s3_files_map)} files from S3 for editing (user_id={actual_user_id})")
+                else:
+                    print(f"⚠️ Project not found in S3, will use local files only")
+            except Exception as s3_err:
+                print(f"⚠️ Could not load from S3, will use local files: {s3_err}")
+
             # Apply the changes with targeted editing
             files_modified = []
+            modified_contents = {}  # Track modified content for S3 upload
+            
             for change in changes:
                 file_path = change.get("file_path", "").lstrip("/")
                 edit_type = change.get("edit_type", "replace")  # Default to full replace for backwards compatibility
@@ -3931,19 +3977,33 @@ RESPOND WITH ONLY JSON NOW:"""
                         replace_with = replace_with.rstrip() + ';'
                         print(f"⚠️ Auto-fixed: Added missing semicolon to replacement in {file_path}")
                     
-                    # Read existing file if it exists
-                    if target.exists():
+                    # Read existing content - PREFER S3 over local files
+                    existing_content = None
+                    
+                    # Try S3 first (primary source)
+                    if file_path in s3_files_map:
+                        existing_content = s3_files_map[file_path]
+                        print(f"☁️ Reading {file_path} from S3")
+                    elif target.exists():
+                        # Fallback to local file
                         with open(target, 'r', encoding='utf-8') as f:
                             existing_content = f.read()
-                        
+                        print(f"📁 Reading {file_path} from local (not in S3)")
+                    
+                    if existing_content:
                         # Apply targeted edit
                         if search_pattern in existing_content:
                             updated_content = existing_content.replace(search_pattern, replace_with, 1)
                             cleaned = _clean_ai_generated_content(updated_content, target.name)
                             
+                            # Save to local file
+                            target.parent.mkdir(parents=True, exist_ok=True)
                             with open(target, 'w', encoding='utf-8', newline='\n') as f:
                                 f.write(cleaned)
+                            
+                            # Track for S3 upload
                             files_modified.append(file_path)
+                            modified_contents[file_path] = cleaned
                             
                             await manager.send_to_project(project_name, {
                                 "type": "file_changed",
@@ -3968,18 +4028,24 @@ RESPOND WITH ONLY JSON NOW:"""
                     content = change.get("content", "")
                     if not content:
                         continue
-                        
+                    
+                    # Read existing content - PREFER S3 over local files
                     existing_content = ""
-                    if target.exists():
+                    if file_path in s3_files_map:
+                        existing_content = s3_files_map[file_path]
+                        print(f"☁️ Reading {file_path} from S3 for append")
+                    elif target.exists():
                         with open(target, 'r', encoding='utf-8') as f:
                             existing_content = f.read()
                     
                     updated_content = existing_content + "\n" + content
                     cleaned = _clean_ai_generated_content(updated_content, target.name)
                     
+                    target.parent.mkdir(parents=True, exist_ok=True)
                     with open(target, 'w', encoding='utf-8', newline='\n') as f:
                         f.write(cleaned)
                     files_modified.append(file_path)
+                    modified_contents[file_path] = cleaned
                     
                 else:
                     # Default: full file replacement (backwards compatibility)
@@ -4000,9 +4066,11 @@ RESPOND WITH ONLY JSON NOW:"""
                         
                     cleaned = _clean_ai_generated_content(content, target.name)
                     
+                    target.parent.mkdir(parents=True, exist_ok=True)
                     with open(target, 'w', encoding='utf-8', newline='\n') as f:
                         f.write(cleaned)
                     files_modified.append(file_path)
+                    modified_contents[file_path] = cleaned
 
             # Validate and fix critical files
             await manager.send_to_project(project_name, {
@@ -4014,6 +4082,68 @@ RESPOND WITH ONLY JSON NOW:"""
             await validate_and_fix_project_files(project_path, project_name)
             check = await check_project_errors(project_name)
             remaining_errors = check.get("errors", []) if check.get("success") else []
+
+            # Upload modified files to S3 so the preview can see them
+            if files_modified and modified_contents:
+                try:
+                    await manager.send_to_project(project_name, {
+                        "type": "status",
+                        "phase": "upload",
+                        "message": "☁️ Saving changes to cloud..."
+                    })
+                    
+                    # Use already-loaded S3 data or fetch fresh
+                    if s3_project_data and s3_project_data.get('files'):
+                        # Build updated files list - use our cached data
+                        files_to_upload = []
+                        modified_paths = set(files_modified)
+                        
+                        # Keep existing files that weren't modified
+                        for file_info in s3_project_data['files']:
+                            if file_info['path'] not in modified_paths:
+                                files_to_upload.append(file_info)
+                        
+                        # Add newly modified files with their in-memory content
+                        for file_path, content in modified_contents.items():
+                            files_to_upload.append({
+                                'path': file_path,
+                                'content': content
+                            })
+                        
+                        # Upload to S3 using the actual user_id that owns the project
+                        upload_result = upload_project_to_s3(
+                            project_slug=project_slug,
+                            files=files_to_upload,
+                            user_id=actual_user_id  # Use the user_id where project was found
+                        )
+                        print(f"✅ AI changes uploaded to S3 (user={actual_user_id}): {list(modified_contents.keys())}")
+                    else:
+                        # Project not in S3 yet, create it fresh from local files
+                        files_to_upload = []
+                        for root, dirs, files in os.walk(project_path):
+                            for file in files:
+                                file_path_full = Path(root) / file
+                                rel_path = file_path_full.relative_to(project_path)
+                                try:
+                                    with open(file_path_full, 'r', encoding='utf-8') as f:
+                                        content = f.read()
+                                    files_to_upload.append({
+                                        'path': str(rel_path).replace(os.sep, '/'),
+                                        'content': content
+                                    })
+                                except:
+                                    pass
+                        
+                        if files_to_upload:
+                            upload_project_to_s3(
+                                project_slug=project_slug,
+                                files=files_to_upload,
+                                user_id=user_id
+                            )
+                            print(f"✅ Full project uploaded to S3: {len(files_to_upload)} files")
+                except Exception as s3_error:
+                    print(f"⚠️ S3 upload error: {s3_error}")
+                    # Continue anyway - local files are saved
 
             # Optionally rerun project
             preview_url = None

@@ -630,13 +630,26 @@ const MonacoProjectEditor = () => {
 
   // Function to refresh preview - FIXED SCOPE ISSUE
   const refreshPreview = useCallback(() => {
-    if (previewUrl) {
-      const iframe = document.querySelector('iframe[src*="localhost"]');
-      if (iframe) {
-        // Get the base URL and add fresh timestamp
-        const baseUrl = iframe.src.split('?')[0];
-        iframe.src = `${baseUrl}?_refresh=${Date.now()}`;
-      }
+    console.log('🔄 Refreshing preview, current URL:', previewUrl);
+    
+    // Find the preview iframe - look for various possible selectors
+    const iframe = document.querySelector('iframe[src*="localhost"]') || 
+                   document.querySelector('iframe[src*="sandbox"]') ||
+                   document.querySelector('iframe[src*="preview"]') ||
+                   document.querySelector('.preview-iframe');
+    
+    if (iframe && iframe.src) {
+      // Get the base URL and add fresh timestamp to force reload
+      const baseUrl = iframe.src.split('?')[0].split('#')[0];
+      const newSrc = `${baseUrl}?_refresh=${Date.now()}`;
+      console.log('🔄 Setting iframe src to:', newSrc);
+      iframe.src = newSrc;
+    } else if (previewUrl) {
+      // If no iframe found but we have a preview URL, update the state to trigger re-render
+      const baseUrl = previewUrl.split('?')[0].split('#')[0];
+      setPreviewUrl(`${baseUrl}?_refresh=${Date.now()}`);
+    } else {
+      console.warn('⚠️ No iframe or preview URL found to refresh');
     }
   }, [previewUrl]);
 
@@ -1492,6 +1505,20 @@ Starting your project again...`
             // Send to AI for processing
             setIsAiThinking(true);
             
+            // Get user_id from localStorage for S3 file access
+            // Priority: _id first (used during project creation), then email
+            let userId = 'anonymous';
+            const userStr = localStorage.getItem('user') || sessionStorage.getItem('user');
+            if (userStr) {
+              try {
+                const user = JSON.parse(userStr);
+                userId = user._id || user.email || 'anonymous';
+                console.log('[Voice AI] Using user_id:', userId);
+              } catch (e) {
+                console.warn('Could not parse user from storage:', e);
+              }
+            }
+            
             try {
               const aiResponse = await fetch(apiUrl('api/ai-project-assistant'), {
                 method: 'POST',
@@ -1500,7 +1527,8 @@ Starting your project again...`
                   project_name: project.name,
                   user_message: result.transcript,
                   tech_stack: project.tech_stack || [],
-                  re_run: true
+                  re_run: true,
+                  user_id: userId // Pass user_id for S3 access
                 })
               });
               
@@ -1533,7 +1561,12 @@ The changes are live in your preview.`
                 }]);
                 
                 // Reload project files and preview
-                initializeProject();
+                await initializeProject();
+                
+                // CRITICAL: Force refresh the preview iframe to show updated content
+                setTimeout(() => {
+                  refreshPreview();
+                }, 500);
               } else {
                 const errorMessage = {
                   role: 'assistant',
@@ -1676,6 +1709,20 @@ The changes are live in your preview.`
     }
     
     try {
+      // Get user_id from localStorage for S3 file access
+      // Priority: _id first (used during project creation), then email
+      let userId = 'anonymous';
+      const userStr = localStorage.getItem('user') || sessionStorage.getItem('user');
+      if (userStr) {
+        try {
+          const user = JSON.parse(userStr);
+          userId = user._id || user.email || 'anonymous';
+          console.log('[AI Assistant] Using user_id:', userId);
+        } catch (e) {
+          console.warn('Could not parse user from storage:', e);
+        }
+      }
+      
       const response = await fetch('http://localhost:8000/api/ai-project-assistant', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1683,7 +1730,8 @@ The changes are live in your preview.`
           project_name: project.name,
           user_message: messageToSend,
           tech_stack: project.tech_stack || [],
-          re_run: true // Auto re-run after changes
+          re_run: true, // Auto re-run after changes
+          user_id: userId // Pass user_id for S3 access
         })
       });
       
@@ -1728,8 +1776,11 @@ The changes are live in your preview.`
           setPreviewUrl(ensurePreviewUrlHasAuth(result.preview_url));
         }
         
-        // Clear building state after reload
-        setTimeout(() => setIsBuilding(false), 1000);
+        // CRITICAL: Force refresh the preview iframe to show updated content
+        setTimeout(() => {
+          refreshPreview();
+          setIsBuilding(false);
+        }, 500);
       } else {
         const errorMessage = {
           role: 'assistant',
