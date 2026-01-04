@@ -768,6 +768,11 @@ def auto_fix_jsx_for_sandbox(code: str, filename: str = "component.jsx") -> str:
     code = re.sub(r"import\s*\{[^}]*\}\s*from\s*['\"]tailwind-merge['\"];?\s*\n?", '', code)
     code = re.sub(r"import\s*\{[^}]*cn[^}]*\}\s*from\s*['\"]\.+/lib/utils['\"];?\s*\n?", '', code)
     code = re.sub(r"import\s*\{[^}]*\}\s*from\s*['\"]@/lib/utils['\"];?\s*\n?", '', code)
+    # Also remove imports from ./lib/utils.js (with .js extension)
+    code = re.sub(r"import\s*\{[^}]*\}\s*from\s*['\"]\.+/lib/utils\.js['\"];?\s*\n?", '', code)
+    # Remove any window.twMerge assignments
+    code = re.sub(r"window\.twMerge\s*=\s*[^;]+;?\s*\n?", '', code)
+    code = re.sub(r"window\.cn\s*=\s*[^;]+;?\s*\n?", '', code)
     
     # Remove CSS imports - Tailwind is provided via CDN
     code = re.sub(r"import\s+['\"][^'\"]*\.css['\"];?\s*\n?", '', code)
@@ -1011,6 +1016,34 @@ def auto_fix_jsx_for_sandbox(code: str, filename: str = "component.jsx") -> str:
         i += 1
     
     code = '\n'.join(cleaned_lines)
+    
+    # ========== REMOVE VARIANT/SIZE CONSTANTS USED BY TEMPLATE COMPONENTS ==========
+    
+    # These constants are only used by Button/Card/etc components that we remove
+    # Keeping them would cause undefined references - remove them
+    code = re.sub(r'(?:const|let|var)\s+buttonVariants\s*=\s*\{[\s\S]*?\};\s*\n?', '', code)
+    code = re.sub(r'(?:const|let|var)\s+cardVariants\s*=\s*\{[\s\S]*?\};\s*\n?', '', code)
+    code = re.sub(r'(?:const|let|var)\s+inputVariants\s*=\s*\{[\s\S]*?\};\s*\n?', '', code)
+    
+    # Remove local sizes constants that would conflict with sandbox globals
+    # But only if they look like UI component size definitions (sm, md, lg keys)
+    code = re.sub(r'(?:const|let|var)\s+sizes\s*=\s*\{[^}]*(?:sm|md|lg)[^}]*\};\s*\n?', '', code)
+    
+    # ========== REMOVE FORWARDREF COMPONENT DECLARATIONS ==========
+    
+    # The TEMPLATE_COMPONENTS set includes Button, Card, etc. but React.forwardRef 
+    # declarations may not match the simple regex above. Handle them explicitly:
+    # Pattern: const Button = React.forwardRef(({ ... }, ref) => { ... });
+    for comp in ['Button', 'Card', 'Input', 'Loading', 'Select', 'Textarea']:
+        # Match forwardRef declarations (multi-line)
+        code = re.sub(
+            rf'(?:const|let|var)\s+{comp}\s*=\s*React\.forwardRef\s*\([^;]*\);?\s*\n?',
+            f'// {comp} is provided globally by the sandbox\n',
+            code,
+            flags=re.DOTALL
+        )
+        # Match displayName assignments
+        code = re.sub(rf'{comp}\.displayName\s*=\s*["\'][^"\']*["\'];?\s*\n?', '', code)
     
     # ========== UTILITY FUNCTION REMOVAL ==========
     

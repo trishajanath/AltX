@@ -1779,18 +1779,49 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
             }};
             
             const SimpleRoutes = ({{ children }}) => {{
-                const currentPath = window.location.hash.slice(1) || '/';
+                const [currentPath, setCurrentPath] = useState(window.location.hash.slice(1) || '/');
+                
+                // Re-render when hash changes
+                useEffect(() => {{
+                    const handleHashChange = () => {{
+                        const newPath = window.location.hash.slice(1) || '/';
+                        console.log('Route changed to:', newPath);
+                        setCurrentPath(newPath);
+                    }};
+                    window.addEventListener('hashchange', handleHashChange);
+                    return () => window.removeEventListener('hashchange', handleHashChange);
+                }}, []);
+                
                 const routes = React.Children.toArray(children);
                 
-                // Find matching route or return first one as default
-                const matchingRoute = routes.find(route => {{
+                // Find matching route - try exact match first, then prefix match
+                let matchingRoute = routes.find(route => {{
                     if (route.props && route.props.path) {{
-                        return route.props.path === currentPath;
+                        // Exact match
+                        if (route.props.path === currentPath) return true;
+                        // Handle index route
+                        if (route.props.index && currentPath === '/') return true;
                     }}
                     return false;
-                }}) || routes[0];
+                }});
                 
-                return matchingRoute || React.createElement('div', null, 'No routes found');
+                // If no exact match, try partial match (for nested routes)
+                if (!matchingRoute) {{
+                    matchingRoute = routes.find(route => {{
+                        if (route.props && route.props.path && route.props.path !== '/') {{
+                            return currentPath.startsWith(route.props.path);
+                        }}
+                        return false;
+                    }});
+                }}
+                
+                // Fall back to first route (usually home) or 404
+                if (!matchingRoute) {{
+                    matchingRoute = routes.find(r => r.props?.path === '/') || routes[0];
+                }}
+                
+                console.log('Rendering route:', matchingRoute?.props?.path || 'default');
+                return matchingRoute || React.createElement('div', null, 'Page not found');
             }};
             
             const SimpleRoute = ({{ element, path, children }}) => {{
@@ -2493,9 +2524,22 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
             return window.twMerge(...inputs);
         }};
         
+        // Store references to sandbox globals BEFORE user code runs
+        const _sandboxButton = window.Button;
+        const _sandboxCard = window.Card;
+        const _sandboxInput = window.Input;
+        const _sandboxLoading = window.Loading;
+        
         {components_code}
         
         {app_content}
+        
+        // CRITICAL: Restore sandbox UI components after user code
+        // This ensures sandbox globals are used even if user code tries to override them
+        window.Button = window.Button || _sandboxButton;
+        window.Card = window.Card || _sandboxCard;
+        window.Input = window.Input || _sandboxInput;
+        window.Loading = window.Loading || _sandboxLoading;
         
         // Render the app
         try {{
@@ -2557,6 +2601,29 @@ def fix_jsx_content_for_sandbox(content: str, component_name: str, project_name:
     content = re.sub(r"import\s*\{[^}]*\}\s*from\s*['\"]clsx['\"];?\s*\n?", '', content)
     content = re.sub(r"import\s*\{[^}]*\}\s*from\s*['\"]tailwind-merge['\"];?\s*\n?", '', content)
     content = re.sub(r"import\s*\{[^}]*cn[^}]*\}\s*from\s*['\"]\.+/lib/utils['\"];?\s*\n?", '', content)
+    content = re.sub(r"import\s*\{[^}]*\}\s*from\s*['\"]\.+/lib/utils\.js['\"];?\s*\n?", '', content)
+    
+    # Remove window.twMerge assignments
+    content = re.sub(r"window\.twMerge\s*=\s*[^;]+;?\s*\n?", '', content)
+    
+    # Remove buttonVariants/cardVariants constants that would cause undefined errors
+    # These are only used by local Button/Card components that we're removing
+    content = re.sub(r"const\s+buttonVariants\s*=\s*\{[\s\S]*?\};\s*\n?", '', content)
+    content = re.sub(r"const\s+cardVariants\s*=\s*\{[\s\S]*?\};\s*\n?", '', content)
+    content = re.sub(r"const\s+inputVariants\s*=\s*\{[\s\S]*?\};\s*\n?", '', content)
+    
+    # Remove React.forwardRef component declarations for UI components
+    # These are provided globally by the sandbox
+    for comp in ['Button', 'Card', 'Input', 'Loading', 'Select', 'Textarea']:
+        # Match forwardRef declarations (multi-line)
+        content = re.sub(
+            rf'const\s+{comp}\s*=\s*React\.forwardRef\s*\([^;]+;',
+            f'// {comp} is provided globally by the sandbox',
+            content,
+            flags=re.DOTALL
+        )
+        # Match displayName assignments
+        content = re.sub(rf'{comp}\.displayName\s*=\s*["\'][^"\']*["\'];?\s*\n?', '', content)
     
     # Fix empty component functions
     if f'const {component_name} = () => (\n\n);' in content:

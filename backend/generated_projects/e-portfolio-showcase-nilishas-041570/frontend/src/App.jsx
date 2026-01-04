@@ -162,6 +162,17 @@ const timelineData = [
   },
 ];
 
+// Smooth scroll helper with guard to avoid errors when an anchor is missing
+const scrollToSection = (id) => {
+  const el = typeof document !== 'undefined' ? document.getElementById(id) : null;
+  if (el && typeof el.scrollIntoView === 'function') {
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } else {
+    // Fallback: update hash so the browser can attempt to navigate, but do not throw
+    window.location.hash = `#${id}`;
+  }
+};
+
 // SECTION COMPONENTS
 const Header = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -175,9 +186,13 @@ const Header = () => {
         </a>
         <nav className="hidden md:flex items-center space-x-6">
           {navLinks.map(link => (
-            <a key={link} href={`#${link.toLowerCase()}`} className="text-sm font-medium text-gray-300 hover:text-white transition-colors">
+            <button
+              key={link}
+              onClick={() => scrollToSection(link.toLowerCase())}
+              className="text-sm font-medium text-gray-300 hover:text-white transition-colors"
+            >
               {link}
-            </a>
+            </button>
           ))}
         </nav>
         <div className="hidden md:flex items-center space-x-4">
@@ -192,9 +207,16 @@ const Header = () => {
         <div className="md:hidden bg-black pb-4">
           <nav className="flex flex-col items-center space-y-4">
             {navLinks.map(link => (
-              <a key={link} href={`#${link.toLowerCase()}`} onClick={() => setIsOpen(false)} className="text-sm font-medium text-gray-300 hover:text-white transition-colors">
+              <button
+                key={link}
+                onClick={() => {
+                  scrollToSection(link.toLowerCase());
+                  setIsOpen(false);
+                }}
+                className="text-sm font-medium text-gray-300 hover:text-white transition-colors"
+              >
                 {link}
-              </a>
+              </button>
             ))}
             <div className="flex items-center space-x-4 pt-2">
                 <a href="https://github.com" target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-white"><Github className="h-6 w-6" /></a>
@@ -231,7 +253,7 @@ const HeroSection = () => (
         <Button 
           variant="outline" 
           className="text-base px-6 py-3"
-          onClick={() => document.getElementById('contact').scrollIntoView({ behavior: 'smooth' })}
+          onClick={() => scrollToSection('contact')}
         >
           Get In Touch
         </Button>
