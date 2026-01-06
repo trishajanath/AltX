@@ -62,6 +62,9 @@ dnspython==2.7.0
 # Environment and Configuration
 python-dotenv==1.1.1
 
+# Security Scanning
+python-owasp-zap-v2.4
+
 # Utilities
 regex==2025.9.1
 

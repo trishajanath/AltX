@@ -4862,6 +4862,81 @@ async def run_project(request: dict = Body(...)):
         })
         return {"success": False, "error": str(e)}
 
+# --- OWASP ZAP Security Scan Endpoint ---
+@app.post("/api/security-scan")
+async def run_security_scan(request: dict = Body(...)):
+    """
+    Run a security scan on a generated application URL using OWASP ZAP.
+    
+    Request body:
+        - target_url: The sandbox preview URL to scan
+        - scan_type: "passive", "active", "spider", or "full" (default: passive)
+        - zap_api_key: Optional custom ZAP API key
+    """
+    try:
+        from scanner_service import ZAPSecurityScanner, ScanType
+        
+        target_url = request.get("target_url")
+        scan_type_str = request.get("scan_type", "passive")
+        api_key = request.get("zap_api_key", "changeme")
+        
+        if not target_url:
+            raise HTTPException(status_code=400, detail="target_url is required")
+        
+        # Map string to enum
+        scan_type_map = {
+            "passive": ScanType.PASSIVE,
+            "active": ScanType.ACTIVE,
+            "spider": ScanType.SPIDER,
+            "full": ScanType.FULL
+        }
+        scan_type = scan_type_map.get(scan_type_str, ScanType.PASSIVE)
+        
+        # Initialize scanner
+        scanner = ZAPSecurityScanner(api_key=api_key)
+        
+        # Check if ZAP is running
+        if not scanner.is_zap_running():
+            return {
+                "success": False,
+                "error": "ZAP daemon not running. Please start OWASP ZAP and enable the API.",
+                "instructions": [
+                    "1. Download OWASP ZAP from https://www.zaproxy.org/download/",
+                    "2. Start ZAP in daemon mode: zap.sh -daemon -port 8080",
+                    "3. Or start ZAP GUI and go to Tools > Options > API to enable API",
+                    "4. Set API key or use 'changeme' as default",
+                    "5. Docker: docker run -u zap -p 8080:8080 -d owasp/zap2docker-stable zap.sh -daemon -host 0.0.0.0 -port 8080 -config api.key=changeme"
+                ]
+            }
+        
+        # Run scan
+        result = scanner.scan_url(target_url, scan_type)
+        
+        return {
+            "success": result.success,
+            "target_url": result.target_url,
+            "scan_type": result.scan_type,
+            "duration_seconds": result.scan_duration_seconds,
+            "summary": {
+                "high_risk": result.high_risk_count,
+                "medium_risk": result.medium_risk_count,
+                "low_risk": result.low_risk_count,
+                "informational": result.informational_count,
+                "total_alerts": len(result.alerts)
+            },
+            "alerts": result.alerts[:50],  # Limit response size
+            "error": result.error,
+            "report": scanner.generate_report(result) if result.success else None
+        }
+    except ImportError:
+        return {
+            "success": False,
+            "error": "ZAP library not installed",
+            "instructions": ["Run: pip install python-owasp-zap-v2.4"]
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
 # --- Auto-Fix Project Errors Endpoint ---
 @app.post("/api/auto-fix-project-errors")
 async def auto_fix_project_errors(project_name: str = Query(...)):
