@@ -1,12 +1,28 @@
 version: '3.8'
 
 services:
+  # OWASP ZAP Security Scanner - starts automatically
+  owasp-zap:
+    image: zaproxy/zap-stable
+    container_name: owasp-zap
+    ports:
+      - "8080:8080"
+    command: zap.sh -daemon -host 0.0.0.0 -port 8080 -config api.addrs.addr.name=.* -config api.addrs.addr.regex=true -config api.disablekey=true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/JSON/core/view/version/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   backend:
     build: ./backend
     ports:
       - "8000:8000"
     env_file:
       - ./backend/.env
+    depends_on:
+      - owasp-zap
     # Uncomment the next line if your backend depends on the frontend being up first
     # depends_on:
     #   - frontend

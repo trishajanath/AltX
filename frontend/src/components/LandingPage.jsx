@@ -1,13 +1,23 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import MarketingNavBar from './MarketingNavBar';
 import VoiceChatInterface from './VoiceChatInterface';
 import PageWrapper from './PageWrapper';
-import { ArrowRight, X, Check } from 'lucide-react';
+import { ArrowRight, X, Check, Shield, Search } from 'lucide-react';
 
 // --- YC-Style High-Conviction Landing Page ---
 const VexelLandingPage = () => {
     const navigate = useNavigate();
+    const [repoUrl, setRepoUrl] = useState('');
+
+    const handleScanRepo = () => {
+        if (repoUrl.trim()) {
+            // Navigate to repo analysis with the URL as a parameter
+            navigate(`/repo-analysis?url=${encodeURIComponent(repoUrl.trim())}`);
+        } else {
+            navigate('/repo-analysis');
+        }
+    };
 
     // Check authentication status on mount and redirect if logged in
     useEffect(() => {
@@ -36,16 +46,57 @@ const VexelLandingPage = () => {
             <section style={styles.heroSection}>
                 <div style={styles.heroContainer}>
                     <h1 style={styles.problemHeadline}>
-                        Stop Wasting Months Talking to Developers.
+                        The AI Architect for Fortified Software.
                     </h1>
                     <p style={styles.solutionSubheadline}>
-                        XVERTA is your 24/7 AI engineer. Speak your vision. Watch it build. Deploy in minutes.
+                        Generate production-ready applications with built-in compliance, encryption, and threat protection. Don't just build faster—build safer.
                     </p>
                 </div>
                 
                 {/* Interactive Demo - The "Magic" Moment */}
                 <div style={styles.demoContainer}>
                     <VoiceChatInterface isDemo={true} />
+                </div>
+            </section>
+
+            {/* AI Security Scanner - Interactive Demo */}
+            <section style={styles.scannerSection}>
+                <div style={styles.container}>
+                    <div style={styles.scannerCard}>
+                        <div style={styles.scannerHeader}>
+                            <Shield size={32} style={{ color: 'var(--accent)' }} />
+                            <h2 style={styles.scannerHeadline}>AI Security Scanner</h2>
+                        </div>
+                        <p style={styles.scannerSubtext}>
+                            Instantly scan any GitHub repository for vulnerabilities, secrets, and security issues.
+                        </p>
+                        <div style={styles.scannerInputContainer}>
+                            <input
+                                type="text"
+                                placeholder="Paste GitHub Repo URL (e.g., https://github.com/user/repo)"
+                                value={repoUrl}
+                                onChange={(e) => setRepoUrl(e.target.value)}
+                                style={styles.scannerInput}
+                                onKeyDown={(e) => e.key === 'Enter' && handleScanRepo()}
+                            />
+                            <button
+                                onClick={handleScanRepo}
+                                style={styles.scanButton}
+                                onMouseEnter={(e) => {
+                                    e.currentTarget.style.background = 'linear-gradient(135deg, #764ba2 0%, #667eea 100%)';
+                                }}
+                                onMouseLeave={(e) => {
+                                    e.currentTarget.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+                                }}
+                            >
+                                <Search size={18} style={{ marginRight: '8px' }} />
+                                Scan for Vulnerabilities
+                            </button>
+                        </div>
+                        <p style={styles.scannerNote}>
+                            ✨ No sign-up required — try it now and see security issues in plain English.
+                        </p>
+                    </div>
                 </div>
             </section>
 
@@ -77,19 +128,19 @@ const VexelLandingPage = () => {
                             <ul style={styles.beforeAfterList}>
                                 <li style={styles.beforeItem}>
                                     <X size={18} style={styles.xIcon} />
-                                    2–8 weeks for an MVP
+                                    Vulnerable to SQL Injection
                                 </li>
                                 <li style={styles.beforeItem}>
                                     <X size={18} style={styles.xIcon} />
-                                    Thousands spent on freelancers
+                                    Data Privacy Nightmares
                                 </li>
                                 <li style={styles.beforeItem}>
                                     <X size={18} style={styles.xIcon} />
-                                    Slow, painful iteration
+                                    Expensive Security Audits
                                 </li>
                                 <li style={styles.beforeItem}>
                                     <X size={18} style={styles.xIcon} />
-                                    Lost in technical translation
+                                    Spaghetti Code
                                 </li>
                             </ul>
                         </div>
@@ -103,19 +154,19 @@ const VexelLandingPage = () => {
                             <ul style={styles.beforeAfterList}>
                                 <li style={styles.afterItem}>
                                     <Check size={18} style={styles.checkIcon} />
-                                    Functional app in minutes
+                                    Auto-Sanitized Inputs
                                 </li>
                                 <li style={styles.afterItem}>
                                     <Check size={18} style={styles.checkIcon} />
-                                    Speak to generate changes
+                                    Built-in RBAC & Encryption
                                 </li>
                                 <li style={styles.afterItem}>
                                     <Check size={18} style={styles.checkIcon} />
-                                    One-click deployment
+                                    Real-time Threat Monitoring
                                 </li>
                                 <li style={styles.afterItem}>
                                     <Check size={18} style={styles.checkIcon} />
-                                    AI understands your vision
+                                    Clean, Documented Code
                                 </li>
                             </ul>
                         </div>
@@ -219,7 +270,8 @@ const styles = {
         color: 'var(--text-primary)',
         lineHeight: '1.1',
         margin: '0 0 0.75rem 0',
-        letterSpacing: '-0.02em'
+        letterSpacing: '-0.02em',
+        fontFamily: "'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace"
     },
     solutionSubheadline: {
         fontSize: '1.25rem',
@@ -232,6 +284,82 @@ const styles = {
     section: {
         padding: '80px 0',
         position: 'relative'
+    },
+    scannerSection: {
+        padding: '60px 0',
+        position: 'relative',
+        background: 'linear-gradient(180deg, rgba(102, 126, 234, 0.03) 0%, transparent 100%)'
+    },
+    scannerCard: {
+        background: 'var(--glass-bg, rgba(16, 16, 16, 0.8))',
+        backdropFilter: 'blur(20px)',
+        border: '1px solid rgba(102, 126, 234, 0.3)',
+        borderRadius: '16px',
+        padding: '2.5rem',
+        textAlign: 'center',
+        maxWidth: '800px',
+        margin: '0 auto',
+        boxShadow: '0 8px 32px rgba(102, 126, 234, 0.15)'
+    },
+    scannerHeader: {
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '12px',
+        marginBottom: '16px'
+    },
+    scannerHeadline: {
+        fontSize: '32px',
+        fontWeight: '700',
+        color: 'var(--text-primary)',
+        margin: 0,
+        fontFamily: "'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace"
+    },
+    scannerSubtext: {
+        fontSize: '18px',
+        color: 'var(--text-secondary)',
+        marginBottom: '32px',
+        lineHeight: '1.5'
+    },
+    scannerInputContainer: {
+        display: 'flex',
+        gap: '12px',
+        maxWidth: '600px',
+        margin: '0 auto 20px',
+        flexWrap: 'wrap',
+        justifyContent: 'center'
+    },
+    scannerInput: {
+        flex: '1',
+        minWidth: '280px',
+        padding: '14px 18px',
+        background: 'rgba(0, 0, 0, 0.4)',
+        border: '1px solid var(--border-color)',
+        borderRadius: '4px',
+        color: 'var(--text-primary)',
+        fontSize: '15px',
+        outline: 'none',
+        transition: 'border-color 0.2s ease'
+    },
+    scanButton: {
+        display: 'inline-flex',
+        alignItems: 'center',
+        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+        color: '#ffffff',
+        border: '1px solid rgba(255, 255, 255, 0.2)',
+        borderRadius: '4px',
+        padding: '14px 24px',
+        fontSize: '15px',
+        fontWeight: '600',
+        cursor: 'pointer',
+        transition: 'all 0.2s ease',
+        whiteSpace: 'nowrap'
+    },
+    scannerNote: {
+        fontSize: '14px',
+        color: 'var(--text-secondary)',
+        marginTop: '16px',
+        fontStyle: 'italic'
     },
     container: {
         maxWidth: '1000px',
@@ -252,7 +380,8 @@ const styles = {
         fontWeight: '700',
         color: 'var(--text-primary)',
         marginBottom: '16px',
-        letterSpacing: '-1px'
+        letterSpacing: '-1px',
+        fontFamily: "'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace"
     },
     proofText: {
         fontSize: '18px',
@@ -356,7 +485,8 @@ const styles = {
         color: 'var(--text-primary)',
         marginBottom: '16px',
         lineHeight: '1.3',
-        letterSpacing: '-1px'
+        letterSpacing: '-1px',
+        fontFamily: "'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace"
     },
     insightText: {
         fontSize: '20px',
@@ -385,7 +515,8 @@ const styles = {
         fontWeight: '700',
         color: 'var(--text-primary)',
         margin: 0,
-        letterSpacing: '-1px'
+        letterSpacing: '-1px',
+        fontFamily: "'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace"
     },
     whyNowList: {
         listStyle: 'none',
@@ -434,7 +565,8 @@ const styles = {
         fontWeight: '700',
         color: 'var(--text-primary)',
         marginBottom: '16px',
-        letterSpacing: '-1.5px'
+        letterSpacing: '-1.5px',
+        fontFamily: "'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace"
     },
     ctaSubtext: {
         fontSize: '18px',
@@ -446,8 +578,8 @@ const styles = {
         background: 'transparent',
         color: 'var(--text-primary)',
         border: '1px solid var(--border-color)',
-        borderRadius: '25px',
-        padding: '0.5rem 1rem',
+        borderRadius: '4px',
+        padding: '0.75rem 1.5rem',
         fontSize: '14px',
         fontWeight: '500',
         cursor: 'pointer',

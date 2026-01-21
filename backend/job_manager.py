@@ -123,6 +123,9 @@ class JobManager:
         features = params.get("features", [])
         requirements = params.get("requirements", {})
         user_id = params.get("user_id", user_email)  # Get user_id from params
+        product_data = params.get("product_data")  # User's product catalog for e-commerce
+        custom_data = params.get("custom_data", {})  # Any custom data
+        documentation_context = params.get("documentation_context")  # User's uploaded documents (resume, PDFs, images)
         
         try:
             # Step 1: Create project structure
@@ -143,7 +146,10 @@ class JobManager:
                 "project_type": project_type,
                 "features": features,
                 "requirements": requirements,
-                "user_id": user_id  # Pass user_id for S3 organization
+                "user_id": user_id,  # Pass user_id for S3 organization
+                "product_data": product_data,  # User's product catalog for e-commerce
+                "custom_data": custom_data,  # Any custom data
+                "documentation_context": documentation_context  # User's uploaded documents (resume, PDFs, images)
             })
             
             if not create_resp.get("success"):

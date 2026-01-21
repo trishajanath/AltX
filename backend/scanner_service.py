@@ -21,7 +21,9 @@ class ScanType(Enum):
     PASSIVE = "passive"
     ACTIVE = "active"
     SPIDER = "spider"
+    AJAX_SPIDER = "ajax_spider"  # Better for SPAs
     FULL = "full"
+    API = "api"  # Direct API endpoint scanning
 
 
 @dataclass
@@ -169,8 +171,29 @@ class ZAPSecurityScanner:
             self.zap.urlopen(target_url)
             time.sleep(2)
             
-            # Step 2: Spider the application to discover all endpoints
-            if scan_type in [ScanType.SPIDER, ScanType.PASSIVE, ScanType.FULL]:
+            # Step 2: Use AJAX Spider for SPAs (BEST for React apps)
+            if scan_type in [ScanType.AJAX_SPIDER, ScanType.FULL]:
+                print("🌐 Starting AJAX Spider (for React/SPA)...")
+                try:
+                    self.zap.ajaxSpider.scan(target_url)
+                    
+                    ajax_start = time.time()
+                    while self.zap.ajaxSpider.status == 'running':
+                        if time.time() - ajax_start > max_spider_time:
+                            print(f"⚠️ AJAX Spider timeout after {max_spider_time}s")
+                            self.zap.ajaxSpider.stop()
+                            break
+                        results = self.zap.ajaxSpider.number_of_results
+                        print(f"🌐 AJAX Spider found {results} resources...")
+                        time.sleep(3)
+                    
+                    print(f"✅ AJAX Spider completed - found {self.zap.ajaxSpider.number_of_results} resources")
+                except Exception as e:
+                    print(f"⚠️ AJAX Spider not available: {e}, falling back to traditional spider")
+                    scan_type = ScanType.SPIDER
+            
+            # Step 2b: Traditional Spider (fallback or explicit)
+            if scan_type in [ScanType.SPIDER, ScanType.PASSIVE]:
                 print("🕷️ Starting spider scan...")
                 spider_scan_id = self.zap.spider.scan(target_url)
                 
@@ -260,6 +283,142 @@ class ZAPSecurityScanner:
                 error=str(e)
             )
     
+    def scan_api_endpoints(
+        self,
+        base_url: str,
+        endpoints: List[str] = None,
+        scan_type: ScanType = ScanType.ACTIVE,
+        max_scan_time: int = 300
+    ) -> ScanResult:
+        """
+        Scan API endpoints directly - BEST PRACTICE for React SPAs.
+        The real attack surface is the backend API, not the React frontend.
+        
+        Args:
+            base_url: Base API URL (e.g., http://localhost:8000/api)
+            endpoints: List of API endpoints to scan (e.g., ['/login', '/users', '/upload'])
+            scan_type: Type of scan (ACTIVE recommended for APIs)
+            max_scan_time: Maximum time for scanning
+            
+        Returns:
+            ScanResult with all findings
+        """
+        start_time = time.time()
+        
+        # Default common API endpoints if none provided
+        if not endpoints:
+            endpoints = [
+                '/login', '/register', '/auth', '/token',
+                '/users', '/user', '/profile', '/account',
+                '/upload', '/files', '/download',
+                '/admin', '/api', '/graphql',
+                '/search', '/query', '/data',
+                '/payment', '/checkout', '/orders',
+                '/settings', '/config', '/webhook'
+            ]
+        
+        if not self._connect():
+            return ScanResult(
+                success=False,
+                target_url=base_url,
+                scan_type="api",
+                alerts=[],
+                high_risk_count=0,
+                medium_risk_count=0,
+                low_risk_count=0,
+                informational_count=0,
+                scan_duration_seconds=0,
+                error="Failed to connect to ZAP"
+            )
+        
+        all_alerts = []
+        scanned_endpoints = []
+        
+        print(f"🔌 Starting API endpoint scan on: {base_url}")
+        print(f"   Testing {len(endpoints)} endpoints...")
+        
+        try:
+            for endpoint in endpoints:
+                full_url = f"{base_url.rstrip('/')}{endpoint}"
+                
+                try:
+                    # Access the endpoint
+                    self.zap.urlopen(full_url)
+                    scanned_endpoints.append(endpoint)
+                    print(f"   ✓ Accessed: {endpoint}")
+                except:
+                    print(f"   ✗ Failed: {endpoint}")
+                    continue
+            
+            time.sleep(2)  # Wait for traffic to be processed
+            
+            # Run active scan on discovered endpoints
+            if scan_type == ScanType.ACTIVE and scanned_endpoints:
+                print("⚔️ Starting active scan on API endpoints...")
+                active_scan_id = self.zap.ascan.scan(base_url)
+                
+                active_start = time.time()
+                while int(self.zap.ascan.status(active_scan_id)) < 100:
+                    if time.time() - active_start > max_scan_time:
+                        print(f"⚠️ Active scan timeout after {max_scan_time}s")
+                        break
+                    progress = self.zap.ascan.status(active_scan_id)
+                    print(f"⚔️ Active scan progress: {progress}%")
+                    time.sleep(5)
+            
+            # Wait for passive scan
+            print("🔎 Waiting for passive scan...")
+            passive_start = time.time()
+            while int(self.zap.pscan.records_to_scan) > 0:
+                if time.time() - passive_start > 60:
+                    break
+                time.sleep(2)
+            
+            # Get alerts
+            alerts = self.zap.core.alerts(baseurl=base_url)
+            
+            # Categorize
+            high_risk = [a for a in alerts if a.get('risk') == 'High']
+            medium_risk = [a for a in alerts if a.get('risk') == 'Medium']
+            low_risk = [a for a in alerts if a.get('risk') == 'Low']
+            informational = [a for a in alerts if a.get('risk') == 'Informational']
+            
+            duration = time.time() - start_time
+            
+            print(f"\n📋 API Scan Results for {base_url}")
+            print(f"   📌 Endpoints scanned: {len(scanned_endpoints)}")
+            print(f"   🔴 High Risk: {len(high_risk)}")
+            print(f"   🟠 Medium Risk: {len(medium_risk)}")
+            print(f"   🟡 Low Risk: {len(low_risk)}")
+            print(f"   🔵 Informational: {len(informational)}")
+            print(f"   ⏱️ Duration: {duration:.2f}s")
+            
+            return ScanResult(
+                success=True,
+                target_url=base_url,
+                scan_type="api",
+                alerts=alerts,
+                high_risk_count=len(high_risk),
+                medium_risk_count=len(medium_risk),
+                low_risk_count=len(low_risk),
+                informational_count=len(informational),
+                scan_duration_seconds=duration
+            )
+            
+        except Exception as e:
+            return ScanResult(
+                success=False,
+                target_url=base_url,
+                scan_type="api",
+                alerts=[],
+                high_risk_count=0,
+                medium_risk_count=0,
+                low_risk_count=0,
+                informational_count=0,
+                scan_duration_seconds=time.time() - start_time,
+                error=str(e)
+            )
+    
     def get_alert_summary(self, alerts: List[Dict]) -> Dict[str, List[Dict]]:
         """
         Group alerts by type for easier analysis.
@@ -296,43 +455,138 @@ class ZAPSecurityScanner:
             Formatted report string
         """
         report = []
-        report.append("=" * 60)
-        report.append("🔐 OWASP ZAP SECURITY SCAN REPORT")
-        report.append("=" * 60)
-        report.append(f"\n📍 Target URL: {result.target_url}")
-        report.append(f"📋 Scan Type: {result.scan_type}")
-        report.append(f"⏱️ Duration: {result.scan_duration_seconds:.2f} seconds")
-        report.append(f"✅ Success: {result.success}")
+        
+        # Header
+        report.append("=" * 76)
+        report.append("OWASP ZAP SECURITY ASSESSMENT REPORT")
+        report.append("=" * 76)
+        report.append("")
+        
+        # Scan Metadata
+        report.append("SCAN CONFIGURATION")
+        report.append("-" * 76)
+        report.append(f"  Target URL      : {result.target_url}")
+        report.append(f"  Scan Type       : {result.scan_type.upper()}")
+        report.append(f"  Scan Duration   : {result.scan_duration_seconds:.2f} seconds")
+        report.append(f"  Scan Status     : {'COMPLETED' if result.success else 'FAILED'}")
+        report.append(f"  Timestamp       : {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+        report.append("")
         
         if result.error:
-            report.append(f"\n❌ Error: {result.error}")
+            report.append("SCAN ERROR")
+            report.append("-" * 76)
+            report.append(f"  {result.error}")
+            report.append("")
         
-        report.append("\n" + "-" * 40)
-        report.append("📊 RISK SUMMARY")
-        report.append("-" * 40)
-        report.append(f"🔴 High Risk:      {result.high_risk_count}")
-        report.append(f"🟠 Medium Risk:    {result.medium_risk_count}")
-        report.append(f"🟡 Low Risk:       {result.low_risk_count}")
-        report.append(f"🔵 Informational:  {result.informational_count}")
+        # Executive Summary
+        report.append("EXECUTIVE SUMMARY")
+        report.append("-" * 76)
+        total_findings = result.high_risk_count + result.medium_risk_count + result.low_risk_count + result.informational_count
+        report.append(f"  Total Findings  : {total_findings}")
+        report.append("")
+        report.append("  Risk Distribution:")
+        report.append(f"    CRITICAL/HIGH   : {result.high_risk_count:>4}  {'[REQUIRES IMMEDIATE ATTENTION]' if result.high_risk_count > 0 else ''}")
+        report.append(f"    MEDIUM          : {result.medium_risk_count:>4}  {'[RECOMMENDED TO ADDRESS]' if result.medium_risk_count > 0 else ''}")
+        report.append(f"    LOW             : {result.low_risk_count:>4}")
+        report.append(f"    INFORMATIONAL   : {result.informational_count:>4}")
+        report.append("")
+        
+        # Calculate risk score
+        risk_score = 100 - (result.high_risk_count * 25 + result.medium_risk_count * 10 + result.low_risk_count * 3 + result.informational_count * 1)
+        risk_score = max(0, min(100, risk_score))
+        if result.high_risk_count > 0:
+            risk_rating = "CRITICAL"
+        elif result.medium_risk_count > 0:
+            risk_rating = "MODERATE"
+        elif result.low_risk_count > 0:
+            risk_rating = "LOW"
+        else:
+            risk_rating = "MINIMAL"
+        report.append(f"  Security Score  : {risk_score}/100")
+        report.append(f"  Risk Rating     : {risk_rating}")
+        report.append("")
         
         if result.alerts:
-            report.append("\n" + "-" * 40)
-            report.append("🚨 DETAILED ALERTS")
-            report.append("-" * 40)
+            report.append("DETAILED FINDINGS")
+            report.append("=" * 76)
             
             # Group by risk level
+            finding_num = 1
             for risk_level in ['High', 'Medium', 'Low', 'Informational']:
                 risk_alerts = [a for a in result.alerts if a.get('risk') == risk_level]
                 if risk_alerts:
-                    report.append(f"\n{'🔴' if risk_level == 'High' else '🟠' if risk_level == 'Medium' else '🟡' if risk_level == 'Low' else '🔵'} {risk_level} Risk Alerts:")
-                    for alert in risk_alerts[:5]:  # Limit to 5 per category
-                        report.append(f"\n  • {alert.get('alert', 'Unknown')}")
-                        report.append(f"    URL: {alert.get('url', 'N/A')[:80]}...")
-                        report.append(f"    Confidence: {alert.get('confidence', 'N/A')}")
+                    report.append("")
+                    report.append(f"[{risk_level.upper()} RISK FINDINGS]")
+                    report.append("-" * 76)
+                    
+                    for alert in risk_alerts:
+                        report.append("")
+                        report.append(f"Finding #{finding_num}: {alert.get('alert', 'Unknown')}")
+                        report.append(f"  Severity      : {risk_level.upper()}")
+                        report.append(f"  Confidence    : {alert.get('confidence', 'N/A')}")
+                        
+                        if alert.get('cweid'):
+                            report.append(f"  CWE ID        : CWE-{alert.get('cweid')}")
+                        if alert.get('wascid'):
+                            report.append(f"  WASC ID       : WASC-{alert.get('wascid')}")
+                        
+                        report.append(f"  Affected URL  : {alert.get('url', 'N/A')}")
+                        
+                        if alert.get('param'):
+                            report.append(f"  Parameter     : {alert.get('param')}")
+                        
+                        if alert.get('evidence'):
+                            evidence = alert.get('evidence', '')[:200]
+                            report.append(f"  Evidence      : {evidence}")
+                        
+                        if alert.get('description'):
+                            desc = alert.get('description', '').replace('\n', ' ').strip()
+                            # Word wrap description at 70 chars
+                            desc_lines = [desc[i:i+60] for i in range(0, len(desc), 60)]
+                            report.append(f"  Description   : {desc_lines[0] if desc_lines else 'N/A'}")
+                            for line in desc_lines[1:4]:  # Limit to 4 lines
+                                report.append(f"                  {line}")
+                        
                         if alert.get('solution'):
-                            report.append(f"    Solution: {alert.get('solution', '')[:100]}...")
+                            solution = alert.get('solution', '').replace('\n', ' ').strip()
+                            sol_lines = [solution[i:i+60] for i in range(0, len(solution), 60)]
+                            report.append(f"  Remediation   : {sol_lines[0] if sol_lines else 'N/A'}")
+                            for line in sol_lines[1:3]:  # Limit to 3 lines
+                                report.append(f"                  {line}")
+                        
+                        if alert.get('reference'):
+                            refs = alert.get('reference', '').split('\n')[:2]  # First 2 references
+                            report.append(f"  References    : {refs[0] if refs else 'N/A'}")
+                            for ref in refs[1:]:
+                                if ref.strip():
+                                    report.append(f"                  {ref.strip()}")
+                        
+                        finding_num += 1
         
-        report.append("\n" + "=" * 60)
+        # Recommendations section
+        report.append("")
+        report.append("RECOMMENDATIONS")
+        report.append("=" * 76)
+        if result.high_risk_count > 0:
+            report.append("  [PRIORITY 1] Address all HIGH risk findings immediately.")
+            report.append("               These vulnerabilities may lead to data breach or system compromise.")
+        if result.medium_risk_count > 0:
+            report.append("  [PRIORITY 2] Review and remediate MEDIUM risk findings within 30 days.")
+            report.append("               These issues could be exploited under certain conditions.")
+        if result.low_risk_count > 0:
+            report.append("  [PRIORITY 3] Address LOW risk findings as part of regular maintenance.")
+        if result.informational_count > 0:
+            report.append("  [INFO] Review informational findings to improve security posture.")
+        if total_findings == 0:
+            report.append("  No vulnerabilities detected. Continue regular security assessments.")
+        
+        # Footer
+        report.append("")
+        report.append("=" * 76)
+        report.append("END OF REPORT")
+        report.append("Generated by OWASP ZAP Security Scanner")
+        report.append("=" * 76)
+        
         return "\n".join(report)
 
 
@@ -415,7 +669,7 @@ if __name__ == "__main__":
     # Example: Scan a sandbox preview URL
     test_url = "http://localhost:8000/api/sandbox-preview/e-commerce-sell-dairy-733439?v=1767546626238&user_email=trishajanath%40gmail.com&user_id_alt=69185f9403d5c9719c80c17a"
     
-    print("🔐 OWASP ZAP Security Scanner")
+    print("OWASP ZAP Security Scanner")
     print("=" * 50)
     
     # Initialize scanner
@@ -423,16 +677,16 @@ if __name__ == "__main__":
     
     # Check if ZAP is running
     if not scanner.is_zap_running():
-        print("\n❌ ZAP daemon is not running!")
-        print("\nTo start ZAP:")
+        print("\n[ERROR] ZAP daemon is not running")
+        print("\nSetup Instructions:")
         print("  1. Download from: https://www.zaproxy.org/download/")
         print("  2. Run in daemon mode: zap.sh -daemon -port 8080")
         print("  3. Or start ZAP GUI and enable API in Tools > Options > API")
-        print("\nAlternatively, run ZAP with Docker:")
+        print("\nDocker Alternative:")
         print("  docker run -u zap -p 8080:8080 -d owasp/zap2docker-stable zap.sh -daemon -host 0.0.0.0 -port 8080 -config api.addrs.addr.name=.* -config api.addrs.addr.regex=true -config api.key=changeme")
     else:
-        print(f"\n✅ ZAP is running at {scanner.zap_url}")
-        print(f"\n🎯 Scanning: {test_url[:80]}...")
+        print(f"\n[OK] ZAP is running at {scanner.zap_url}")
+        print(f"\nTarget: {test_url[:80]}...")
         
         # Run passive scan
         result = scanner.scan_url(test_url, ScanType.PASSIVE)

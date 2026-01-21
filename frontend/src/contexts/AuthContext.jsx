@@ -84,10 +84,13 @@ export const AuthProvider = ({ children }) => {
 
   // API helper with authentication
   const authenticatedFetch = async (url, options = {}) => {
-    const headers = {
-      ...options.headers,
-      'Content-Type': 'application/json',
-    };
+    const headers = { ...options.headers };
+
+    // Only set Content-Type for non-FormData requests
+    // FormData needs the browser to set the Content-Type with the boundary
+    if (!(options.body instanceof FormData)) {
+      headers['Content-Type'] = 'application/json';
+    }
 
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;

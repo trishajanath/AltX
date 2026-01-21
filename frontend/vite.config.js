@@ -37,6 +37,7 @@ export default defineConfig({
     }
   },
   optimizeDeps: {
-    include: ['three']
+    include: ['three', 'monaco-editor'],
+    exclude: ['@monaco-editor/react']
   }
 })

@@ -16,6 +16,9 @@ const ProjectBuilder = () => {
   const [fileContent, setFileContent] = useState("");
   const [selectedImages, setSelectedImages] = useState([]);
   const [autoRunEnabled, setAutoRunEnabled] = useState(false);
+  const [showProductInput, setShowProductInput] = useState(false);
+  const [productDataText, setProductDataText] = useState("");
+  const [productDataError, setProductDataError] = useState("");
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
 
@@ -41,6 +44,44 @@ const ProjectBuilder = () => {
     setSelectedImages(prev => prev.filter((_, i) => i !== index));
   };
 
+  // Generate a meaningful, human-readable project name from the idea description
+  // Note: The backend will ensure uniqueness by appending numbers if needed (e.g., todo-list, todo-list-2)
+  const generateProjectName = (idea) => {
+    if (!idea) return 'my-project';
+    
+    // Common words to filter out
+    const stopWords = ['a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 
+      'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'must', 'shall',
+      'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by', 'from', 'as', 'into', 'through', 'during',
+      'before', 'after', 'above', 'below', 'between', 'under', 'again', 'further', 'then', 'once',
+      'create', 'build', 'make', 'develop', 'design', 'implement', 'add', 'use', 'using', 'want',
+      'need', 'like', 'help', 'please', 'can', 'you', 'i', 'we', 'they', 'it', 'this', 'that',
+      'app', 'application', 'website', 'web', 'page', 'site', 'project', 'system', 'platform',
+      'and', 'or', 'but', 'if', 'so', 'because', 'about', 'which', 'when', 'where', 'who', 'what', 'how'];
+    
+    // Extract meaningful words from the idea
+    const words = idea.toLowerCase()
+      .replace(/[^\w\s]/g, ' ') // Remove punctuation
+      .split(/\s+/)
+      .filter(word => word.length > 2 && !stopWords.includes(word));
+    
+    // Take the first 2-3 meaningful words
+    const keyWords = words.slice(0, 3);
+    
+    if (keyWords.length === 0) {
+      // Fallback: use first few words of original idea
+      const fallbackWords = idea.toLowerCase()
+        .replace(/[^\w\s]/g, ' ')
+        .split(/\s+/)
+        .filter(word => word.length > 1)
+        .slice(0, 2);
+      return fallbackWords.length > 0 ? fallbackWords.join('-') : 'my-project';
+    }
+    
+    // Create a clean slug from keywords (no random numbers)
+    return keyWords.join('-');
+  };
+
   const loadFileTree = async (projectName) => {
     try {
       const treeRes = await fetch(
@@ -61,8 +102,8 @@ const ProjectBuilder = () => {
     setBuildProgress([]);
     setGeneratedProject(null);
 
-    // Generate a unique project name
-    const projectName = `app-${Date.now()}`;
+    // Generate a meaningful project name from the idea
+    const projectName = generateProjectName(projectIdea);
     
     // Set initial project data and immediately show Monaco Editor
     const initialProject = {
@@ -119,6 +160,17 @@ const ProjectBuilder = () => {
         payload.context = `Project includes ${selectedImages.length} reference image(s): ${selectedImages.map(img => img.name).join(", ")}`;
       }
 
+      // Add product data if provided (for e-commerce projects)
+      if (showProductInput && productDataText.trim()) {
+        try {
+          const parsedProducts = JSON.parse(productDataText);
+          payload.product_data = parsedProducts;
+          setBuildProgress(prev => [...prev, `[PRODUCTS] 📦 Using ${parsedProducts.length || 'custom'} products from your catalog`]);
+        } catch (e) {
+          setBuildProgress(prev => [...prev, `[WARN] ⚠️ Could not parse product data, using AI-generated products`]);
+        }
+      }
+
       setBuildProgress(["[INIT] 🤖 Starting AI-powered React + FastAPI generation..."]);
 
       const response = await fetch(apiUrl("api/build-with-ai"), {
@@ -161,6 +213,9 @@ const ProjectBuilder = () => {
     setIsBuilding(false);
     setShowMonacoEditor(false);
     setSelectedImages([]);
+    setShowProductInput(false);
+    setProductDataText("");
+    setProductDataError("");
   };
 
   const handleFileClick = async (file) => {
@@ -487,6 +542,113 @@ const ProjectBuilder = () => {
                 className="idea-input"
                 disabled={isBuilding}
               />
+              
+              {/* E-commerce Product Data Toggle */}
+              <div style={{ 
+                padding: '0.75rem 1.5rem', 
+                borderTop: '1px solid var(--card-border)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.75rem'
+              }}>
+                <label style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '0.5rem',
+                  cursor: 'pointer',
+                  fontSize: '0.9rem',
+                  color: 'var(--text-secondary)'
+                }}>
+                  <input
+                    type="checkbox"
+                    checked={showProductInput}
+                    onChange={(e) => setShowProductInput(e.target.checked)}
+                    style={{ 
+                      width: '16px', 
+                      height: '16px', 
+                      accentColor: 'var(--accent)' 
+                    }}
+                    disabled={isBuilding}
+                  />
+                  <span>📦 Add my product catalog (for e-commerce)</span>
+                </label>
+              </div>
+
+              {/* Product Data Input */}
+              {showProductInput && (
+                <div style={{ 
+                  padding: '1rem 1.5rem', 
+                  borderTop: '1px solid var(--card-border)',
+                  background: 'rgba(74, 222, 128, 0.05)'
+                }}>
+                  <div style={{ marginBottom: '0.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <label style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                      Paste your products as JSON array:
+                    </label>
+                    <button 
+                      onClick={() => setProductDataText(`[
+  {
+    "name": "Product Name",
+    "price": 29.99,
+    "description": "Product description here",
+    "category": "Category",
+    "image_url": "https://images.unsplash.com/photo-..."
+  }
+]`)}
+                      style={{
+                        background: 'transparent',
+                        border: '1px solid var(--card-border)',
+                        color: 'var(--text-secondary)',
+                        padding: '0.25rem 0.5rem',
+                        borderRadius: '0.25rem',
+                        fontSize: '0.75rem',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      📋 Show Example
+                    </button>
+                  </div>
+                  <textarea
+                    value={productDataText}
+                    onChange={(e) => {
+                      setProductDataText(e.target.value);
+                      // Validate JSON
+                      if (e.target.value.trim()) {
+                        try {
+                          JSON.parse(e.target.value);
+                          setProductDataError("");
+                        } catch (err) {
+                          setProductDataError("Invalid JSON format");
+                        }
+                      } else {
+                        setProductDataError("");
+                      }
+                    }}
+                    placeholder='[{"name": "T-Shirt", "price": 29.99, "description": "Cotton t-shirt", "category": "Clothing"}, ...]'
+                    style={{
+                      width: '100%',
+                      background: 'rgba(0, 0, 0, 0.3)',
+                      border: productDataError ? '1px solid #dc2626' : '1px solid var(--card-border)',
+                      borderRadius: '0.5rem',
+                      color: 'var(--text-primary)',
+                      fontSize: '0.85rem',
+                      padding: '0.75rem',
+                      minHeight: '100px',
+                      resize: 'vertical',
+                      fontFamily: '"JetBrains Mono", monospace'
+                    }}
+                    disabled={isBuilding}
+                  />
+                  {productDataError && (
+                    <p style={{ color: '#dc2626', fontSize: '0.75rem', marginTop: '0.25rem' }}>
+                      ⚠️ {productDataError}
+                    </p>
+                  )}
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.5rem' }}>
+                    💡 Your actual products will be used instead of AI-generated placeholder data
+                  </p>
+                </div>
+              )}
               
               <div className="input-container">
                 <div className="input-controls">

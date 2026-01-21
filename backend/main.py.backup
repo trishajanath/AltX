@@ -2113,39 +2113,26 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
         
     </script>
     
-    <!-- Babel standalone for JSX transformation - load FIRST before any CommonJS shims -->
-    <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.23.5/babel.min.js" crossorigin="anonymous"></script>
-    <script>
-        if (typeof Babel !== 'undefined' && Babel.transform) {{
-            window.babelLoaded = true;
-            console.log('✅ Babel loaded successfully');
-        }} else {{
-            console.error('❌ Babel failed to load, trying fallback...');
-            // Try loading from unpkg as fallback
-            var fallbackScript = document.createElement('script');
-            fallbackScript.src = 'https://unpkg.com/@babel/standalone@7.21.4/babel.min.js';
-            fallbackScript.crossOrigin = 'anonymous';
-            fallbackScript.onload = function() {{
-                if (typeof Babel !== 'undefined') {{
-                    window.babelLoaded = true;
-                    console.log('✅ Babel loaded from fallback');
-                }}
-            }};
-            document.head.appendChild(fallbackScript);
-        }}
-    </script>
+    <!-- Babel transformer for JSX - using v6.26.0 which is battle-tested for browsers -->
+    <script src="https://unpkg.com/babel-standalone@6.26.0/babel.min.js"></script>
     
-    <!-- Define CommonJS globals AFTER Babel is loaded -->
+    <!-- Define CommonJS globals to prevent "exports is not defined" errors -->
     <script>
-        // Define globals for user code that might use CommonJS patterns
-        // This must be AFTER Babel loads to avoid breaking Babel's internal module system
-        if (typeof window.exports === 'undefined') {{
+        // Babel standalone sometimes generates CommonJS output
+        // Define these globals to prevent errors
+        if (typeof exports === 'undefined') {{
             window.exports = {{}};
         }}
-        if (typeof window.module === 'undefined') {{
+        if (typeof module === 'undefined') {{
             window.module = {{ exports: {{}} }};
         }}
-        console.log('✅ CommonJS globals defined (after Babel)');
+        if (typeof require === 'undefined') {{
+            window.require = function(name) {{
+                console.warn('require() called for:', name, '- returning empty object');
+                return {{}};
+            }};
+        }}
+        console.log('✅ CommonJS globals defined for Babel compatibility');
     </script>
     
     <!-- Use pre-built Tailwind CSS instead of JIT CDN to avoid conflicts -->
@@ -3171,14 +3158,14 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
         }};
     </script>
     
-    <!-- User code - Babel automatically transforms type="text/babel" scripts -->
-    <script type="text/babel" data-presets="react">
+    <!-- User code - Manual Babel transformation for reliability -->
+    <script id="user-jsx-code" type="text/plain">
         // User's component and app code (JSX)
         {components_code}
         
         {app_content}
         
-        // CRITICAL: Ensure App is assigned to window after code runs
+        // CRITICAL: Ensure App is assigned to window after Babel transforms
         if (typeof App !== 'undefined' && typeof window.App !== 'function') {{
             window.App = App;
             console.log('✅ Assigned App to window.App');
@@ -3190,35 +3177,57 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
         console.log('✅ User code executed, window.App is:', typeof window.App);
         
         // CRITICAL: Restore sandbox UI components after user code
+        // This ensures sandbox globals are used even if user code tries to override them
         window.Button = window.Button || window._sandboxButton;
         window.Card = window.Card || window._sandboxCard;
         window.Input = window.Input || window._sandboxInput;
         window.Loading = window.Loading || window._sandboxLoading;
-        
-        // Render the app
-        try {{
-            if (typeof window.App === 'function') {{
-                const root = ReactDOM.createRoot(document.getElementById('root'));
-                root.render(
-                    React.createElement(window.SandboxErrorBoundary, null,
-                        React.createElement(window.App)
-                    )
-                );
-                console.log('✅ App rendered successfully');
-            }} else {{
-                throw new Error('App component not found');
-            }}
-        }} catch (error) {{
-            console.error('❌ Render error:', error);
-            document.getElementById('root').innerHTML = 
-                '<div class="error-boundary">' +
-                '<h2>Failed to render application</h2>' +
-                '<p>' + error.message + '</p>' +
-                '</div>';
-        }}
     </script>
     
-    <!-- Visual Editor - NO JSX, doesn't need Babel -->
+    <!-- Manual Babel transform - more reliable than auto script tag -->
+    <script>
+        (function() {{
+            let jsxCode = document.getElementById('user-jsx-code').textContent;
+            try {{
+                console.log('🔄 Transforming JSX code manually...');
+                
+                // CRITICAL: Convert React fragments <> </> to <React.Fragment> </React.Fragment>
+                // Babel 6 doesn't support fragment shorthand syntax
+                jsxCode = jsxCode.replace(/<>/g, '<React.Fragment>');
+                jsxCode = jsxCode.replace(/<\/>/g, '</React.Fragment>');
+                
+                // Also handle any remaining fragment edge cases
+                jsxCode = jsxCode.replace(/<\s*>/g, '<React.Fragment>');
+                jsxCode = jsxCode.replace(/<\s*\/\s*>/g, '</React.Fragment>');
+                
+                // Babel 6 uses 'es2015' and 'react' presets
+                const result = Babel.transform(jsxCode, {{
+                    presets: ['es2015', 'react'],
+                    plugins: ['transform-object-rest-spread']
+                }});
+                console.log('✅ JSX transformed successfully');
+                
+                // Execute the transformed code
+                const script = document.createElement('script');
+                script.textContent = result.code;
+                document.body.appendChild(script);
+                console.log('✅ Transformed code executed');
+            }} catch (error) {{
+                console.error('❌ Babel transform error:', error);
+                console.error('Error details:', error.message);
+                // Show error to user
+                document.getElementById('root').innerHTML = 
+                    '<div class="error-boundary">' +
+                    '<h2>JSX Transformation Error</h2>' +
+                    '<p>' + error.message + '</p>' +
+                    '<pre style="text-align:left;overflow:auto;max-height:300px;font-size:12px;">' + 
+                    (error.stack || '').substring(0, 1000) + '</pre>' +
+                    '</div>';
+            }}
+        }})();
+    </script>
+    
+    <!-- Visual Editor & App Renderer - NO JSX, doesn't need Babel -->
     <script>
         // ========== VISUAL EDITOR - RIGHT-CLICK TO EDIT STYLES ==========
         // This enables users to right-click any element and change its styles
@@ -4264,6 +4273,43 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
         if (typeof window.gc === 'function') {{
             try {{ window.gc(); }} catch (e) {{}}
         }}
+        
+        // Wait for Babel to transform JSX, then render
+        const renderApp = () => {{
+            console.log('🔍 Checking window.App:', typeof window.App, window.App);
+            console.log('🔍 All window keys with App:', Object.keys(window).filter(k => k.includes('App')));
+            if (typeof window.App === 'function') {{
+                try {{
+                    const root = ReactDOM.createRoot(document.getElementById('root'));
+                    root.render(
+                        React.createElement(window.SandboxErrorBoundary, null,
+                            React.createElement(window.App)
+                        )
+                    );
+                    console.log('✅ App rendered successfully');
+                }} catch (error) {{
+                    console.error('Failed to render app:', error);
+                    document.getElementById('root').innerHTML = 
+                        '<div class="error-boundary">' +
+                        '<h2>Failed to render the application</h2>' +
+                        '<p>' + error.message + '</p>' +
+                        '<p>Check the console for more details.</p>' +
+                        '</div>';
+                }}
+            }} else {{
+                console.error('App component not found - check user code');
+                console.error('window.App is:', window.App);
+                document.getElementById('root').innerHTML = 
+                    '<div class="error-boundary">' +
+                    '<h2>Failed to render the application</h2>' +
+                    '<p>App component not found or not a function</p>' +
+                    '<p>Check the console for syntax errors.</p>' +
+                    '</div>';
+            }}
+        }};
+        
+        // Give Babel more time to transform the user code
+        setTimeout(renderApp, 1500);
     </script>
 </body>
 </html>

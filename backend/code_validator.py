@@ -710,13 +710,56 @@ def validate_generated_code(code: str, file_type: str, filename: str) -> Validat
         return ValidationResult(True, [], [], ["Unknown file type - basic validation only"])
 
 
+def _remove_jsx_prop_with_balanced_braces(code: str, prop_name: str) -> str:
+    """
+    Remove a JSX prop that has nested braces, like: prop={{ value: { nested: true } }}
+    Uses balanced brace matching to handle arbitrary nesting depth.
+    """
+    import re
+    
+    result = []
+    i = 0
+    while i < len(code):
+        # Look for prop={{ or prop={ patterns (with optional whitespace before)
+        match = re.search(rf'\s*{prop_name}=\{{', code[i:])
+        if not match:
+            result.append(code[i:])
+            break
+        
+        # Add everything before the match
+        result.append(code[i:i+match.start()])
+        
+        # Find the start of the prop value (after the opening brace)
+        start = i + match.end()
+        
+        # Count braces to find the end - we start with 1 open brace from prop={
+        brace_count = 1
+        j = start
+        while j < len(code) and brace_count > 0:
+            if code[j] == '{':
+                brace_count += 1
+            elif code[j] == '}':
+                brace_count -= 1
+            j += 1
+        
+        # Skip to after the closing brace
+        i = j
+    
+    return ''.join(result)
+
+
 def auto_fix_jsx_for_sandbox(code: str, filename: str = "component.jsx") -> str:
     """
     Automatically fix common JSX issues for sandbox execution.
     This function transforms code to work in a browser sandbox environment.
-    Fixes include: import removal, syntax fixes, React-specific fixes.
+    Fixes include: import removal, syntax fixes, React-specific fixes, motion component replacement.
     """
     import re
+    
+    # ========== DUPLICATE DECLARATION FIXES ==========
+    # Remove duplicate React hooks destructure that causes "Identifier already declared" errors
+    code = re.sub(r"// React hooks - using React\.\* namespace\s*\nconst \{ useState[^}]+\} = React;\s*\n?", '', code)
+    code = re.sub(r"const \{ useState[^}]+\} = React;\s*\n?", '', code)
     
     # ========== IMPORT REMOVAL (sandbox provides these globally) ==========
     
@@ -730,6 +773,25 @@ def auto_fix_jsx_for_sandbox(code: str, filename: str = "component.jsx") -> str:
     code = re.sub(r"import\s+\{[^}]*\}\s+from\s+['\"]framer-motion['\"];?\s*\n?", '', code)
     code = re.sub(r"import\s+\*\s+as\s+\w+\s+from\s+['\"]framer-motion['\"];?\s*\n?", '', code)
     code = re.sub(r"import\s+motion\s+from\s+['\"]framer-motion['\"];?\s*\n?", '', code)
+    
+    # Replace AnimatePresence with React.Fragment - causes "a.set is not a function" errors in sandbox
+    code = code.replace('<AnimatePresence>', '<React.Fragment>')
+    code = code.replace('</AnimatePresence>', '</React.Fragment>')
+    code = code.replace('<AnimatePresence ', '<React.Fragment ')  # Handle with props
+    
+    # ========== MOTION COMPONENT REPLACEMENT ==========
+    # Replace motion.X components with regular HTML elements to avoid "a.set is not a function" errors
+    # The sandbox's motion fallback doesn't work reliably with all React versions
+    
+    # Replace motion.element with regular element
+    code = re.sub(r'<motion\.(\w+)', r'<\1', code)
+    code = re.sub(r'</motion\.(\w+)>', r'</\1>', code)
+    
+    # Remove motion-specific props that are invalid on regular elements
+    # Use balanced brace matching to handle nested objects like: exit={{ opacity: 0, transition: { duration: 0.2 } }}
+    motion_props = ['initial', 'animate', 'exit', 'whileHover', 'whileTap', 'whileInView', 'transition', 'variants', 'layoutId', 'layout']
+    for prop in motion_props:
+        code = _remove_jsx_prop_with_balanced_braces(code, prop)
     
     # Remove local motion fallback definitions (global ones exist in sandbox)
     code = re.sub(r"const\s+motion\s*=\s*window\.motion\s*\|\|[^;]+;?\s*\n?", '', code)
@@ -805,8 +867,14 @@ def auto_fix_jsx_for_sandbox(code: str, filename: str = "component.jsx") -> str:
     # This happens when AI generates malformed arrow syntax
     code = re.sub(r'\)\s*=\s*/>', r') =>', code)
     
+    # Fix arrow function without parens: e = /> to e =>
+    code = re.sub(r'(\w+)\s*=\s*/>', r'\1 =>', code)
+    
     # Fix other arrow function corruptions: (e) = > to (e) =>
     code = re.sub(r'\)\s*=\s+>', r') =>', code)
+    
+    # Fix arrow without parens with space: e = > to e =>
+    code = re.sub(r'(\w+)\s*=\s+>', r'\1 =>', code)
     
     # Fix arrow with extra spaces: ( e ) = > to (e) =>
     code = re.sub(r'\(\s*(\w+)\s*\)\s*=\s*>', r'(\1) =>', code)
@@ -1078,6 +1146,133 @@ def auto_fix_jsx_for_sandbox(code: str, filename: str = "component.jsx") -> str:
     # Add helpful comment if motion is used
     if 'motion.' in code and 'const motion' not in code:
         code = '// motion is provided globally by the sandbox environment\n' + code
+    
+    # ========== FIX BROKEN IMAGE URLS ==========
+    # Replace broken/placeholder image URLs with reliable working images
+    code = fix_image_urls_in_code(code)
+    
+    # ========== FIX EXPORT FOR SANDBOX ==========
+    # Sandbox requires window.App assignment, not export default
+    # Simple approach: just remove exports, let main.py handle window assignment
+    if 'export default' in code:
+        # Remove the export but keep the component declaration
+        code = re.sub(r'export\s+default\s+', '', code)
+    
+    return code
+
+
+# Reliable image URL database - these are verified working Unsplash images
+RELIABLE_IMAGE_URLS = {
+    # Food/Grocery images
+    'food': [
+        'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400&h=300&fit=crop&auto=format',  # Food bowl
+        'https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=400&h=300&fit=crop&auto=format',  # Pizza
+        'https://images.unsplash.com/photo-1540189549336-e6e99c3679fe?w=400&h=300&fit=crop&auto=format',  # Salad
+        'https://images.unsplash.com/photo-1567620905732-2d1ec7ab7445?w=400&h=300&fit=crop&auto=format',  # Pancakes
+        'https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=400&h=300&fit=crop&auto=format',  # Meat dish
+        'https://images.unsplash.com/photo-1512621776951-a57141f2eefd?w=400&h=300&fit=crop&auto=format',  # Healthy bowl
+    ],
+    # Product images  
+    'product': [
+        'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=400&h=400&fit=crop&auto=format',  # Watch
+        'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=400&h=400&fit=crop&auto=format',  # Headphones
+        'https://images.unsplash.com/photo-1572635196237-14b3f281503f?w=400&h=400&fit=crop&auto=format',  # Sunglasses
+        'https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f?w=400&h=400&fit=crop&auto=format',  # Camera
+        'https://images.unsplash.com/photo-1585386959984-a4155224a1ad?w=400&h=400&fit=crop&auto=format',  # Cosmetics
+        'https://images.unsplash.com/photo-1560343090-f0409e92791a?w=400&h=400&fit=crop&auto=format',  # Sneakers
+    ],
+    # Hero/banner images
+    'hero': [
+        'https://images.unsplash.com/photo-1557804506-669a67965ba0?w=1600&h=900&fit=crop&auto=format',  # Office
+        'https://images.unsplash.com/photo-1551434678-e076c223a692?w=1600&h=900&fit=crop&auto=format',  # Team
+        'https://images.unsplash.com/photo-1497366216548-37526070297c?w=1600&h=900&fit=crop&auto=format',  # Modern office
+        'https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=1600&h=900&fit=crop&auto=format',  # Collaboration
+    ],
+    # Avatar/profile images
+    'avatar': [
+        'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=200&h=200&fit=crop&auto=format',  # Male
+        'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&h=200&fit=crop&auto=format',  # Female
+        'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&h=200&fit=crop&auto=format',  # Male 2
+        'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=200&h=200&fit=crop&auto=format',  # Female 2
+    ],
+    # Default fallback
+    'default': [
+        'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=400&h=300&fit=crop&auto=format',  # Abstract
+        'https://images.unsplash.com/photo-1557683316-973673baf926?w=400&h=300&fit=crop&auto=format',  # Gradient
+        'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=400&h=300&fit=crop&auto=format',  # Colorful
+    ]
+}
+
+def fix_image_urls_in_code(code: str) -> str:
+    """
+    Replace broken or placeholder image URLs with reliable working images.
+    Detects context from surrounding code to choose appropriate image type.
+    """
+    import re
+    import hashlib
+    
+    # Patterns for broken image URLs that need replacement
+    broken_patterns = [
+        # Placeholder services that may not work reliably
+        r'https?://placehold\.co/[^\s"\'>]+',
+        r'https?://placeholder\.com/[^\s"\'>]+',
+        r'https?://via\.placeholder\.com/[^\s"\'>]+',
+        r'https?://placekitten\.com/[^\s"\'>]+',
+        r'https?://picsum\.photos/[^\s"\'>]+',
+        r'https?://loremflickr\.com/[^\s"\'>]+',
+        # Example.com URLs
+        r'https?://example\.com/[^\s"\'>]+\.(?:jpg|jpeg|png|gif|webp)',
+        # Generic fake URLs
+        r'https?://fake[^\s"\'>]+\.(?:jpg|jpeg|png|gif|webp)',
+        r'https?://[^\s"\'>]+/placeholder[^\s"\'>]*\.(?:jpg|jpeg|png|gif|webp)',
+        # URLs that end without an extension (often broken)
+        r'https?://[^\s"\'>]+/images?/[a-zA-Z]+(?=["\'])',
+    ]
+    
+    def get_image_category_from_context(match_start: int, code: str) -> str:
+        """Determine image category based on surrounding code context."""
+        # Get 200 chars before and after the match for context
+        start = max(0, match_start - 200)
+        end = min(len(code), match_start + 200)
+        context = code[start:end].lower()
+        
+        # Food/grocery context
+        if any(word in context for word in ['food', 'meal', 'grocery', 'recipe', 'breakfast', 'lunch', 'dinner', 'taco', 'pizza', 'burger', 'salad', 'fruit', 'vegetable', 'kitchen', 'restaurant', 'menu', 'dish', 'cuisine']):
+            return 'food'
+        
+        # Product context
+        if any(word in context for word in ['product', 'cart', 'shop', 'store', 'buy', 'price', 'item', 'inventory', 'stock', 'ecommerce', 'purchase']):
+            return 'product'
+        
+        # Avatar/profile context
+        if any(word in context for word in ['avatar', 'profile', 'user', 'author', 'member', 'team', 'person', 'employee', 'staff']):
+            return 'avatar'
+        
+        # Hero/banner context
+        if any(word in context for word in ['hero', 'banner', 'background', 'cover', 'header', 'jumbotron', 'splash']):
+            return 'hero'
+        
+        return 'default'
+    
+    def get_replacement_url(match, code: str) -> str:
+        """Get a consistent replacement URL based on context and position."""
+        category = get_image_category_from_context(match.start(), code)
+        images = RELIABLE_IMAGE_URLS.get(category, RELIABLE_IMAGE_URLS['default'])
+        
+        # Use hash of the original URL to get consistent replacement
+        original_url = match.group(0)
+        hash_val = int(hashlib.md5(original_url.encode()).hexdigest(), 16)
+        index = hash_val % len(images)
+        
+        return images[index]
+    
+    # Apply replacements
+    for pattern in broken_patterns:
+        matches = list(re.finditer(pattern, code, re.IGNORECASE))
+        # Process in reverse order to maintain correct positions
+        for match in reversed(matches):
+            replacement = get_replacement_url(match, code)
+            code = code[:match.start()] + replacement + code[match.end():]
     
     return code
 

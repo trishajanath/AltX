@@ -18,7 +18,7 @@ import './voice.css';
 const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
   usePreventZoom();
   const navigate = useNavigate();
-  const { authenticatedFetch, login, token } = useAuth();
+  const { authenticatedFetch, login, token, user } = useAuth();
   const [isRecording, setIsRecording] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -48,17 +48,50 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
   const formatTimeAgo = (dateString) => {
     const date = new Date(dateString);
     const now = new Date();
-    const diffInHours = Math.floor((now - date) / (1000 * 60 * 60));
+    const seconds = Math.floor((now - date) / 1000);
     
-    if (diffInHours < 1) return 'Just now';
-    if (diffInHours < 24) return `${diffInHours} hours ago`;
-    
-    const diffInDays = Math.floor(diffInHours / 24);
-    if (diffInDays === 1) return 'Yesterday';
-    if (diffInDays < 7) return `${diffInDays} days ago`;
-    
+    if (seconds < 60) return 'just now';
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+    if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`;
     return date.toLocaleDateString();
   };
+
+  // Helper function to build preview URLs with auth params
+  const buildAuthenticatedPreviewUrl = useCallback((projectSlug) => {
+    let url = `/api/sandbox-preview/${projectSlug}`;
+    
+    // Try to get user info from context or localStorage
+    const userEmail = user?.email;
+    const userId = user?._id;
+    
+    // Fallback to localStorage if context user not available
+    const storedUserStr = localStorage.getItem('user') || sessionStorage.getItem('user');
+    let storedEmail = null;
+    let storedUserId = null;
+    
+    if (storedUserStr) {
+      try {
+        const storedUser = JSON.parse(storedUserStr);
+        storedEmail = storedUser.email;
+        storedUserId = storedUser._id;
+      } catch (e) {
+        console.warn('Could not parse stored user');
+      }
+    }
+    
+    const email = userEmail || storedEmail;
+    const id = userId || storedUserId;
+    
+    if (email || id) {
+      const params = new URLSearchParams();
+      if (email) params.set('user_email', email);
+      if (id) params.set('user_id_alt', id);
+      url = `${url}?${params.toString()}`;
+    }
+    
+    return url;
+  }, [user]);
   
   // Real-time conversation states
   const [isRealTimeMode, setIsRealTimeMode] = useState(false);
@@ -90,7 +123,11 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
   const prevConversationLengthRef = useRef(0);
   const userAtBottomRef = useRef(true); // Track if user is at bottom (ref-only, no re-renders)
   const projectHistoryLoadedRef = useRef(false); // Prevent multiple loads
+  const supportedLanguagesLoadedRef = useRef(false); // Prevent multiple TTS language loads
   const messageIdCounterRef = useRef(0); // Stable ID counter for messages
+  
+  // Helper to generate unique message IDs
+  const getNextMessageId = () => `msg-${++messageIdCounterRef.current}`;
 
   // Initialize with AI welcome message
   useEffect(() => {
@@ -253,7 +290,7 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
     // Add user message to conversation with stable ID
     messageIdCounterRef.current += 1;
     const userMessage = {
-      id: `msg-${messageIdCounterRef.current}`,
+      id: getNextMessageId(),
       type: 'user',
       content: prompt,
       timestamp: new Date()
@@ -264,9 +301,8 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
     // Check if in demo mode
     if (isDemo) {
       // Demo flow: Show thinking message instantly (no delays)
-      messageIdCounterRef.current += 1;
       const thinkingMessage = {
-        id: `msg-${messageIdCounterRef.current}`,
+        id: getNextMessageId(),
         type: 'ai',
         content: "Great! I'm designing that project for you right now...",
         timestamp: new Date()
@@ -303,9 +339,8 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
       
       // After a short delay, show the confirmation message
       setTimeout(() => {
-        messageIdCounterRef.current += 1;
         const confirmationMessage = {
-          id: `msg-${messageIdCounterRef.current}`,
+          id: getNextMessageId(),
           type: 'ai',
           content: `Okay, I've generated the first draft of your project. Would you like me to create this project for you?`,
           timestamp: new Date(),
@@ -900,7 +935,7 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
 
   // Handle preview project - open in new tab
   const handlePreviewProject = (project) => {
-    const previewUrl = project.preview_url || `http://localhost:8000/api/sandbox-preview/${project.slug}`;
+    const previewUrl = project.preview_url || `http://localhost:8000${buildAuthenticatedPreviewUrl(project.slug)}`;
     window.open(previewUrl, '_blank', 'noopener,noreferrer');
   };
 
@@ -1434,130 +1469,48 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
 
   // Handle project generation
   const handleProjectGeneration = async (projectSpec) => {
-    addMessage('system', 'Starting project generation...');
+    // Generate project name first
+    const generateProjectName = (description, type) => {
+      const stopWords = ['a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had',
+        'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'must', 'shall',
+        'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by', 'from', 'as', 'into', 'through', 'during',
+        'before', 'after', 'above', 'below', 'between', 'under', 'again', 'further', 'then', 'once',
+        'create', 'build', 'make', 'develop', 'design', 'implement', 'add', 'use', 'using', 'want',
+        'need', 'like', 'help', 'please', 'can', 'you', 'i', 'we', 'they', 'it', 'this', 'that',
+        'and', 'or', 'but', 'if', 'so', 'because', 'about', 'which', 'when', 'where', 'who', 'what', 'how',
+        'app', 'application', 'website', 'web', 'page', 'site', 'project', 'system', 'platform', 'ai', 'generated'];
+      
+      if (!description || description === 'AI-generated application') {
+        const typeWord = (type || 'web').toLowerCase().split(' ')[0];
+        return `${typeWord}-project`;
+      }
+      
+      const words = description.toLowerCase()
+        .replace(/[^\w\s]/g, ' ')
+        .split(/\s+/)
+        .filter(word => word.length > 2 && !stopWords.includes(word));
+      
+      const keyWords = words.slice(0, 3);
+      
+      if (keyWords.length === 0) {
+        const typeWord = (type || 'web').toLowerCase().split(' ')[0];
+        return `${typeWord}-project`;
+      }
+      
+      return keyWords.join('-');
+    };
+
+    const projectName = generateProjectName(projectSpec.description, projectSpec.type);
     
-    try {
-      // Generate a meaningful project name from the description and type
-      const generateProjectName = (description, type) => {
-        const timestamp = Date.now().toString().slice(-6); // Last 6 digits for uniqueness
-        
-        if (!description || description === 'AI-generated application') {
-          return `app-${timestamp}`;
-        }
-        
-        // Extract key words from description
-        const cleanDesc = description.toLowerCase()
-          .replace(/[^\w\s]/g, '')
-          .split(' ')
-          .filter(word => word.length > 2 && !['the', 'and', 'for', 'with', 'app', 'application'].includes(word))
-          .slice(0, 2)
-          .join('-');
-        
-        const typePrefix = (type || 'app').toLowerCase().split(' ')[0];
-        
-        return cleanDesc ? `${typePrefix}-${cleanDesc}-${timestamp}` : `${typePrefix}-app-${timestamp}`;
-      };
-
-      const projectName = generateProjectName(projectSpec.description, projectSpec.type);
-
-      // Step 1: Create async job
-      const response = await fetch(apiUrl('api/build-with-ai'), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          project_name: projectName,
-          idea: projectSpec.description,
-          tech_stack: projectSpec.tech_stack || [],
-          project_type: projectSpec.type || 'web app',
-          features: projectSpec.features || [],
-          requirements: projectSpec,
-          customizations: projectSpec.customizations || {}
-        })
-      });
-      
-      if (!response.ok) {
-        throw new Error('Failed to start project generation');
+    // IMMEDIATELY navigate to editor with building state - don't wait!
+    // The editor will handle the building process and show progress
+    navigate(`/project/${projectName}`, {
+      state: {
+        isNewProject: true,
+        projectSpec: projectSpec,
+        projectName: projectName
       }
-      
-      const result = await response.json();
-      
-      if (!result.success || !result.job_id) {
-        throw new Error(result.error || 'Failed to create generation job');
-      }
-      
-      const jobId = result.job_id;
-      addMessage('system', `Starting project generation... (Job ID: ${jobId})`);
-      
-      // Step 2: Poll for job status
-      const pollInterval = 2000; // Poll every 2 seconds
-      const maxAttempts = 300; // 10 minutes max (300 * 2s)
-      let attempts = 0;
-      
-      const pollJobStatus = async () => {
-        try {
-          const statusResponse = await fetch(apiUrl(`api/jobs/${jobId}`), {
-            headers: {
-              'Authorization': `Bearer ${token}`
-            }
-          });
-          
-          if (!statusResponse.ok) {
-            throw new Error('Failed to check job status');
-          }
-          
-          const statusResult = await statusResponse.json();
-          const job = statusResult.job;
-          
-          // Update progress message
-          if (job.logs && job.logs.length > 0) {
-            const latestLog = job.logs[job.logs.length - 1];
-            addMessage('system', `Progress: ${latestLog} (${job.progress}%)`);
-          }
-          
-          if (job.status === 'completed') {
-            addMessage('system', `Success: Project "${projectName}" generated successfully!`);
-            
-            // Refresh project history (force reload)
-            projectHistoryLoadedRef.current = false;
-            fetchProjectHistory();
-            
-            // Redirect to Monaco editor
-            setTimeout(() => {
-              if (onProjectGenerated) {
-                onProjectGenerated(projectName);
-              } else {
-                window.location.href = `/project/${projectName}`;
-              }
-            }, 2000);
-            
-            return; // Done!
-          } else if (job.status === 'failed') {
-            throw new Error(job.error || 'Project generation failed');
-          } else {
-            // Still running, poll again
-            attempts++;
-            if (attempts < maxAttempts) {
-              setTimeout(pollJobStatus, pollInterval);
-            } else {
-              throw new Error('Project generation timed out');
-            }
-          }
-        } catch (error) {
-          console.error('Poll error:', error);
-          addMessage('system', `Error: ${error.message}`);
-        }
-      };
-      
-      // Start polling
-      setTimeout(pollJobStatus, pollInterval);
-      
-    } catch (error) {
-      console.error('Project generation error:', error);
-      addMessage('system', 'Error: Failed to generate project. Please try again.');
-    }
+    });
   };
 
   // Manual text input for fallback
@@ -1641,6 +1594,13 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
 
   // Load supported TTS languages
   useEffect(() => {
+    // Prevent duplicate loads (React StrictMode causes double mounting)
+    if (supportedLanguagesLoadedRef.current) {
+      console.log('⚠️ Supported languages already loaded, skipping');
+      return;
+    }
+    supportedLanguagesLoadedRef.current = true;
+
     const loadSupportedLanguages = async () => {
       try {
         const response = await fetch(apiUrl('api/supported-languages'));
@@ -1958,8 +1918,8 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
               {/* Hero Heading - Only show when NOT in demo mode */}
               {!isDemo && (
                 <div className="hero-heading-section">
-                  <h1 className="hero-main-title">Build applications with XVERTA</h1>
-                  <p className="hero-subtitle">Create, iterate, and launch your next application by talking with XVERTA.</p>
+                  <h1 className="hero-main-title">Build Secure Applications with XVERTA</h1>
+                  <p className="hero-subtitle">From zero to production-ready code with built-in compliance, encryption, and threat protection.</p>
                 </div>
               )}
 
@@ -2246,9 +2206,9 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
                 {/* Show real project history (not in demo mode) */}
                 {!isDemo && (
                   <div className="jump-back-in-section">
-                    <div style={{ padding: '40px', textAlign: 'center' }}>
-                      <h2 className="empty-state-section-title" style={{ marginBottom: '12px' }}>Ready to continue?</h2>
-                      <p style={{ color: 'var(--text-secondary)', marginBottom: '24px', fontSize: '14px' }}>
+                    <div style={{ padding: '24px', textAlign: 'center', width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                      <h2 className="empty-state-section-title" style={{ marginBottom: '8px', fontSize: '20px' }}>Ready to continue?</h2>
+                      <p style={{ color: 'var(--text-secondary)', marginBottom: '16px', fontSize: '14px' }}>
                         Pick up where you left off with your previous projects
                       </p>
                       <button 
@@ -2336,9 +2296,9 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
           </div>
           
           <div className="project-cards-grid">
-            {/* Show real project history */}
+            {/* Show real project history - lightweight cards without heavy iframe previews */}
             {projectHistory.map((project, index) => (
-              <div key={project.slug || index} className="project-card">
+              <div key={project.slug || index} className="project-card" style={{ cursor: 'pointer' }} onClick={() => handleEditProject(project)}>
                 <div className="project-card-header">
                   <div className="project-card-info">
                     <h4 className="project-card-name">{project.name || 'Unnamed Project'}</h4>
@@ -2348,27 +2308,48 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
                   </div>
                 </div>
                 
-                {/* Live Preview Container */}
-                <div className="project-card-preview">
-                  <iframe
-                    src={`/api/sandbox-preview/${project.slug}`}
-                    title={`Preview of ${project.name}`}
-                    className="project-preview-iframe"
-                    sandbox="allow-scripts allow-same-origin"
-                    scrolling="no"
-                  />
+                {/* Lightweight Preview Placeholder - No iframe to save memory */}
+                <div className="project-card-preview" style={{
+                  background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '12px',
+                  minHeight: '140px',
+                  borderRadius: '8px',
+                  border: '1px solid rgba(255,255,255,0.05)'
+                }}>
+                  <div style={{
+                    width: '48px',
+                    height: '48px',
+                    borderRadius: '12px',
+                    background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}>
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+                      <rect x="3" y="3" width="18" height="18" rx="2"/>
+                      <path d="M3 9h18"/>
+                      <path d="M9 21V9"/>
+                    </svg>
+                  </div>
+                  <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: '12px' }}>
+                    {project.file_count || '~'} files
+                  </span>
                 </div>
                 
                 <div className="project-card-actions">
                   <button 
                     className="project-card-btn primary"
-                    onClick={() => handleEditProject(project)}
+                    onClick={(e) => { e.stopPropagation(); handleEditProject(project); }}
                   >
                     Open Project
                   </button>
                   <button 
                     className="project-card-btn"
-                    onClick={() => handlePreviewProject(project)}
+                    onClick={(e) => { e.stopPropagation(); handlePreviewProject(project); }}
                   >
                     Preview
                   </button>

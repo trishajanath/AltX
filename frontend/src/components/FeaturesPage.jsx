@@ -16,10 +16,10 @@ const FeaturesPage = () => {
             <section style={styles.heroSection}>
                 <div style={styles.heroContainer}>
                     <h1 style={styles.heroHeadline}>
-                        All Power, No Code.
+                        Secure Code. Zero Compromise.
                     </h1>
                     <p style={styles.heroSubheadline}>
-                        XVERTA is your 24/7 AI engineer. Here's what it can do for you.
+                        Generate production-ready applications with built-in compliance, encryption, and threat protection. Don't just build faster—build safer.
                     </p>
                 </div>
             </section>
@@ -73,19 +73,19 @@ const FeaturesPage = () => {
                             <ul style={styles.beforeAfterList}>
                                 <li style={styles.beforeItem}>
                                     <X size={18} style={styles.xIcon} />
-                                    2–8 weeks for an MVP
+                                    Vulnerable to SQL Injection
                                 </li>
                                 <li style={styles.beforeItem}>
                                     <X size={18} style={styles.xIcon} />
-                                    Thousands spent on freelancers
+                                    Data Privacy Nightmares
                                 </li>
                                 <li style={styles.beforeItem}>
                                     <X size={18} style={styles.xIcon} />
-                                    Slow, painful iteration
+                                    Expensive Security Audits
                                 </li>
                                 <li style={styles.beforeItem}>
                                     <X size={18} style={styles.xIcon} />
-                                    Lost in technical translation
+                                    Spaghetti Code
                                 </li>
                             </ul>
                         </div>
@@ -99,19 +99,19 @@ const FeaturesPage = () => {
                             <ul style={styles.beforeAfterList}>
                                 <li style={styles.afterItem}>
                                     <Check size={18} style={styles.checkIcon} />
-                                    Functional app in minutes
+                                    Auto-Sanitized Inputs
                                 </li>
                                 <li style={styles.afterItem}>
                                     <Check size={18} style={styles.checkIcon} />
-                                    Speak to generate changes
+                                    Built-in RBAC & Encryption
                                 </li>
                                 <li style={styles.afterItem}>
                                     <Check size={18} style={styles.checkIcon} />
-                                    One-click deployment
+                                    Real-time Threat Monitoring
                                 </li>
                                 <li style={styles.afterItem}>
                                     <Check size={18} style={styles.checkIcon} />
-                                    AI understands your vision
+                                    Clean, Documented Code
                                 </li>
                             </ul>
                         </div>
@@ -231,7 +231,8 @@ const styles = {
         color: 'var(--text-primary)',
         textAlign: 'center',
         marginBottom: '64px',
-        letterSpacing: '-1.5px'
+        letterSpacing: '-1.5px',
+        fontFamily: "'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace"
     },
     stepsGrid: {
         display: 'grid',
@@ -369,7 +370,8 @@ const styles = {
         fontWeight: '700',
         color: 'var(--text-primary)',
         marginBottom: '16px',
-        letterSpacing: '-1px'
+        letterSpacing: '-1px',
+        fontFamily: "'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace"
     },
     auditorSubheadline: {
         fontSize: '20px',
@@ -419,7 +421,8 @@ const styles = {
         fontWeight: '700',
         color: 'var(--text-primary)',
         marginBottom: '16px',
-        letterSpacing: '-1.5px'
+        letterSpacing: '-1.5px',
+        fontFamily: "'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace"
     },
     ctaSubtext: {
         fontSize: '18px',
@@ -432,8 +435,8 @@ const styles = {
         alignItems: 'center',
         background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
         color: '#ffffff',
-        border: 'none',
-        borderRadius: '25px',
+        border: '1px solid rgba(255, 255, 255, 0.2)',
+        borderRadius: '4px',
         padding: '16px 32px',
         fontSize: '16px',
         fontWeight: '600',

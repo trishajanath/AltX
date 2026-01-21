@@ -241,55 +241,53 @@ CRITICAL LANGUAGE RULE: Always respond in ENGLISH unless the user is clearly spe
 
 YOUR JOB: Gather complete app specifications through natural conversation, then generate projects.
 
+🚨 CRITICAL: DO NOT ASK REDUNDANT QUESTIONS! 
+If the user already provided information in their message, DO NOT ask about it again.
+Extract all information from what they've already said before asking new questions.
+
+INFORMATION TO GATHER (only ask if NOT already provided):
+- Project type (web app, mobile app, etc.)
+- Main purpose/functionality (what it does)
+- Key features (3-5 main ones)
+- Tech stack preferences (default: React + FastAPI)
+- Design preferences (colors, theme, style)
+
 CONVERSATION FLOW:
-1. Greet users warmly and ask what they want to build
-2. Ask ONE short question at a time to gather:
-   - Project type (web app, mobile app, etc.)
-   - Main purpose and functionality  
-   - Target users/audience
-   - Key features (3-5 main ones)
-   - Tech stack preferences
-   - Design preferences (colors, theme, style - VERY IMPORTANT!)
-   - Special requirements
+1. When user gives initial description, EXTRACT ALL INFO from it first!
+   Example: "e-commerce for groceries, black background, white text, product search, cart, login"
+   → You already have: purpose (grocery e-commerce), features (search, cart, login), design (black bg, white text)
+   → Only ask about what's MISSING (maybe just tech stack)
 
-CRITICAL: Always ask about design preferences! Ask questions like:
-"What should it look like? Any specific colors, themes, or style preferences?"
+2. Ask ONE short question at a time ONLY for missing information
 
-3. SMART DEFAULTS: If user says "I don't know", "default", or gives vague answers:
-   - Suggest reasonable defaults
-   - Say: "I'll assume [default]. We can change this later."
-   - Continue to next question
+3. SMART DEFAULTS: If user says "I don't know", "default", "nope", or similar:
+   - Use sensible defaults, don't ask again
+   - Tech stack default: React + FastAPI
+   - Say: "I'll use React for frontend and FastAPI for backend - our recommended stack!"
 
-TECH STACK DEFAULT: If user doesn't specify tech stack or says "I don't know" or "default":
-   - Frontend: React JSX
-   - Backend: FastAPI
-   - Say: "I'll use React for the frontend and FastAPI for the backend - our recommended stack!"
+4. After 2-4 exchanges (or when you have all info), create PROJECT SUMMARY:
 
-4. Keep responses CONVERSATIONAL and BRIEF (2-3 sentences max)
-
-5. After gathering info, create a summary like:
    "PROJECT SUMMARY:
-   📱 Type: [type]
-   🎯 Purpose: [purpose] 
-   👥 Users: [audience]
-   ⭐ Features: [list including design features]
-   💻 Tech: [stack]
-   🎨 Style: [design colors, theme, visual preferences]
    
-   Does this look good? Say 'yes' to generate your app!"
+   Application Type: [type]
+   Purpose: [purpose from their description]
+   Key Features: [all features they mentioned + design features]
+   Technology Stack: [stack]
+   Design Style: [colors and theme they specified]
    
-MUST include design preferences in BOTH Features and Style sections!
+   Please confirm these specifications are correct. Reply 'yes' to proceed with generation."
 
-6. If user confirms (says yes/looks good/generate/build), respond:
+5. If user confirms (yes/looks good/generate), respond:
    "Perfect! Generating your project now..." and set should_generate=true
 
-IMPORTANT RULES:
-- Be friendly and enthusiastic
-- Ask only ONE question per response
-- Keep it conversational, not formal
-- Don't overwhelm with too many options
-- Make sensible assumptions when user is unsure
-- After 5-7 questions, summarize and ask for confirmation"""
+🚨 NEVER DO THIS:
+- Ask "What's the main purpose?" if they already described it
+- Ask "What features?" if they listed features already  
+- Ask about colors if they already said "black background, white text"
+- Keep asking the same question differently
+- Ask more than 4-5 total questions
+
+MUST include ALL user-specified design preferences (colors, theme) in the summary!"""
 )
 
 @router.post("/process-speech")
@@ -338,18 +336,20 @@ async def process_speech(audio: UploadFile = File(...)):
         with open(temp_file_path, "rb") as audio_file:
             audio_content = audio_file.read()
         
-        # Check audio size - if > ~1MB or 60 seconds, we should use async processing
-        # For now, limit sync processing and provide helpful error message
-        audio_size_mb = len(audio_content) / (1024 * 1024)
-        if audio_size_mb > 1.0:  # Rough estimate for 60 seconds
+        # Check audio size - WebM audio is roughly 10KB/second at typical bitrates
+        # 60 seconds * 10KB = ~600KB, but we'll be conservative and check duration
+        audio_size_kb = len(audio_content) / 1024
+        estimated_duration_seconds = audio_size_kb / 8  # Conservative estimate: ~8KB/second for WebM Opus
+        
+        if estimated_duration_seconds > 55:  # Give 5 second buffer before 60s limit
             os.unlink(temp_file_path)
             return JSONResponse(
                 status_code=200,
                 content={
-                    "error": "Audio recording too long. Please keep recordings under 60 seconds.",
+                    "error": f"Audio recording too long (~{int(estimated_duration_seconds)} seconds). Google Speech API limit is 60 seconds for real-time processing.",
                     "transcript": None,
                     "suggestions": [
-                        "Try recording a shorter message (under 1 minute)",
+                        "Try recording a shorter message (under 50 seconds)",
                         "Break your message into smaller parts",
                         "Use text input for longer messages"
                     ]
@@ -397,6 +397,7 @@ async def process_speech(audio: UploadFile = File(...)):
         
         response = None
         successful_config = None
+        audio_too_long_error = False
         
         for i, config in enumerate(configs_to_try):
             try:
@@ -409,11 +410,31 @@ async def process_speech(audio: UploadFile = File(...)):
                 else:
                     print(f"⚠️  Config {i+1} returned empty results")
             except Exception as encoding_error:
-                print(f"❌ Config {i+1} failed: {encoding_error}")
+                error_str = str(encoding_error)
+                print(f"❌ Config {i+1} failed: {error_str}")
+                # Check if this is the "audio too long" error
+                if "Sync input too long" in error_str or "LongRunningRecognize" in error_str:
+                    audio_too_long_error = True
+                    break  # No point trying other configs for length issues
                 continue
         
         # Clean up temp file
         os.unlink(temp_file_path)
+        
+        # Handle audio too long error specifically
+        if audio_too_long_error:
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "error": "Audio recording exceeds 60 second limit. Please record a shorter message.",
+                    "transcript": None,
+                    "suggestions": [
+                        "Keep your recording under 50 seconds",
+                        "Break longer messages into multiple recordings",
+                        "Use text input for detailed descriptions"
+                    ]
+                }
+            )
         
         if response and response.results:
             transcript = response.results[0].alternatives[0].transcript.strip()
@@ -451,9 +472,9 @@ async def process_speech(audio: UploadFile = File(...)):
 
 @router.post("/chat-with-files")
 async def chat_with_ai_and_files(
-    message: str = Form(...),
-    conversation_history: str = Form("[]"),
-    files: List[UploadFile] = File(default=[])
+    message: str = Form(default=""),
+    conversation_history: str = Form(default="[]"),
+    files: Optional[List[UploadFile]] = File(default=None)
 ):
     """Handle conversation with AI assistant, including file uploads for documentation.
     
@@ -461,7 +482,21 @@ async def chat_with_ai_and_files(
     Files (images, PDFs) will be processed and their content used as context
     for the AI to generate better applications.
     """
+    print(f"📨 Received chat-with-files request: message='{message[:100]}...', files={files}")
     try:
+        # Handle missing or empty message
+        if not message or message.strip() == "":
+            return {
+                "response": "I didn't receive your message. Could you please try again?",
+                "should_generate": False,
+                "project_spec": None,
+                "has_documentation": False
+            }
+        
+        # Ensure files is a list
+        if files is None:
+            files = []
+            
         # Parse conversation history from JSON string
         try:
             history = json.loads(conversation_history)
@@ -472,10 +507,14 @@ async def chat_with_ai_and_files(
         documentation_context = ""
         if files and len(files) > 0:
             # Filter out empty file uploads
-            actual_files = [f for f in files if f.filename and f.size > 0]
+            actual_files = [f for f in files if f and f.filename and f.size and f.size > 0]
             if actual_files:
                 print(f"📎 Processing {len(actual_files)} uploaded files for chat context")
-                documentation_context = await process_uploaded_files(actual_files)
+                try:
+                    documentation_context = await process_uploaded_files(actual_files)
+                except Exception as file_err:
+                    print(f"⚠️ Error processing files: {file_err}")
+                    documentation_context = ""
                 
                 # Store context for project generation
                 # Use a simple session ID based on conversation length for now
@@ -499,14 +538,40 @@ async def chat_with_ai_and_files(
         conversation_context += f"User: {message}\n"
         
         # Check if we have enough info for a summary
-        has_project_type = any(keyword in conversation_context.lower() for keyword in ['grocery', 'app', 'website', 'mobile', 'web app', 'application'])
-        has_tech_stack = any(keyword in conversation_context.lower() for keyword in ['react', 'fastapi', 'javascript', 'python', 'node'])
-        has_design_prefs = any(keyword in conversation_context.lower() for keyword in ['black', 'white', 'color', 'theme', 'style', 'design'])
-        user_said_nope = 'nope' in message.lower() or 'no' in message.lower()
+        conv_lower = conversation_context.lower()
         
-        should_create_summary = has_project_type and has_tech_stack and has_design_prefs and user_said_nope
+        # Check for project type/purpose
+        has_project_type = any(keyword in conv_lower for keyword in [
+            'grocery', 'e-commerce', 'ecommerce', 'shopping', 'store', 'app', 'website', 
+            'mobile', 'web app', 'application', 'dashboard', 'portfolio', 'blog',
+            'tracker', 'management', 'booking', 'delivery', 'social'
+        ])
         
-        print(f"DEBUG Summary Check: type={has_project_type}, tech={has_tech_stack}, design={has_design_prefs}, nope={user_said_nope}")
+        # Check for tech stack (or user said they don't care / confirmed default)
+        has_tech_stack = any(keyword in conv_lower for keyword in [
+            'react', 'fastapi', 'javascript', 'python', 'node', 'vue', 'angular',
+            'recommended stack', "i'll use react"
+        ]) or ('yup' in message.lower() or 'yes' in message.lower() or 'yeah' in message.lower())
+        
+        # Check for design preferences  
+        has_design_prefs = any(keyword in conv_lower for keyword in [
+            'black', 'white', 'dark', 'light', 'color', 'theme', 'style', 'design',
+            'modern', 'minimal', 'clean', 'professional', 'background'
+        ])
+        
+        # Check for features
+        has_features = any(keyword in conv_lower for keyword in [
+            'cart', 'login', 'signup', 'search', 'product', 'checkout', 'review',
+            'payment', 'profile', 'list', 'filter', 'category', 'order'
+        ])
+        
+        # User said they have no more requirements
+        user_done = any(word in message.lower() for word in ['nope', 'no more', 'that\'s it', 'nothing else', 'that is it'])
+        
+        # Create summary if we have core info and user indicated they're done
+        should_create_summary = has_project_type and has_features and has_design_prefs and (user_done or has_tech_stack)
+        
+        print(f"DEBUG Summary Check: type={has_project_type}, features={has_features}, design={has_design_prefs}, tech={has_tech_stack}, done={user_done}")
         print(f"DEBUG Should create summary: {should_create_summary}")
         print(f"DEBUG Has documentation: {len(documentation_context) > 0}")
         
@@ -527,21 +592,27 @@ When you create the PROJECT SUMMARY, include features and designs based on the p
         
         summary_instruction = """
         
-IMPORTANT: Based on the conversation, if you have collected:
-1. Project type/purpose 
-2. Technology stack
-3. Design preferences
-4. User indicated no additional requirements
+🚨 CRITICAL: You have ALL the information needed. Create a PROJECT SUMMARY NOW!
 
-Then you MUST create a PROJECT SUMMARY in this format:
+Based on the conversation, the user has provided:
+- Project type/purpose
+- Features they want
+- Design preferences (colors/theme)
+- Tech stack (or confirmed default)
+
+DO NOT ask any more questions. Create a summary in this EXACT format:
+
 "PROJECT SUMMARY:
-📱 Type: [type from conversation]
-🎯 Purpose: [purpose from conversation] 
-⭐ Features: [basic features + design preferences]
-💻 Tech: [tech stack from conversation]
-🎨 Style: [design preferences from conversation]
 
-Does this look good? Say 'yes' to generate your app!"
+Application Type: [extract from conversation - e.g., "Web Application"]
+Purpose: [extract main purpose - e.g., "E-commerce grocery store for busy professionals"] 
+Key Features: [list ALL features mentioned: product search, listings, shopping cart, login, sign up, customer reviews, etc.]
+Technology Stack: React (frontend), FastAPI (backend)
+Design Style: [EXACT design they specified - e.g., "Black background with white text, modern design"]
+
+Please confirm these specifications are correct. Reply 'yes' to proceed with generation."
+
+IMPORTANT: Include their EXACT color preferences (black background, white text) in the Design Style!
 """ if should_create_summary else ""
         
         prompt = f"""Conversation so far:
@@ -679,34 +750,66 @@ async def chat_with_ai(chat_data: ChatMessage):
         conversation_context += f"User: {chat_data.message}\n"
         
         # Check if we have enough info for a summary
-        has_project_type = any(keyword in conversation_context.lower() for keyword in ['grocery', 'app', 'website', 'mobile', 'web app', 'application'])
-        has_tech_stack = any(keyword in conversation_context.lower() for keyword in ['react', 'fastapi', 'javascript', 'python', 'node'])
-        has_design_prefs = any(keyword in conversation_context.lower() for keyword in ['black', 'white', 'color', 'theme', 'style', 'design'])
-        user_said_nope = 'nope' in chat_data.message.lower() or 'no' in chat_data.message.lower()
+        conv_lower = conversation_context.lower()
+        msg_lower = chat_data.message.lower()
         
-        should_create_summary = has_project_type and has_tech_stack and has_design_prefs and user_said_nope
+        # Check for project type/purpose
+        has_project_type = any(keyword in conv_lower for keyword in [
+            'grocery', 'e-commerce', 'ecommerce', 'shopping', 'store', 'app', 'website', 
+            'mobile', 'web app', 'application', 'dashboard', 'portfolio', 'blog',
+            'tracker', 'management', 'booking', 'delivery', 'social'
+        ])
         
-        print(f"DEBUG Summary Check: type={has_project_type}, tech={has_tech_stack}, design={has_design_prefs}, nope={user_said_nope}")
+        # Check for tech stack (or user confirmed default)
+        has_tech_stack = any(keyword in conv_lower for keyword in [
+            'react', 'fastapi', 'javascript', 'python', 'node', 'vue', 'angular',
+            'recommended stack', "i'll use react"
+        ]) or ('yup' in msg_lower or 'yes' in msg_lower or 'yeah' in msg_lower)
+        
+        # Check for design preferences  
+        has_design_prefs = any(keyword in conv_lower for keyword in [
+            'black', 'white', 'dark', 'light', 'color', 'theme', 'style', 'design',
+            'modern', 'minimal', 'clean', 'professional', 'background'
+        ])
+        
+        # Check for features
+        has_features = any(keyword in conv_lower for keyword in [
+            'cart', 'login', 'signup', 'search', 'product', 'checkout', 'review',
+            'payment', 'profile', 'list', 'filter', 'category', 'order'
+        ])
+        
+        # User said they have no more requirements
+        user_done = any(word in msg_lower for word in ['nope', 'no more', 'that\'s it', 'nothing else', 'that is it'])
+        
+        should_create_summary = has_project_type and has_features and has_design_prefs and (user_done or has_tech_stack)
+        
+        print(f"DEBUG Summary Check: type={has_project_type}, features={has_features}, design={has_design_prefs}, tech={has_tech_stack}, done={user_done}")
         print(f"DEBUG Should create summary: {should_create_summary}")
         
         # Generate response with safety handling
         summary_instruction = """
         
-IMPORTANT: Based on the conversation, if you have collected:
-1. Project type/purpose 
-2. Technology stack
-3. Design preferences
-4. User indicated no additional requirements
+🚨 CRITICAL: You have ALL the information needed. Create a PROJECT SUMMARY NOW!
 
-Then you MUST create a PROJECT SUMMARY in this format:
+Based on the conversation, the user has provided:
+- Project type/purpose
+- Features they want
+- Design preferences (colors/theme)
+- Tech stack (or confirmed default)
+
+DO NOT ask any more questions. Create a summary in this EXACT format:
+
 "PROJECT SUMMARY:
-📱 Type: [type from conversation]
-🎯 Purpose: [purpose from conversation] 
-⭐ Features: [basic features + design preferences]
-💻 Tech: [tech stack from conversation]
-🎨 Style: [design preferences from conversation]
 
-Does this look good? Say 'yes' to generate your app!"
+Application Type: [extract from conversation - e.g., "Web Application"]
+Purpose: [extract main purpose - e.g., "E-commerce grocery store for busy professionals"] 
+Key Features: [list ALL features mentioned: product search, listings, shopping cart, login, sign up, customer reviews, etc.]
+Technology Stack: React (frontend), FastAPI (backend)
+Design Style: [EXACT design they specified - e.g., "Black background with white text, modern design"]
+
+Please confirm these specifications are correct. Reply 'yes' to proceed with generation."
+
+IMPORTANT: Include their EXACT color preferences (black background, white text) in the Design Style!
 """ if should_create_summary else ""
         
         prompt = f"""Conversation so far:
