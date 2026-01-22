@@ -1769,6 +1769,45 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
     <title>{project_name} - Live Preview</title>
     <!-- SANDBOX PREVIEW - Fast loading with conditional libraries -->
     
+    <!-- CRITICAL: Protect built-in globals BEFORE any libraries load -->
+    <script>
+        // Save native Map/Set BEFORE anything else runs
+        // User code with components named "Map" would otherwise break React
+        (function() {{
+            const _NativeMap = window.Map;
+            const _NativeSet = window.Set;
+            const _NativeArray = window.Array;
+            const _NativeObject = window.Object;
+            const _NativePromise = window.Promise;
+            
+            // Make them non-writable on window
+            Object.defineProperty(window, 'Map', {{
+                get: function() {{ return _NativeMap; }},
+                set: function(v) {{
+                    // Allow setting but store as MapComponent instead
+                    if (typeof v === 'function' && v !== _NativeMap) {{
+                        window.MapComponent = v;
+                        console.log('⚠️ Redirected Map assignment to MapComponent');
+                    }}
+                }},
+                configurable: false
+            }});
+            
+            Object.defineProperty(window, 'Set', {{
+                get: function() {{ return _NativeSet; }},
+                set: function(v) {{
+                    if (typeof v === 'function' && v !== _NativeSet) {{
+                        window.SetComponent = v;
+                        console.log('⚠️ Redirected Set assignment to SetComponent');
+                    }}
+                }},
+                configurable: false
+            }});
+            
+            console.log('✅ Protected native Map/Set from being overwritten');
+        }})();
+    </script>
+    
     <!-- Core React (required) -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>

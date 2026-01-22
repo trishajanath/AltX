@@ -17,6 +17,9 @@ ESBUILD_PATH = os.path.join(os.path.dirname(__file__), 'node_modules', '.bin', '
 # Cache for compiled code
 _compile_cache = {}
 
+# Reserved JavaScript built-in names that user code shouldn't shadow
+RESERVED_BUILTINS = ['Map', 'Set', 'Array', 'Object', 'Promise', 'JSON', 'Date', 'Error', 'Number', 'String', 'Boolean', 'Symbol', 'Function']
+
 def precompile_jsx(jsx_code: str) -> str:
     """
     Precompile JSX to plain JavaScript using esbuild.
@@ -37,6 +40,37 @@ def precompile_jsx(jsx_code: str) -> str:
     # Preprocess: Remove/comment out import/export statements
     # (sandbox provides everything globally)
     clean_code = jsx_code
+    
+    # CRITICAL: Rename user components that shadow built-in names
+    # e.g., "const Map = " -> "const MapComponent = "
+    for builtin in RESERVED_BUILTINS:
+        # Rename component declarations: const Map = ..., function Map(...), class Map ...
+        clean_code = re.sub(
+            rf'\b(const|let|var)\s+{builtin}\s*=',
+            rf'\1 {builtin}Component =',
+            clean_code
+        )
+        clean_code = re.sub(
+            rf'\bfunction\s+{builtin}\s*\(',
+            rf'function {builtin}Component(',
+            clean_code
+        )
+        clean_code = re.sub(
+            rf'\bclass\s+{builtin}\s+',
+            rf'class {builtin}Component ',
+            clean_code
+        )
+        # Also rename JSX usage: <Map ... -> <MapComponent ...
+        clean_code = re.sub(
+            rf'<{builtin}(\s|>|/)',
+            rf'<{builtin}Component\1',
+            clean_code
+        )
+        clean_code = re.sub(
+            rf'</{builtin}>',
+            rf'</{builtin}Component>',
+            clean_code
+        )
     
     # Remove import statements completely (they're handled by global includes)
     # Handle: import X from 'y', import { X } from 'y', import 'y'
