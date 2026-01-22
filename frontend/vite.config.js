@@ -1,11 +1,14 @@
 import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
+import react from '@vitejs/plugin-react-swc'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [
+    react(), // SWC is 20x faster than Babel
+    tailwindcss()
+  ],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
@@ -37,7 +40,7 @@ export default defineConfig({
     }
   },
   optimizeDeps: {
-    include: ['three', 'monaco-editor'],
+    include: ['three', 'monaco-editor', 'react', 'react-dom', 'react-router-dom'],
     exclude: ['@monaco-editor/react']
   }
 })

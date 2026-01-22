@@ -2,6 +2,9 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 
 const AuthContext = createContext(null);
 
+// SSR-safe check for browser environment
+const isBrowser = typeof window !== 'undefined';
+
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) {
@@ -15,8 +18,14 @@ export const AuthProvider = ({ children }) => {
   const [token, setToken] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Load user from localStorage or sessionStorage on mount
+  // Load user from localStorage or sessionStorage on mount (client-side only)
   useEffect(() => {
+    // Skip on server
+    if (!isBrowser) {
+      setLoading(false);
+      return;
+    }
+    
     let storedToken = null;
     let parsedUser = null;
 
@@ -49,6 +58,8 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const login = (userData, accessToken, rememberMe = false) => {
+    if (!isBrowser) return;
+    
     console.log('🔐 Login called with:', { user: userData.email || userData.username, rememberMe });
     
     // Update state FIRST
@@ -74,10 +85,12 @@ export const AuthProvider = ({ children }) => {
   const logout = () => {
     setUser(null);
     setToken(null);
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('user');
-    sessionStorage.removeItem('access_token');
-    sessionStorage.removeItem('user');
+    if (isBrowser) {
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('user');
+      sessionStorage.removeItem('access_token');
+      sessionStorage.removeItem('user');
+    }
   };
 
   const isAuthenticated = !!token && !!user;

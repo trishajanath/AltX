@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { BrowserRouter as Router, Routes, Route, Link, useLocation, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import './App.css';
 import HomePage from './components/HomePage';
 import DeployPage from './components/DeployPage';
@@ -17,8 +17,6 @@ import AboutPage from './components/AboutPage';
 import PricingPage from './components/PricingPage';
 import OAuthCallback from './components/OAuthCallback';
 import { AuthProvider } from './contexts/AuthContext';
-
-
 
 function App() {
   const [scanResult, setScanResult] = useState(null);

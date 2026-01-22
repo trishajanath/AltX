@@ -21,6 +21,10 @@ from typing import List, Dict, Optional, Any, Union
 from starlette.concurrency import run_in_threadpool
 import json
 import re
+
+# JSX Precompiler - compiles JSX to JS on server (no browser transforms needed)
+from jsx_precompiler import precompile_jsx, check_esbuild
+
 from scanner.file_security_scanner import scan_for_sensitive_files, scan_file_contents_for_secrets
 # Try to import scanner dependencies, but make them optional
 try:
@@ -1629,7 +1633,7 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
     # Process component files properly for browser compilation
     components_code = ""
     total_code_size = 0
-    MAX_CODE_SIZE = 100000  # 100KB max to prevent in-browser Babel memory issues
+    MAX_CODE_SIZE = 100000  # 100KB max code size limit
     
     # UI components that are provided globally by the sandbox - skip loading their separate files
     SANDBOX_PROVIDED_COMPONENTS = {
@@ -1749,6 +1753,12 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
         app_content += '\n// Code truncated due to size limits\nwindow.App = App || (() => React.createElement("div", null, "App truncated"));'
     
     print(f"📦 Total code size: {total_code_size + len(app_content)} bytes")
+    
+    # PRECOMPILE JSX TO JS ON SERVER - No browser transforms needed!
+    jsx_code = f"{components_code}\n\n{app_content}"
+    print("🔄 Precompiling JSX to JavaScript using esbuild...")
+    precompiled_code = precompile_jsx(jsx_code)
+    print("✅ JSX precompilation complete - sending pure JS to browser")
     
     return f"""
 <!DOCTYPE html>
@@ -2113,39 +2123,18 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
         
     </script>
     
-    <!-- Babel standalone for JSX transformation - load FIRST before any CommonJS shims -->
-    <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.23.5/babel.min.js" crossorigin="anonymous"></script>
-    <script>
-        if (typeof Babel !== 'undefined' && Babel.transform) {{
-            window.babelLoaded = true;
-            console.log('✅ Babel loaded successfully');
-        }} else {{
-            console.error('❌ Babel failed to load, trying fallback...');
-            // Try loading from unpkg as fallback
-            var fallbackScript = document.createElement('script');
-            fallbackScript.src = 'https://unpkg.com/@babel/standalone@7.21.4/babel.min.js';
-            fallbackScript.crossOrigin = 'anonymous';
-            fallbackScript.onload = function() {{
-                if (typeof Babel !== 'undefined') {{
-                    window.babelLoaded = true;
-                    console.log('✅ Babel loaded from fallback');
-                }}
-            }};
-            document.head.appendChild(fallbackScript);
-        }}
-    </script>
+    <!-- NO JSX TRANSFORMS IN BROWSER - Code is precompiled on server using esbuild -->
     
-    <!-- Define CommonJS globals AFTER Babel is loaded -->
+    <!-- Define CommonJS globals -->
     <script>
         // Define globals for user code that might use CommonJS patterns
-        // This must be AFTER Babel loads to avoid breaking Babel's internal module system
         if (typeof window.exports === 'undefined') {{
             window.exports = {{}};
         }}
         if (typeof window.module === 'undefined') {{
             window.module = {{ exports: {{}} }};
         }}
-        console.log('✅ CommonJS globals defined (after Babel)');
+        console.log('✅ CommonJS globals defined');
     </script>
     
     <!-- Use pre-built Tailwind CSS instead of JIT CDN to avoid conflicts -->
@@ -2419,7 +2408,7 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
         setInterval(() => {{ loopCounter = 0; }}, 1000);
     </script>
     
-    <!-- Setup code - NO JSX, doesn't need Babel (saves ~40KB compile time) -->
+    <!-- Setup code - NO JSX, plain JavaScript -->
     <script>
         // Wait for all dependencies to load
         if (typeof React === 'undefined' || typeof ReactDOM === 'undefined') {{
@@ -3156,13 +3145,13 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
         window._sandboxInput = window.Input;
         window._sandboxLoading = window.Loading;
         
-        // Add global error handler to catch Babel errors
+        // Add global error handler to catch runtime errors
         window.onerror = function(msg, url, lineNo, columnNo, error) {{
             console.error('❌ Global error:', msg, 'at line', lineNo);
-            if (msg.includes('Babel') || msg.includes('transform') || msg.includes('SyntaxError')) {{
+            if (msg.includes('SyntaxError') || msg.includes('ReferenceError')) {{
                 document.getElementById('root').innerHTML = 
                     '<div style="padding: 20px; color: #f87171; background: #1e1e1e;">' +
-                    '<h2>JSX Transform Error</h2>' +
+                    '<h2>JavaScript Error</h2>' +
                     '<p>' + msg + '</p>' +
                     '<p>Line: ' + lineNo + '</p>' +
                     '</div>';
@@ -3171,12 +3160,10 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
         }};
     </script>
     
-    <!-- User code - Babel automatically transforms type="text/babel" scripts -->
-    <script type="text/babel" data-presets="react">
-        // User's component and app code (JSX)
-        {components_code}
-        
-        {app_content}
+    <!-- User code - PRECOMPILED on server (no JSX in browser) -->
+    <script>
+        // User's component and app code (precompiled from JSX to JS)
+        {precompiled_code}
         
         // CRITICAL: Ensure App is assigned to window after code runs
         if (typeof App !== 'undefined' && typeof window.App !== 'function') {{
@@ -3218,7 +3205,7 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
         }}
     </script>
     
-    <!-- Visual Editor - NO JSX, doesn't need Babel -->
+    <!-- Visual Editor - NO JSX, plain JavaScript -->
     <script>
         // ========== VISUAL EDITOR - RIGHT-CLICK TO EDIT STYLES ==========
         // This enables users to right-click any element and change its styles
