@@ -1886,37 +1886,105 @@ Just tell me what you'd like to do.`
       // Add notification to chat
       const scanStartMessage = {
         role: 'assistant',
-        content: `🔐 **Security Scan Started**\n\nRunning OWASP ZAP security analysis on your application...\n\nThis will detect vulnerabilities like:\n• Cross-Site Scripting (XSS)\n• SQL Injection\n• Insecure Headers\n• Authentication Issues\n• And more...`
+        content: `🔐 **Comprehensive Security Scan Started**\n\nRunning both **DAST** (Dynamic) and **SAST** (Static) analysis...\n\n**DAST (OWASP ZAP)** - Testing the running application:\n• Cross-Site Scripting (XSS)\n• SQL Injection\n• Insecure Headers\n• Authentication Issues\n\n**SAST (AI Scanner)** - Analyzing source code:\n• Hardcoded Secrets\n• Vulnerable Dependencies\n• Insecure Patterns\n• OWASP Top 10 Coverage`
       };
       setChatMessages(prev => [...prev, scanStartMessage]);
       
-      setZapScanProgress('Running passive security scan...');
+      setZapScanProgress('Running comprehensive security scan (DAST + SAST)...');
       
-      const response = await fetch(apiUrl('api/security-scan'), {
+      // Run DAST (ZAP) scan with ACTIVE mode for thorough testing
+      const dastResponse = await fetch(apiUrl('api/security-scan'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           target_url: scanUrl,
-          scan_type: 'passive', // Start with passive scan (faster, non-intrusive)
-          zap_api_key: 'changeme'
+          scan_type: 'ajax_spider', // Use AJAX Spider for SPAs (React) - better coverage than passive
+          zap_api_key: null, // Use disabled API key mode
+          timeout: 90
         })
       });
       
-      const result = await response.json();
+      const dastResult = await dastResponse.json();
       
-      if (result.success) {
+      // Also run SAST (AI code analysis) on the project files
+      let sastResult = null;
+      if (project?.files && Object.keys(project.files).length > 0) {
+        try {
+          setZapScanProgress('Running static code analysis...');
+          const allCode = Object.entries(project.files)
+            .filter(([name]) => name.match(/\.(js|jsx|ts|tsx|py|html)$/i))
+            .map(([name, content]) => `// === ${name} ===\n${content}`)
+            .join('\n\n');
+          
+          if (allCode.length > 100) {
+            const sastResponse = await fetch(apiUrl('api/ai-security-scan'), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                code: allCode,
+                language: 'javascript',
+                scan_type: 'deep' // Deep SAST analysis
+              })
+            });
+            sastResult = await sastResponse.json();
+          }
+        } catch (sastErr) {
+          console.warn('SAST scan error:', sastErr);
+        }
+      }
+      
+      // Combine results from both scans
+      let combinedAlerts = [...(dastResult.alerts || [])];
+      let combinedSummary = { ...dastResult.summary };
+      
+      if (sastResult?.success && sastResult.alerts?.length > 0) {
+        // Add SAST findings with source marker
+        const sastAlerts = sastResult.alerts.map(alert => ({
+          ...alert,
+          source: 'SAST (Code Analysis)',
+          scanner: 'AI Security Scanner'
+        }));
+        combinedAlerts = [...combinedAlerts, ...sastAlerts];
+        
+        // Update summary counts
+        combinedSummary.critical = (combinedSummary.critical || 0) + (sastResult.summary?.critical || 0);
+        combinedSummary.high_risk = (combinedSummary.high_risk || 0) + (sastResult.summary?.high_risk || 0);
+        combinedSummary.medium_risk = (combinedSummary.medium_risk || 0) + (sastResult.summary?.medium_risk || 0);
+        combinedSummary.low_risk = (combinedSummary.low_risk || 0) + (sastResult.summary?.low_risk || 0);
+        combinedSummary.informational = (combinedSummary.informational || 0) + (sastResult.summary?.informational || 0);
+        combinedSummary.total_alerts = combinedAlerts.length;
+      }
+      
+      // Mark DAST alerts with source
+      combinedAlerts = combinedAlerts.map(alert => ({
+        ...alert,
+        source: alert.source || 'DAST (Runtime Testing)',
+        scanner: alert.scanner || dastResult.scanner || 'OWASP ZAP'
+      }));
+      
+      const result = {
+        ...dastResult,
+        alerts: combinedAlerts,
+        summary: combinedSummary,
+        sast_included: !!sastResult?.success,
+        dast_included: dastResult.success
+      };
+      
+      if (result.success || combinedAlerts.length > 0) {
         setZapScanResult(result);
         setZapScanProgress('');
         
         // Calculate security score based on findings
-        const totalAlerts = result.summary?.total_alerts || 0;
-        const highRisk = result.summary?.high_risk || 0;
-        const mediumRisk = result.summary?.medium_risk || 0;
-        const lowRisk = result.summary?.low_risk || 0;
+        const totalAlerts = combinedSummary.total_alerts || combinedAlerts.length;
+        const critical = combinedSummary.critical || 0;
+        const highRisk = combinedSummary.high_risk || 0;
+        const mediumRisk = combinedSummary.medium_risk || 0;
+        const lowRisk = combinedSummary.low_risk || 0;
         
         // Score calculation: start at 100, deduct based on severity
         let calculatedScore = 100;
-        calculatedScore -= highRisk * 20;    // -20 per high risk
+        calculatedScore -= critical * 30;     // -30 per critical
+        calculatedScore -= highRisk * 20;     // -20 per high risk
         calculatedScore -= mediumRisk * 10;   // -10 per medium risk
         calculatedScore -= lowRisk * 3;       // -3 per low risk
         calculatedScore = Math.max(0, calculatedScore);
@@ -1925,7 +1993,7 @@ Just tell me what you'd like to do.`
         // Add completion message to chat
         const scanCompleteMessage = {
           role: 'assistant',
-          content: `🛡️ **Security Scan Complete**\n\n**Security Score:** ${calculatedScore}%\n\n**Findings:**\n• 🔴 High Risk: ${highRisk}\n• 🟠 Medium Risk: ${mediumRisk}\n• 🟡 Low Risk: ${lowRisk}\n• 🔵 Informational: ${result.summary?.informational || 0}\n\n**Total Alerts:** ${totalAlerts}\n\n${totalAlerts > 0 ? 'View the **Security** tab to see detailed findings and use **AI Fix** to automatically resolve issues.' : '✅ No critical security issues found!'}`
+          content: `🛡️ **Comprehensive Security Scan Complete**\n\n**Security Score:** ${calculatedScore}%\n\n**Scan Coverage:**\n• 🌐 DAST (ZAP): ${dastResult.success ? '✅ Complete' : '⚠️ Partial'}\n• 📝 SAST (AI): ${sastResult?.success ? '✅ Complete' : '⚠️ Skipped'}\n\n**Findings:**\n• ⚫ Critical: ${critical}\n• 🔴 High Risk: ${highRisk}\n• 🟠 Medium Risk: ${mediumRisk}\n• 🟡 Low Risk: ${lowRisk}\n• 🔵 Informational: ${combinedSummary.informational || 0}\n\n**Total Alerts:** ${totalAlerts}\n\n${totalAlerts > 0 ? 'View the **Security** tab to see detailed findings and use **AI Fix** to automatically resolve issues.' : '✅ No critical security issues found!'}`
         };
         setChatMessages(prev => [...prev, scanCompleteMessage]);
         

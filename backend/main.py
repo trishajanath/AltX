@@ -7198,6 +7198,8 @@ async def run_security_scan(request: dict = Body(...)):
             from ai_security_scanner import AISecurityScanner, ScanType as AIScanType
             
             ai_scan_type_str = request.get("scan_type", "standard")
+            timeout = request.get("timeout", 60)  # Allow custom timeout
+            
             ai_scan_map = {
                 "passive": AIScanType.STANDARD,
                 "active": AIScanType.DEEP,
@@ -7211,7 +7213,7 @@ async def run_security_scan(request: dict = Body(...)):
             ai_scan_type = ai_scan_map.get(ai_scan_type_str, AIScanType.STANDARD)
             
             ai_scanner = AISecurityScanner()
-            result = await ai_scanner.scan_url(target_url, ai_scan_type)
+            result = await ai_scanner.scan_url(target_url, ai_scan_type, timeout=timeout, retries=3)
             
             return {
                 "success": result.success,
@@ -7226,18 +7228,18 @@ async def run_security_scan(request: dict = Body(...)):
                     "informational": result.informational_count,
                     "total_alerts": len(result.alerts)
                 },
-                "alerts": result.alerts[:100],
+                "alerts": result.alerts[:150],  # Return more alerts
                 "owasp_mapping": result.owasp_mapping,
                 "error": result.error,
                 "report": ai_scanner.generate_report(result) if result.success else None,
-                "scanner": "AI-Powered (ZAP Fallback)",
-                "note": "Using AI-powered scanning because OWASP ZAP is not available. For full ZAP scanning, install and run the ZAP daemon."
+                "scanner": "AI-Powered Security Scanner",
+                "note": "Comprehensive security analysis using AI + pattern matching. No OWASP ZAP required."
             }
         except Exception as e:
             import traceback
             return {
                 "success": False,
-                "error": f"Both ZAP and AI scanner failed: {str(e)}",
+                "error": f"Security scan failed: {str(e)}",
                 "traceback": traceback.format_exc()
             }
 
@@ -7255,6 +7257,7 @@ async def run_ai_security_scan(request: dict = Body(...)):
         - language: Programming language (default: javascript)
         - scan_type: "quick", "standard", "deep", or "owasp" (default: standard)
         - project_name: (optional) Project name to scan from S3/storage
+        - timeout: (optional) Request timeout in seconds (default: 60)
     """
     try:
         from ai_security_scanner import AISecurityScanner, ScanType
@@ -7264,6 +7267,7 @@ async def run_ai_security_scan(request: dict = Body(...)):
         language = request.get("language", "javascript")
         scan_type_str = request.get("scan_type", "standard")
         project_name = request.get("project_name")
+        timeout = request.get("timeout", 60)
         
         # Map string to enum
         scan_type_map = {
@@ -7283,9 +7287,9 @@ async def run_ai_security_scan(request: dict = Body(...)):
             print(f"🔍 AI Security Scan: Analyzing provided code ({len(code)} chars)")
             result = await scanner.scan_code(code, language, scan_type)
         elif target_url:
-            # URL-based scanning
+            # URL-based scanning with retry
             print(f"🔍 AI Security Scan: Analyzing URL {target_url[:60]}...")
-            result = await scanner.scan_url(target_url, scan_type)
+            result = await scanner.scan_url(target_url, scan_type, timeout=timeout, retries=3)
         elif project_name:
             # Scan project from storage
             project_slug = project_name.lower().replace(" ", "-")
@@ -7386,6 +7390,7 @@ class SecurityFixPreviewRequest(BaseModel):
 async def ai_fix_security_preview(request: SecurityFixPreviewRequest):
     """
     Generate a diff preview for a security fix without applying it.
+    Works with both OWASP ZAP alerts and AI Security Scanner alerts.
     Returns the original code, proposed fix, and explanation.
     """
     try:
@@ -7398,7 +7403,12 @@ async def ai_fix_security_preview(request: SecurityFixPreviewRequest):
         alert_solution = alert.get('solution', '')
         alert_evidence = alert.get('evidence', '')
         alert_param = alert.get('param', '')
-        alert_cweid = alert.get('cweid', '')
+        # Support both ZAP ('cweid') and AI scanner ('cwe_id') field names
+        alert_cweid = alert.get('cweid', '') or alert.get('cwe_id', '')
+        alert_owasp = alert.get('owasp', '')
+        alert_context = alert.get('context', '')  # AI scanner provides context
+        alert_line = alert.get('url', '')  # AI scanner puts line number here
+        alert_line_content = alert.get('line_content', '')
         
         # Find relevant file content from provided files
         relevant_file = None
@@ -7415,17 +7425,34 @@ async def ai_fix_security_preview(request: SecurityFixPreviewRequest):
                     relevant_file = f.get('name')
                     relevant_content = content
                     break
+                
+                # Check if line content appears in this file (AI scanner)
+                if alert_line_content and alert_line_content in content:
+                    relevant_file = f.get('name')
+                    relevant_content = content
+                    break
                     
                 # Check for common vulnerable patterns based on alert type
-                if 'xss' in alert_name.lower() and ('dangerouslySetInnerHTML' in content or 'innerHTML' in content):
+                alert_lower = alert_name.lower()
+                if 'xss' in alert_lower and ('dangerouslySetInnerHTML' in content or 'innerHTML' in content or 'document.write' in content):
                     relevant_file = f.get('name')
                     relevant_content = content
                     break
-                if 'sql' in alert_name.lower() and ('query' in content.lower() or 'execute' in content.lower()):
+                if ('sql' in alert_lower or 'injection' in alert_lower) and ('query' in content.lower() or 'execute' in content.lower()):
                     relevant_file = f.get('name')
                     relevant_content = content
                     break
-                if 'header' in alert_name.lower() and ('index.html' in fname or 'App.jsx' in fname):
+                if 'header' in alert_lower and ('index.html' in fname or 'app.jsx' in fname):
+                    relevant_file = f.get('name')
+                    relevant_content = content
+                    break
+                if ('secret' in alert_lower or 'credential' in alert_lower or 'hardcoded' in alert_lower):
+                    # Check for secrets in any file
+                    if any(pattern in content.lower() for pattern in ['api_key', 'password', 'secret', 'token']):
+                        relevant_file = f.get('name')
+                        relevant_content = content
+                        break
+                if 'cookie' in alert_lower and 'document.cookie' in content:
                     relevant_file = f.get('name')
                     relevant_content = content
                     break
@@ -7434,40 +7461,87 @@ async def ai_fix_security_preview(request: SecurityFixPreviewRequest):
             if not relevant_file:
                 for f in request.files:
                     fname = f.get('name', '').lower()
-                    if fname == 'index.html' or fname == 'app.jsx':
+                    if fname == 'index.html' or fname == 'app.jsx' or fname.endswith('.jsx') or fname.endswith('.js'):
                         relevant_file = f.get('name')
                         relevant_content = f.get('content', '')
                         break
         
-        # Configure Gemini
-        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        # If still no files, try to fetch from S3 or local storage
+        if not relevant_file and request.project_id:
+            try:
+                from s3_storage import S3ProjectStorage
+                s3_storage = S3ProjectStorage()
+                project_data = await asyncio.to_thread(s3_storage.get_project, request.project_id)
+                
+                if project_data and "files" in project_data:
+                    for file_path, content in project_data["files"].items():
+                        # Check if this file might contain the vulnerability
+                        if alert_evidence and alert_evidence in content:
+                            relevant_file = file_path
+                            relevant_content = content
+                            break
+                        if file_path.endswith(('.jsx', '.js', '.html')):
+                            relevant_file = file_path
+                            relevant_content = content
+                            # Don't break, keep looking for better match
+            except Exception as e:
+                print(f"⚠️ Could not fetch project files: {e}")
         
-        prompt = f"""You are a security expert. Analyze this OWASP ZAP security vulnerability and provide a fix.
+        # Configure Gemini
+        api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        if not api_key:
+            return {
+                "success": False,
+                "message": "Gemini API key not configured",
+                "diff": {
+                    "filename": relevant_file or "N/A",
+                    "description": "API key not available for AI analysis. Apply the suggested solution manually.",
+                    "original": alert_evidence or alert_line_content or "",
+                    "patched": alert_solution[:500] if alert_solution else "See solution in alert details",
+                    "notes": alert_solution
+                }
+            }
+            
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel('gemini-2.0-flash')
+        
+        # Build context info
+        context_info = ""
+        if alert_context:
+            context_info = f"\nCODE CONTEXT:\n{alert_context}"
+        if alert_line_content:
+            context_info += f"\nVULNERABLE LINE:\n{alert_line_content}"
+        
+        prompt = f"""You are a security expert. Analyze this security vulnerability and provide a specific code fix.
 
 VULNERABILITY DETECTED:
 - Alert: {alert_name}
 - Risk: {alert_risk}
 - CWE: {alert_cweid}
+- OWASP: {alert_owasp}
 - Parameter: {alert_param}
 - Evidence: {alert_evidence}
 - Description: {alert_description}
 - Recommended Solution: {alert_solution}
+{context_info}
 
 {"RELEVANT FILE: " + relevant_file if relevant_file else ""}
-{"CODE:" if relevant_content else ""}
-{relevant_content[:3000] if relevant_content else "No specific file identified"}
+{"CURRENT CODE:" if relevant_content else ""}
+{relevant_content[:4000] if relevant_content else "No specific file identified - provide generic fix pattern"}
 
 Provide your response in this EXACT JSON format:
 {{
-    "filename": "{relevant_file or 'index.html'}",
-    "description": "Brief explanation of what the fix does",
-    "original_lines": "The exact vulnerable code snippet (2-5 lines)",
-    "fixed_lines": "The secure replacement code (2-5 lines)",
-    "additional_notes": "Any server-side changes needed or additional recommendations"
+    "filename": "{relevant_file or 'App.jsx'}",
+    "description": "Clear explanation of what the fix does and why it's secure",
+    "original_lines": "The exact vulnerable code snippet that needs to be replaced (copy from the code above, 2-10 lines)",
+    "fixed_lines": "The secure replacement code with proper fixes applied (2-10 lines)",
+    "additional_notes": "Any server-side changes needed, CSP recommendations, or additional security measures"
 }}
 
-Only return the JSON, no other text."""
+IMPORTANT:
+- The original_lines MUST be an exact copy of vulnerable code from the file (if provided)
+- The fixed_lines must be syntactically correct and ready to use
+- Only return the JSON, no other text."""
 
         response = model.generate_content(prompt)
         response_text = response.text.strip()
@@ -7483,17 +7557,17 @@ Only return the JSON, no other text."""
         except json.JSONDecodeError:
             # Fallback response
             fix_data = {
-                "filename": relevant_file or "index.html",
+                "filename": relevant_file or "App.jsx",
                 "description": f"Fix for {alert_name}: {alert_solution[:200]}",
-                "original_lines": alert_evidence[:200] if alert_evidence else "// Vulnerable code",
-                "fixed_lines": "// Secure implementation - see solution above",
+                "original_lines": alert_evidence[:200] if alert_evidence else (alert_line_content[:200] if alert_line_content else "// Vulnerable code"),
+                "fixed_lines": f"// Secure implementation:\n// {alert_solution[:300]}",
                 "additional_notes": alert_solution
             }
         
         return {
             "success": True,
             "diff": {
-                "filename": fix_data.get("filename", relevant_file or "index.html"),
+                "filename": fix_data.get("filename", relevant_file or "App.jsx"),
                 "description": fix_data.get("description", "Security fix"),
                 "original": fix_data.get("original_lines", ""),
                 "patched": fix_data.get("fixed_lines", ""),
@@ -7503,15 +7577,16 @@ Only return the JSON, no other text."""
         
     except Exception as e:
         import traceback
+        print(f"❌ AI Fix Preview Error: {e}\n{traceback.format_exc()}")
         return {
             "success": False,
             "message": str(e),
             "diff": {
                 "filename": "N/A",
                 "description": f"Error generating preview: {str(e)}",
-                "original": "",
-                "patched": "",
-                "notes": "Try applying the fix directly using the AI Fix button."
+                "original": request.alert.get('evidence', '') or request.alert.get('line_content', ''),
+                "patched": request.alert.get('solution', 'See alert details for solution'),
+                "notes": "Try applying the fix directly using the AI Fix button, or apply the solution manually."
             }
         }
 
@@ -7519,8 +7594,8 @@ Only return the JSON, no other text."""
 @app.post("/api/ai-fix-security-issue")
 async def ai_fix_security_issue(request: SecurityFixRequest):
     """
-    Use Gemini AI to fix security issues detected ONLY by OWASP ZAP.
-    This endpoint fixes vulnerabilities found by ZAP's security scan.
+    Use Gemini AI to fix security issues detected by OWASP ZAP or AI Security Scanner.
+    This endpoint fixes vulnerabilities found by security scans.
     """
     try:
         import google.generativeai as genai
@@ -7529,7 +7604,19 @@ async def ai_fix_security_issue(request: SecurityFixRequest):
         projects_dir = Path("generated_projects")
         project_path = projects_dir / project_slug
         
+        # Also try S3 storage if local path doesn't exist
+        files_from_s3 = None
         if not project_path.exists():
+            try:
+                from s3_storage import S3ProjectStorage
+                s3_storage = S3ProjectStorage()
+                project_data = await asyncio.to_thread(s3_storage.get_project, project_slug)
+                if project_data and "files" in project_data:
+                    files_from_s3 = project_data["files"]
+            except Exception as e:
+                print(f"S3 fetch error: {e}")
+        
+        if not project_path.exists() and not files_from_s3:
             return {"success": False, "error": "Project not found"}
         
         alert = request.alert
@@ -7540,26 +7627,39 @@ async def ai_fix_security_issue(request: SecurityFixRequest):
         alert_solution = alert.get('solution', '')
         alert_evidence = alert.get('evidence', '')
         alert_param = alert.get('param', '')
-        alert_cweid = alert.get('cweid', '')
+        # Support both ZAP ('cweid') and AI scanner ('cwe_id') field names
+        alert_cweid = alert.get('cweid', '') or alert.get('cwe_id', '')
         alert_wascid = alert.get('wascid', '')
         alert_reference = alert.get('reference', '')
+        alert_owasp = alert.get('owasp', '')
+        alert_context = alert.get('context', '')
+        alert_line_content = alert.get('line_content', '')
+        alert_source = alert.get('source', 'Security Scan')
         
-        # Build comprehensive security context from ZAP alert ONLY
+        # Build comprehensive security context
+        context_extra = ""
+        if alert_context:
+            context_extra += f"\nCode Context:\n{alert_context}"
+        if alert_line_content:
+            context_extra += f"\nVulnerable Line:\n{alert_line_content}"
+        
         security_context = f"""
-OWASP ZAP DETECTED SECURITY VULNERABILITY:
+SECURITY VULNERABILITY DETECTED:
 ==========================================
 - Alert Name: {alert_name}
 - Risk Level: {alert_risk}
 - CWE ID: {alert_cweid}
+- OWASP Category: {alert_owasp}
 - WASC ID: {alert_wascid}
-- URL Affected: {alert_url}
+- URL/Location: {alert_url}
 - Parameter: {alert_param}
 - Evidence Found: {alert_evidence}
+{context_extra}
 
-OWASP ZAP Description:
+Description:
 {alert_description}
 
-OWASP ZAP Recommended Solution:
+Recommended Solution:
 {alert_solution}
 
 Reference: {alert_reference}
@@ -7567,11 +7667,24 @@ Reference: {alert_reference}
 Project: {request.project_name}
 Type: React Frontend Application
 Framework: React + Vite
+Source: {alert_source}
 """
         
         # Load ALL project files for comprehensive analysis
         all_files = []
-        frontend_src = project_path / "frontend" / "src"
+        
+        if files_from_s3:
+            # Use S3 files
+            for file_path, content in files_from_s3.items():
+                if any(file_path.endswith(ext) for ext in ['.js', '.jsx', '.ts', '.tsx', '.html', '.css', '.json']):
+                    all_files.append({
+                        'path': file_path,
+                        'full_path': file_path,
+                        'content': content[:8000]
+                    })
+        else:
+            # Use local files
+            frontend_src = project_path / "frontend" / "src"
         
         if frontend_src.exists():
             for file_path in frontend_src.rglob("*"):
@@ -7602,8 +7715,12 @@ Framework: React + Vite
         if not all_files:
             return {"success": False, "error": "No source files found in project"}
         
-        # Use Gemini to analyze and fix ONLY the ZAP-detected issue
-        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+        # Use Gemini to analyze and fix the security issue
+        api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        if not api_key:
+            return {"success": False, "error": "Gemini API key not configured. Set GEMINI_API_KEY or GOOGLE_API_KEY."}
+        
+        genai.configure(api_key=api_key)
         model = genai.GenerativeModel('gemini-2.0-flash')
         
         files_context = "\n\n".join([
@@ -7611,7 +7728,7 @@ Framework: React + Vite
             for f in all_files[:10]  # Include up to 10 files
         ])
         
-        prompt = f"""You are a security expert. Fix ONLY the specific vulnerability detected by OWASP ZAP.
+        prompt = f"""You are a security expert. Fix ONLY the specific vulnerability detected by the security scan.
 
 {security_context}
 
@@ -7619,25 +7736,26 @@ PROJECT SOURCE FILES:
 {files_context}
 
 IMPORTANT INSTRUCTIONS:
-1. Fix ONLY the specific vulnerability described above (detected by OWASP ZAP)
-2. Do NOT look for or fix other security issues - only fix what ZAP detected
-3. Identify which file(s) need modification to fix this specific ZAP alert
+1. Fix ONLY the specific vulnerability described above
+2. Do NOT look for or fix other security issues - only fix the reported issue
+3. Identify which file(s) need modification to fix this specific alert
 4. Provide the COMPLETE fixed file content (not just snippets)
 5. If the fix requires server-side changes (like adding headers), indicate this clearly
+6. Ensure the fix follows security best practices
 
 RESPONSE FORMAT (JSON only, no markdown):
 {{
     "affected_files": [
         {{
             "path": "frontend/src/App.jsx",
-            "issue_found": "exact description of where ZAP's alert applies",
+            "issue_found": "exact description of where the vulnerability applies",
             "fixed_code": "COMPLETE file content with the fix applied",
-            "explanation": "how this fix resolves the specific ZAP alert"
+            "explanation": "how this fix resolves the specific security issue"
         }}
     ],
     "server_side_fix_needed": true/false,
     "server_fix_instructions": "If server config needed, explain here",
-    "owasp_category": "OWASP Top 10 category",
+    "owasp_category": "{alert_owasp or 'OWASP Top 10 category'}",
     "zap_alert_resolved": "{alert_name}"
 }}
 
