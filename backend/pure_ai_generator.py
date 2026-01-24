@@ -1077,9 +1077,30 @@ class PureAIGenerator:
 		# Handle both dict (new format) and str (legacy format)
 		if isinstance(project_spec, dict):
 			idea = project_spec.get("idea", "")
+			features = project_spec.get("features", [])
 		else:
 			idea = str(project_spec)
+			features = []
 			project_spec = {"idea": idea}
+		
+		# 🤖 NEW: Detect ML model requirements
+		try:
+			from ml_integration_templates import detect_ml_requirements, detect_llm_requirements
+			
+			ml_requirements = detect_ml_requirements(idea, features)
+			llm_requirements = detect_llm_requirements(idea, features)
+			
+			if ml_requirements.get("needs_ml"):
+				print(f"🤖 ML INTEGRATION DETECTED: {ml_requirements['models']}")
+				print(f"   Use cases: {ml_requirements['use_cases']}")
+				project_spec["ml_requirements"] = ml_requirements
+			
+			if llm_requirements.get("needs_llm"):
+				print(f"🧠 LLM INTEGRATION DETECTED: {[p['name'] for p in llm_requirements['providers']]}")
+				print(llm_requirements.get("api_key_instructions", ""))
+				project_spec["llm_requirements"] = llm_requirements
+		except ImportError as e:
+			print(f"⚠️ ML integration templates not available: {e}")
 		
 		# 🌐 NEW: Check for website reference and analyze if found
 		website_inspiration_context = ""
@@ -1142,6 +1163,12 @@ class PureAIGenerator:
 			if project_spec.get("custom_data"):
 				plan["_user_custom_data"] = project_spec.get("custom_data")
 				print(f"📋 User provided custom data for this project")
+			# Pass through ML/LLM requirements
+			if project_spec.get("ml_requirements"):
+				plan["_ml_requirements"] = project_spec.get("ml_requirements")
+				print(f"🤖 ML models to integrate: {project_spec['ml_requirements'].get('models', [])}")
+			if project_spec.get("llm_requirements"):
+				plan["_llm_requirements"] = project_spec.get("llm_requirements")
 		
 		return plan
 
@@ -4486,6 +4513,10 @@ export const FloatingTabs = ({ tabs, activeTab, onTabChange, className = '' }) =
 		user_product_data = plan.get('_user_product_data')
 		user_custom_data = plan.get('_user_custom_data', {})
 		
+		# Extract ML/LLM requirements
+		ml_requirements = plan.get('_ml_requirements', {})
+		llm_requirements = plan.get('_llm_requirements', {})
+		
 		# Build product data section for the prompt
 		product_data_section = ""
 		if user_product_data:
@@ -4532,6 +4563,219 @@ products.map(product => (
 {json.dumps(user_custom_data, indent=2)}
 
 Use this exact data in the application instead of generating placeholder content.
+════════════════════════════════════════════════════════════════════════
+
+"""
+		
+		# Build ML integration section
+		ml_integration_section = ""
+		if ml_requirements and ml_requirements.get('detected'):
+			models = ml_requirements.get('models', [])
+			ml_integration_section = f"""
+🤖🤖🤖 MACHINE LEARNING INTEGRATION REQUIRED 🤖🤖🤖
+════════════════════════════════════════════════════════════════════════
+The user has requested ML model integration. You MUST include:
+
+📊 DETECTED ML MODELS: {', '.join(models)}
+
+🎯 ML IMPLEMENTATION REQUIREMENTS:
+
+1. **LINEAR REGRESSION** (if detected: population prediction, price prediction, trend analysis):
+   - Create a form to input feature values (X variables)
+   - Call backend API: POST /api/ml/predict with {{ "model": "linear_regression", "features": [values] }}
+   - Display prediction results in a nice card with visualization
+   - Show model accuracy/confidence if available
+   
+   Example Implementation:
+   ```jsx
+   const [features, setFeatures] = useState([]);
+   const [prediction, setPrediction] = useState(null);
+   const [loading, setLoading] = useState(false);
+   
+   const handlePredict = async () => {{
+     setLoading(true);
+     try {{
+       const response = await fetch('http://localhost:8000/api/ml/predict', {{
+         method: 'POST',
+         headers: {{ 'Content-Type': 'application/json' }},
+         body: JSON.stringify({{ model: 'linear_regression', features }})
+       }});
+       const data = await response.json();
+       setPrediction(data.prediction);
+     }} catch (error) {{
+       console.error('Prediction failed:', error);
+     }} finally {{
+       setLoading(false);
+     }}
+   }};
+   
+   // Prediction UI
+   <div className="p-6 bg-white rounded-xl shadow-lg">
+     <h3 className="text-xl font-bold mb-4">Make Prediction</h3>
+     <input 
+       type="number" 
+       placeholder="Enter value"
+       onChange={{(e) => setFeatures([parseFloat(e.target.value)])}}
+       className="px-4 py-2 border rounded-lg w-full mb-4"
+     />
+     <button 
+       onClick={{handlePredict}}
+       disabled={{loading}}
+       className="w-full py-3 bg-blue-600 text-white rounded-lg font-semibold"
+     >
+       {{loading ? 'Predicting...' : 'Get Prediction'}}
+     </button>
+     {{prediction !== null && (
+       <div className="mt-4 p-4 bg-green-50 rounded-lg">
+         <p className="text-lg font-semibold text-green-800">
+           Predicted Value: {{prediction.toFixed(2)}}
+         </p>
+       </div>
+     )}}
+   </div>
+   ```
+
+2. **CLASSIFICATION** (if detected: sentiment analysis, categorization, spam detection):
+   - Create input for text/features to classify
+   - Show classification result with confidence scores
+   - Display probability distribution for each class
+   
+3. **TIME SERIES** (if detected: forecasting, trend prediction):
+   - Show historical data in a chart
+   - Allow selecting forecast period
+   - Display predicted future values with confidence intervals
+
+4. **TRAIN YOUR OWN MODEL** Feature:
+   - Allow users to upload CSV data
+   - Auto-detect feature columns
+   - Train model and show training progress
+   - Save trained model for future predictions
+
+🔧 BACKEND ML ENDPOINTS (Already available):
+- POST /api/ml/predict - Make predictions
+- POST /api/ml/train - Train custom model
+- GET /api/ml/models - List available models
+- POST /api/ml/upload-data - Upload training data
+
+✅ REQUIRED UI COMPONENTS:
+- Prediction form with proper validation
+- Results display with nice visualization
+- Loading states during model inference
+- Error handling for failed predictions
+- Historical predictions list (optional)
+════════════════════════════════════════════════════════════════════════
+
+"""
+		
+		# Build LLM integration section
+		llm_integration_section = ""
+		if llm_requirements and llm_requirements.get('detected'):
+			provider = llm_requirements.get('provider', 'openai')
+			instructions = llm_requirements.get('setup_instructions', '')
+			llm_integration_section = f"""
+🧠🧠🧠 LLM/AI INTEGRATION REQUIRED 🧠🧠🧠
+════════════════════════════════════════════════════════════════════════
+The user has requested LLM integration. You MUST include:
+
+🔑 DETECTED LLM PROVIDER: {provider.upper()}
+
+⚠️ API KEY REQUIRED! Show this message to the user:
+{instructions}
+
+🎯 LLM IMPLEMENTATION REQUIREMENTS:
+
+1. **API KEY INPUT UI** (CRITICAL - Show first!):
+   ```jsx
+   const [apiKey, setApiKey] = useState(localStorage.getItem('llm_api_key') || '');
+   const [isApiKeySet, setIsApiKeySet] = useState(!!localStorage.getItem('llm_api_key'));
+   
+   const saveApiKey = () => {{
+     localStorage.setItem('llm_api_key', apiKey);
+     setIsApiKeySet(true);
+     showNotification('API Key saved successfully!');
+   }};
+   
+   // Show if no API key
+   {{!isApiKeySet && (
+     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+       <div className="bg-white p-8 rounded-xl max-w-md w-full">
+         <h2 className="text-2xl font-bold mb-4">🔑 API Key Required</h2>
+         <p className="text-gray-600 mb-4">
+           {instructions.replace(chr(10), ' ')}
+         </p>
+         <input
+           type="password"
+           value={{apiKey}}
+           onChange={{(e) => setApiKey(e.target.value)}}
+           placeholder="Enter your API key"
+           className="w-full px-4 py-3 border rounded-lg mb-4"
+         />
+         <button
+           onClick={{saveApiKey}}
+           disabled={{!apiKey}}
+           className="w-full py-3 bg-blue-600 text-white rounded-lg font-semibold disabled:opacity-50"
+         >
+           Save API Key
+         </button>
+       </div>
+     </div>
+   )}}
+   ```
+
+2. **CHAT INTERFACE** (AI Chat/Assistant apps):
+   ```jsx
+   const [messages, setMessages] = useState([]);
+   const [input, setInput] = useState('');
+   const [loading, setLoading] = useState(false);
+   
+   const sendMessage = async () => {{
+     if (!input.trim()) return;
+     
+     const userMessage = {{ role: 'user', content: input }};
+     setMessages(prev => [...prev, userMessage]);
+     setInput('');
+     setLoading(true);
+     
+     try {{
+       const response = await fetch('http://localhost:8000/api/llm/chat', {{
+         method: 'POST',
+         headers: {{
+           'Content-Type': 'application/json',
+           'X-API-Key': localStorage.getItem('llm_api_key')
+         }},
+         body: JSON.stringify({{
+           provider: '{provider}',
+           messages: [...messages, userMessage]
+         }})
+       }});
+       const data = await response.json();
+       setMessages(prev => [...prev, {{ role: 'assistant', content: data.response }}]);
+     }} catch (error) {{
+       setMessages(prev => [...prev, {{ role: 'assistant', content: 'Error: Failed to get response' }}]);
+     }} finally {{
+       setLoading(false);
+     }}
+   }};
+   ```
+
+3. **TEXT GENERATION** (Content generation apps):
+   - Prompt input with templates
+   - Generated content display
+   - Copy to clipboard functionality
+   - Regenerate option
+
+🔧 BACKEND LLM ENDPOINTS (Already available):
+- POST /api/llm/chat - Chat completion
+- POST /api/llm/generate - Text generation
+- POST /api/llm/summarize - Text summarization
+- POST /api/llm/analyze - Content analysis
+
+✅ REQUIRED UI COMPONENTS:
+- API Key setup modal (shows first if no key)
+- Chat interface with message history
+- Loading indicators during API calls
+- Error handling for rate limits/failures
+- Settings to change model/provider
 ════════════════════════════════════════════════════════════════════════
 
 """
@@ -4800,6 +5044,8 @@ User requested LIGHT/CLEAN theme. You MUST use:
 
 {product_data_section}
 {custom_data_section}
+{ml_integration_section}
+{llm_integration_section}
 
 🌐 BROWSER SANDBOX ENVIRONMENT - CRITICAL REQUIREMENTS:
 ════════════════════════════════════════════════════════
@@ -4873,6 +5119,96 @@ The following are ALREADY AVAILABLE GLOBALLY - DO NOT IMPORT OR REDEFINE:
 6. USE Router, Routes, Route, Link, NavLink directly (they are global)
 7. USE Button, Input, Card, Loading directly (they are global)
 8. USE React.createContext and React.useContext (React is global)
+
+🚨🚨🚨 CRITICAL CODE QUALITY RULES - VIOLATIONS CAUSE RUNTIME ERRORS 🚨🚨🚨
+════════════════════════════════════════════════════════════════════════
+
+⛔ EMPTY COMPONENT BODIES (FATAL ERROR):
+NEVER create components with empty bodies - they render NOTHING!
+
+❌ WRONG - Empty component body (renders nothing):
+const NeumorphicInput = ({{ children, className }}) => {{}};
+const Card = ({{ children }}) => {{}};
+const MyComponent = () => ();
+const MyComponent = () => {{}};  // Empty block
+
+✅ CORRECT - Components MUST have a return statement:
+const NeumorphicInput = ({{ children, className }}) => {{
+  return (
+    <div className={{cn('bg-gray-800 rounded-xl p-4', className)}}>
+      {{children}}
+    </div>
+  );
+}};
+
+const Card = ({{ children }}) => (
+  <div className="bg-white rounded-xl p-6 shadow-md">{{children}}</div>
+);
+
+⛔ ASYNC IN SYNC CONTEXT (FATAL ERROR):
+NEVER call async functions inside useMemo, useState initializers, or render!
+
+❌ WRONG - async in useMemo (returns Promise, not data!):
+const data = useMemo(() => {{
+  const result = await fetchData();  // ❌ Can't use await in useMemo!
+  return result;
+}}, []);
+
+const data = useMemo(() => fetchAPIData(), []);  // ❌ Returns Promise object!
+
+✅ CORRECT - Use useEffect for async operations:
+const [data, setData] = useState(null);
+const [loading, setLoading] = useState(true);
+
+useEffect(() => {{
+  const loadData = async () => {{
+    setLoading(true);
+    try {{
+      const result = await fetchData();
+      setData(result);
+    }} catch (err) {{
+      console.error(err);
+    }} finally {{
+      setLoading(false);
+    }}
+  }};
+  loadData();
+}}, []);
+
+// For computed values that depend on async data:
+const processedData = useMemo(() => {{
+  if (!data) return null;  // Handle null case
+  return data.map(item => ({{ ...item, processed: true }}));  // Sync transformation
+}}, [data]);
+
+⛔ WRONG EXPORT (FATAL ERROR):
+If you have AppWrapper, export AppWrapper NOT App!
+
+❌ WRONG:
+const AppWrapper = () => (<Router><App /></Router>);
+export default App;  // ❌ Wrong! Should export AppWrapper
+
+✅ CORRECT:
+const AppWrapper = () => (<Router><App /></Router>);
+export default AppWrapper;  // ✅ Correct!
+
+// Or better for sandbox (no export at all):
+const AppWrapper = () => (<Router><App /></Router>);
+// window.App = AppWrapper is handled by sandbox
+
+⛔ TAILWIND PEER CLASSES (UNRELIABLE IN SANDBOX):
+Avoid peer-checked/peer-focus classes - use state-based styling instead!
+
+❌ WRONG - Peer classes may not work:
+<input type="checkbox" className="peer" />
+<span className="peer-checked:bg-blue-500">Toggle</span>
+
+✅ CORRECT - State-based styling (always works):
+const [isChecked, setIsChecked] = useState(false);
+<input type="checkbox" checked={{isChecked}} onChange={{(e) => setIsChecked(e.target.checked)}} />
+<span className={{isChecked ? 'bg-blue-500' : 'bg-gray-500'}}>Toggle</span>
+
+════════════════════════════════════════════════════════════════════════
 
 ✅ CORRECT PATTERN:
 ```jsx

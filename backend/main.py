@@ -1710,13 +1710,16 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
     # Handle export patterns (robust)
     import re
     if 'export default' in app_content:
-        # Pattern 1: export default App; (reference to component)
-        app_content = re.sub(
-            r'export\s+default\s+App\s*;?',
-            'window.App = App;',
-            app_content,
-            flags=re.MULTILINE
-        )
+        # Pattern 1: export default SomeName; (reference to component - handles App, AppWrapper, etc.)
+        export_match = re.search(r'export\s+default\s+(\w+)\s*;?', app_content)
+        if export_match:
+            component_name = export_match.group(1)
+            app_content = re.sub(
+                r'export\s+default\s+' + component_name + r'\s*;?',
+                f'window.App = {component_name};',
+                app_content,
+                flags=re.MULTILINE
+            )
         # Pattern 2: export default function App() { ... }
         if re.search(r'export\s+default\s+function\s+App\s*\(', app_content):
             app_content = re.sub(
@@ -1734,12 +1737,16 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
                 app_content
             )
         # Pattern 4: export default () => / export default ( ... )
-        else:
+        elif 'export default' in app_content:
             app_content = app_content.replace('export default', 'window.App =')
     else:
         # No export - add window.App assignment at the end
+        # Prefer AppWrapper if it exists, otherwise use App
         if 'window.App' not in app_content:
-            app_content = app_content.rstrip() + '\n\nwindow.App = App;\n'
+            if 'const AppWrapper' in app_content or 'function AppWrapper' in app_content:
+                app_content = app_content.rstrip() + '\n\nwindow.App = AppWrapper;\n'
+            else:
+                app_content = app_content.rstrip() + '\n\nwindow.App = App;\n'
     
     # Limit App.jsx size as well
     if len(app_content) > MAX_CODE_SIZE:
@@ -6431,13 +6438,302 @@ async def save_project_file(request: dict = Body(...)):
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+# --- Machine Learning API Endpoints ---
+@app.post("/api/ml/predict")
+async def ml_predict(request: dict = Body(...)):
+    """Make predictions using ML models"""
+    try:
+        model_type = request.get("model", "linear_regression")
+        features = request.get("features", [])
+        
+        if not features:
+            return {"success": False, "error": "No features provided"}
+        
+        # Simple linear regression prediction
+        if model_type == "linear_regression":
+            import numpy as np
+            
+            # For demo, use a simple linear model (y = mx + b)
+            # In production, this would load a trained model
+            slope = request.get("slope", 1.5)
+            intercept = request.get("intercept", 10)
+            
+            if isinstance(features[0], list):
+                predictions = [sum([f * slope for f in row]) + intercept for row in features]
+            else:
+                predictions = [f * slope + intercept for f in features]
+            
+            return {
+                "success": True,
+                "model": model_type,
+                "prediction": predictions[0] if len(predictions) == 1 else predictions,
+                "confidence": 0.85,
+                "features_used": features
+            }
+        
+        elif model_type == "classification":
+            # Simple classification demo
+            threshold = request.get("threshold", 0.5)
+            predictions = ["positive" if f > threshold else "negative" for f in features]
+            confidences = [abs(f - threshold) + 0.5 for f in features]
+            
+            return {
+                "success": True,
+                "model": model_type,
+                "prediction": predictions[0] if len(predictions) == 1 else predictions,
+                "confidence": min(confidences),
+                "classes": ["negative", "positive"]
+            }
+        
+        elif model_type == "time_series":
+            # Simple time series prediction (moving average)
+            import numpy as np
+            
+            data = np.array(features)
+            window = min(3, len(data))
+            moving_avg = np.convolve(data, np.ones(window)/window, mode='valid')
+            
+            # Forecast next values
+            last_avg = moving_avg[-1] if len(moving_avg) > 0 else data[-1]
+            trend = (data[-1] - data[0]) / len(data) if len(data) > 1 else 0
+            
+            forecast_steps = request.get("steps", 5)
+            forecast = [last_avg + trend * (i + 1) for i in range(forecast_steps)]
+            
+            return {
+                "success": True,
+                "model": model_type,
+                "prediction": forecast,
+                "historical": features,
+                "confidence": 0.75
+            }
+        
+        else:
+            return {"success": False, "error": f"Unknown model type: {model_type}"}
+            
+    except Exception as e:
+        print(f"❌ ML prediction error: {e}")
+        return {"success": False, "error": str(e)}
+
+@app.post("/api/ml/train")
+async def ml_train(request: dict = Body(...)):
+    """Train a custom ML model"""
+    try:
+        model_type = request.get("model", "linear_regression")
+        X = request.get("features", [])
+        y = request.get("labels", [])
+        
+        if not X or not y:
+            return {"success": False, "error": "Training data (features and labels) required"}
+        
+        if len(X) != len(y):
+            return {"success": False, "error": "Features and labels must have same length"}
+        
+        import numpy as np
+        
+        X = np.array(X)
+        y = np.array(y)
+        
+        if model_type == "linear_regression":
+            # Simple least squares fit
+            if X.ndim == 1:
+                X = X.reshape(-1, 1)
+            
+            # Add bias term
+            X_with_bias = np.c_[np.ones(X.shape[0]), X]
+            
+            # Normal equation: (X^T X)^-1 X^T y
+            coefficients = np.linalg.lstsq(X_with_bias, y, rcond=None)[0]
+            
+            # Calculate R-squared
+            y_pred = X_with_bias @ coefficients
+            ss_res = np.sum((y - y_pred) ** 2)
+            ss_tot = np.sum((y - np.mean(y)) ** 2)
+            r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
+            
+            return {
+                "success": True,
+                "model": model_type,
+                "coefficients": {
+                    "intercept": float(coefficients[0]),
+                    "slopes": [float(c) for c in coefficients[1:]]
+                },
+                "r_squared": float(r_squared),
+                "samples_used": len(y)
+            }
+        
+        return {"success": False, "error": f"Training not implemented for: {model_type}"}
+        
+    except Exception as e:
+        print(f"❌ ML training error: {e}")
+        return {"success": False, "error": str(e)}
+
+@app.get("/api/ml/models")
+async def ml_list_models():
+    """List available ML models"""
+    return {
+        "success": True,
+        "models": [
+            {
+                "id": "linear_regression",
+                "name": "Linear Regression",
+                "description": "Predict continuous values based on input features",
+                "use_cases": ["Price prediction", "Population forecasting", "Trend analysis"]
+            },
+            {
+                "id": "classification",
+                "name": "Classification",
+                "description": "Categorize inputs into discrete classes",
+                "use_cases": ["Sentiment analysis", "Spam detection", "Category prediction"]
+            },
+            {
+                "id": "time_series",
+                "name": "Time Series",
+                "description": "Forecast future values based on historical data",
+                "use_cases": ["Sales forecasting", "Stock prediction", "Demand planning"]
+            }
+        ]
+    }
+
+# --- LLM Integration API Endpoints ---
+@app.post("/api/llm/chat")
+async def llm_chat(request: dict = Body(...)):
+    """Chat with LLM (OpenAI, Gemini, Claude)"""
+    try:
+        provider = request.get("provider", "openai")
+        messages = request.get("messages", [])
+        api_key = request.headers.get("X-API-Key") or request.get("api_key")
+        
+        if not messages:
+            return {"success": False, "error": "No messages provided"}
+        
+        if not api_key:
+            return {"success": False, "error": "API key required. Please set your API key."}
+        
+        if provider == "openai":
+            import openai
+            client = openai.OpenAI(api_key=api_key)
+            
+            response = client.chat.completions.create(
+                model=request.get("model", "gpt-3.5-turbo"),
+                messages=messages,
+                max_tokens=request.get("max_tokens", 1000),
+                temperature=request.get("temperature", 0.7)
+            )
+            
+            return {
+                "success": True,
+                "provider": provider,
+                "response": response.choices[0].message.content,
+                "usage": {
+                    "prompt_tokens": response.usage.prompt_tokens,
+                    "completion_tokens": response.usage.completion_tokens
+                }
+            }
+        
+        elif provider == "gemini":
+            import google.generativeai as genai
+            genai.configure(api_key=api_key)
+            
+            model = genai.GenerativeModel(request.get("model", "gemini-1.5-flash"))
+            
+            # Convert messages to Gemini format
+            prompt = "\n".join([f"{m['role']}: {m['content']}" for m in messages])
+            
+            response = model.generate_content(prompt)
+            
+            return {
+                "success": True,
+                "provider": provider,
+                "response": response.text
+            }
+        
+        elif provider == "claude":
+            import anthropic
+            client = anthropic.Anthropic(api_key=api_key)
+            
+            # Extract system message if present
+            system_message = None
+            user_messages = []
+            for msg in messages:
+                if msg.get("role") == "system":
+                    system_message = msg.get("content")
+                else:
+                    user_messages.append(msg)
+            
+            kwargs = {
+                "model": request.get("model", "claude-3-sonnet-20240229"),
+                "max_tokens": request.get("max_tokens", 1000),
+                "messages": user_messages
+            }
+            if system_message:
+                kwargs["system"] = system_message
+            
+            response = client.messages.create(**kwargs)
+            
+            return {
+                "success": True,
+                "provider": provider,
+                "response": response.content[0].text,
+                "usage": {
+                    "input_tokens": response.usage.input_tokens,
+                    "output_tokens": response.usage.output_tokens
+                }
+            }
+        
+        else:
+            return {"success": False, "error": f"Unknown provider: {provider}"}
+            
+    except Exception as e:
+        print(f"❌ LLM chat error: {e}")
+        return {"success": False, "error": str(e)}
+
+@app.post("/api/llm/generate")
+async def llm_generate(request: dict = Body(...)):
+    """Generate text using LLM"""
+    try:
+        provider = request.get("provider", "gemini")
+        prompt = request.get("prompt", "")
+        api_key = request.headers.get("X-API-Key") or request.get("api_key")
+        
+        if not prompt:
+            return {"success": False, "error": "No prompt provided"}
+        
+        # Use Gemini as default (we have API key)
+        if provider == "gemini" or not api_key:
+            import google.generativeai as genai
+            
+            # Use environment Gemini key if no API key provided
+            key = api_key or os.getenv("GOOGLE_API_KEY")
+            if not key:
+                return {"success": False, "error": "Gemini API key not configured"}
+            
+            genai.configure(api_key=key)
+            model = genai.GenerativeModel("gemini-2.0-flash")
+            
+            response = model.generate_content(prompt)
+            
+            return {
+                "success": True,
+                "provider": "gemini",
+                "text": response.text
+            }
+        
+        # Forward to chat endpoint for other providers
+        messages = [{"role": "user", "content": prompt}]
+        return await llm_chat({**request, "messages": messages})
+        
+    except Exception as e:
+        print(f"❌ LLM generate error: {e}")
+        return {"success": False, "error": str(e)}
+
 # --- Visual Edit Element Endpoint ---
 @app.post("/api/visual-edit-element")
 async def visual_edit_element(
     request: dict = Body(...),
     current_user: Optional[dict] = Depends(get_current_user_optional)
 ):
-    """Update element styles in the code based on visual editor changes"""
+    """Update element styles in the code based on visual editor changes - searches ALL project files"""
     try:
         project_slug = request.get("project_slug", "").strip()
         element_path = request.get("element_path", "")
@@ -6453,6 +6749,9 @@ async def visual_edit_element(
         # Get text change info
         new_text = request.get("new_text")
         original_text = request.get("original_text")
+        
+        # Get component context from request
+        component_name = request.get("component_name", "")
         
         if not project_slug:
             return {"success": False, "error": "Missing project_slug"}
@@ -6494,22 +6793,78 @@ async def visual_edit_element(
         if not project_data or not project_data.get('files'):
             return {"success": False, "error": f"Project '{project_slug}' not found"}
         
-        # Find App.jsx to update
-        app_jsx_file = None
-        app_jsx_content = ""
-        
+        # ENHANCED: Search ALL JSX/JS files, not just App.jsx
+        jsx_files = []
         for file in project_data['files']:
-            if file['path'].endswith('App.jsx'):
-                app_jsx_file = file
-                app_jsx_content = file['content']
-                break
+            if file['path'].endswith(('.jsx', '.js', '.tsx', '.ts')) and 'node_modules' not in file['path']:
+                jsx_files.append(file)
         
-        if not app_jsx_content:
-            return {"success": False, "error": "App.jsx not found in project"}
+        if not jsx_files:
+            return {"success": False, "error": "No JSX/JS files found in project"}
         
-        # Convert styles to inline style or Tailwind classes
-        style_updates = []
+        print(f"🔍 Searching {len(jsx_files)} JSX/JS files for element...")
+        
+        # Clean up classes for searching (remove xverta- prefixed classes)
+        clean_classes = ' '.join([c for c in element_classes.split() 
+                                  if not c.startswith('xverta')]) if element_classes else ""
+        
+        # Try to find the exact file containing this element
+        target_file = None
+        target_content = ""
+        match_confidence = 0
+        
+        # Build search patterns
+        search_patterns = []
+        if clean_classes:
+            # Add full class string pattern
+            search_patterns.append(clean_classes)
+            # Add first few significant classes
+            sig_classes = [c for c in clean_classes.split() if c.startswith('bg-') or c.startswith('text-') or c.startswith('px-') or c.startswith('py-') or c.startswith('flex') or c.startswith('grid')][:4]
+            if sig_classes:
+                search_patterns.extend(sig_classes)
+        if original_text:
+            search_patterns.append(original_text)
+        if element_text:
+            search_patterns.append(element_text[:30])
+        
+        # Search each file for the element
+        for file in jsx_files:
+            content = file['content']
+            file_path = file['path']
+            score = 0
+            
+            # Check each pattern
+            for pattern in search_patterns:
+                if pattern and pattern in content:
+                    score += 1
+                    # Higher score for exact class match
+                    if pattern == clean_classes and len(pattern) > 20:
+                        score += 5
+            
+            # If this file has a higher match score, use it
+            if score > match_confidence:
+                match_confidence = score
+                target_file = file
+                target_content = content
+                print(f"   📄 Better match in {file_path} (score: {score})")
+        
+        # Fall back to App.jsx if no better match found
+        if not target_file:
+            for file in jsx_files:
+                if file['path'].endswith('App.jsx'):
+                    target_file = file
+                    target_content = file['content']
+                    print(f"   📄 Fallback to App.jsx")
+                    break
+        
+        if not target_file:
+            return {"success": False, "error": "Could not find target file"}
+        
+        print(f"🎯 Target file: {target_file['path']}")
+        
+        # Convert styles to Tailwind classes
         tailwind_classes = []
+        style_updates = []
         
         # Map CSS properties to Tailwind classes
         tailwind_map = {
@@ -6517,29 +6872,36 @@ async def visual_edit_element(
                 '#ef4444': 'bg-red-500', '#f97316': 'bg-orange-500', '#eab308': 'bg-yellow-500',
                 '#22c55e': 'bg-green-500', '#3b82f6': 'bg-blue-500', '#8b5cf6': 'bg-violet-500',
                 '#ec4899': 'bg-pink-500', '#1f2937': 'bg-gray-800', '#ffffff': 'bg-white',
-                '#000000': 'bg-black', 'transparent': 'bg-transparent'
+                '#000000': 'bg-black', 'transparent': 'bg-transparent',
+                '#111827': 'bg-gray-900', '#374151': 'bg-gray-700', '#4b5563': 'bg-gray-600',
+                '#6b7280': 'bg-gray-500', '#9ca3af': 'bg-gray-400', '#d1d5db': 'bg-gray-300',
+                '#e5e7eb': 'bg-gray-200', '#f3f4f6': 'bg-gray-100', '#f9fafb': 'bg-gray-50',
             },
             'color': {
                 '#ef4444': 'text-red-500', '#f97316': 'text-orange-500', '#eab308': 'text-yellow-500',
                 '#22c55e': 'text-green-500', '#3b82f6': 'text-blue-500', '#8b5cf6': 'text-violet-500',
                 '#ec4899': 'text-pink-500', '#1f2937': 'text-gray-800', '#ffffff': 'text-white',
-                '#000000': 'text-black'
+                '#000000': 'text-black', '#111827': 'text-gray-900', '#374151': 'text-gray-700',
+                '#6b7280': 'text-gray-500', '#9ca3af': 'text-gray-400', '#d1d5db': 'text-gray-300',
             },
             'fontSize': {
                 '12px': 'text-xs', '14px': 'text-sm', '16px': 'text-base', '18px': 'text-lg',
-                '20px': 'text-xl', '24px': 'text-2xl', '32px': 'text-3xl', '48px': 'text-4xl'
+                '20px': 'text-xl', '24px': 'text-2xl', '30px': 'text-3xl', '36px': 'text-4xl',
+                '48px': 'text-5xl', '60px': 'text-6xl'
             },
             'fontWeight': {
-                '300': 'font-light', '400': 'font-normal', '500': 'font-medium',
-                '600': 'font-semibold', '700': 'font-bold'
+                '100': 'font-thin', '200': 'font-extralight', '300': 'font-light', 
+                '400': 'font-normal', '500': 'font-medium', '600': 'font-semibold', 
+                '700': 'font-bold', '800': 'font-extrabold', '900': 'font-black'
             },
             'borderRadius': {
-                '0': 'rounded-none', '4px': 'rounded', '8px': 'rounded-lg',
-                '12px': 'rounded-xl', '16px': 'rounded-2xl', '9999px': 'rounded-full'
+                '0': 'rounded-none', '2px': 'rounded-sm', '4px': 'rounded', '6px': 'rounded-md',
+                '8px': 'rounded-lg', '12px': 'rounded-xl', '16px': 'rounded-2xl', 
+                '24px': 'rounded-3xl', '9999px': 'rounded-full'
             },
             'padding': {
-                '4px': 'p-1', '8px': 'p-2', '12px': 'p-3', '16px': 'p-4',
-                '20px': 'p-5', '24px': 'p-6', '32px': 'p-8'
+                '0': 'p-0', '4px': 'p-1', '8px': 'p-2', '12px': 'p-3', '16px': 'p-4',
+                '20px': 'p-5', '24px': 'p-6', '32px': 'p-8', '40px': 'p-10', '48px': 'p-12'
             }
         }
         
@@ -6548,42 +6910,39 @@ async def visual_edit_element(
             if prop in tailwind_map and value in tailwind_map[prop]:
                 tailwind_classes.append(tailwind_map[prop][value])
             else:
-                # Use inline style for non-standard values
-                css_prop = ''.join(['-' + c.lower() if c.isupper() else c for c in prop]).lstrip('-')
-                style_updates.append(f"{css_prop}: {value}")
-        
-        # Get additional context from request
-        element_html = request.get("element_html", "")[:200]
-        parent_context = request.get("parent_context", [])
-        sibling_info = request.get("sibling_info", {})
+                # Try to find closest match for colors
+                if prop == 'backgroundColor' and value.startswith('#'):
+                    tailwind_classes.append(f"bg-[{value}]")  # Arbitrary value
+                elif prop == 'color' and value.startswith('#'):
+                    tailwind_classes.append(f"text-[{value}]")
+                else:
+                    # Use inline style for non-standard values
+                    css_prop = ''.join(['-' + c.lower() if c.isupper() else c for c in prop]).lstrip('-')
+                    style_updates.append(f"{css_prop}: {value}")
         
         print(f"🎨 Tailwind classes to add: {tailwind_classes}")
         print(f"🎨 Inline styles to add: {style_updates}")
         
         # Track if we made any changes
         content_modified = False
-        new_content = app_jsx_content
+        new_content = target_content
         
         # HANDLE TEXT CHANGES FIRST
-        if new_text and original_text and original_text in app_jsx_content:
+        if new_text and original_text and original_text in target_content:
             # Direct text replacement
             new_content = new_content.replace(f">{original_text}<", f">{new_text}<", 1)
-            if new_content != app_jsx_content:
+            if new_content != target_content:
                 print(f"🎨 TEXT REPLACED: '{original_text}' -> '{new_text}'")
                 content_modified = True
             else:
                 # Try with quotes (for JSX text)
                 new_content = new_content.replace(f'"{original_text}"', f'"{new_text}"', 1)
-                if new_content != app_jsx_content:
+                if new_content != target_content:
                     print(f"🎨 TEXT REPLACED (quoted): '{original_text}' -> '{new_text}'")
                     content_modified = True
         
-        # FAST PATH: Try direct string replacement without AI if we have exact class match
-        if element_classes and tailwind_classes:
-            # Clean up classes (remove xverta- prefixed classes and dynamic state classes)
-            clean_classes = ' '.join([c for c in element_classes.split() 
-                                      if not c.startswith('xverta') and not c.startswith('hover:') == False])
-            
+        # FAST PATH: Try direct string replacement if we have exact class match
+        if clean_classes and tailwind_classes:
             print(f"🎨 Looking for classes in code: '{clean_classes[:80]}...'")
             
             if clean_classes and clean_classes in new_content:
@@ -6604,11 +6963,11 @@ async def visual_edit_element(
                         from s3_storage import upload_project_to_s3
                         upload_project_to_s3(
                             project_slug=project_slug,
-                            files=[{'path': 'frontend/src/App.jsx', 'content': new_content}],
+                            files=[{'path': target_file['path'], 'content': new_content}],
                             user_id=user_id
                         )
-                        print(f"✅ FAST PATH: Visual edit saved for {project_slug}")
-                        return {"success": True, "message": "Changes saved to code (fast)"}
+                        print(f"✅ FAST PATH: Visual edit saved for {project_slug} in {target_file['path']}")
+                        return {"success": True, "message": f"Changes saved to {target_file['path']} (fast)"}
                     except Exception as e:
                         print(f"⚠️ Fast path save failed: {e}")
                 else:
@@ -6638,11 +6997,11 @@ async def visual_edit_element(
                                     from s3_storage import upload_project_to_s3
                                     upload_project_to_s3(
                                         project_slug=project_slug,
-                                        files=[{'path': 'frontend/src/App.jsx', 'content': new_content}],
+                                        files=[{'path': target_file['path'], 'content': new_content}],
                                         user_id=user_id
                                     )
-                                    print(f"✅ PARTIAL MATCH: Visual edit saved for {project_slug}")
-                                    return {"success": True, "message": "Styles saved to code (partial match)"}
+                                    print(f"✅ PARTIAL MATCH: Visual edit saved for {project_slug} in {target_file['path']}")
+                                    return {"success": True, "message": f"Styles saved to {target_file['path']} (partial match)"}
                                 except Exception as e:
                                     print(f"⚠️ Partial match save failed: {e}")
         
@@ -6659,19 +7018,21 @@ async def visual_edit_element(
         # Find the position in code where element likely is
         code_start = 0
         for term in search_terms:
-            pos = app_jsx_content.find(term)
+            pos = target_content.find(term)
             if pos > 0:
                 code_start = max(0, pos - 500)  # Start 500 chars before match
                 break
         
         # Extract relevant code section (8k around the match point)
-        code_section = app_jsx_content[code_start:code_start + 8000]
+        code_section = target_content[code_start:code_start + 8000]
         
         # Build parent context string
         parent_str = ""
-        if parent_context:
-            for i, p in enumerate(parent_context):
-                parent_str += f"\n  Parent {i+1}: <{p.get('tag', '')}> classes=\"{p.get('classes', '')[:50]}\""
+        if 'parent_context' in request:
+            parent_context = request.get("parent_context", [])
+            if parent_context:
+                for i, p in enumerate(parent_context):
+                    parent_str += f"\n  Parent {i+1}: <{p.get('tag', '')}> classes=\"{p.get('classes', '')[:50]}\""
         
         # Build the style modification instruction - TARGETED EDIT APPROACH
         modification_prompt = f"""Find the className to modify in this React code snippet.
@@ -6732,17 +7093,17 @@ CODE:
                 return {"success": True, "message": "Styles applied visually (couldn't parse AI edit)"}
         
         # Apply the find/replace to the code
-        if find_str in app_jsx_content:
-            new_content = app_jsx_content.replace(find_str, replace_str, 1)  # Replace first occurrence
+        if find_str in target_content:
+            new_content = target_content.replace(find_str, replace_str, 1)  # Replace first occurrence
             print(f"🎨 Replaced: '{find_str[:50]}...' -> '{replace_str[:50]}...'")
         else:
             # Try a fuzzy match - maybe the classes are in a different order or with extra spaces
             import re
             # Escape special regex chars and allow flexible whitespace
             pattern = r'\s+'.join(re.escape(c) for c in find_str.split())
-            match = re.search(pattern, app_jsx_content)
+            match = re.search(pattern, target_content)
             if match:
-                new_content = app_jsx_content[:match.start()] + replace_str + app_jsx_content[match.end():]
+                new_content = target_content[:match.start()] + replace_str + target_content[match.end():]
                 print(f"🎨 Fuzzy replaced via regex")
             else:
                 print(f"🎨 Could not find '{find_str[:50]}...' in code")
@@ -6753,21 +7114,22 @@ CODE:
             print(f"❌ Edit removed 'export default' - reverting")
             return {"success": True, "message": "Styles applied visually (edit would break code)"}
         
-        # Save updated App.jsx to S3
+        # Save updated file to S3
         try:
             from s3_storage import upload_project_to_s3
             
             upload_project_to_s3(
                 project_slug=project_slug,
-                files=[{'path': 'frontend/src/App.jsx', 'content': new_content}],
+                files=[{'path': target_file['path'], 'content': new_content}],
                 user_id=user_id
             )
             
-            print(f"✅ Visual edit saved to S3 for {project_slug}")
+            print(f"✅ Visual edit saved to S3 for {project_slug} in {target_file['path']}")
             
             return {
                 "success": True, 
-                "message": "Styles saved to code",
+                "message": f"Styles saved to {target_file['path']}",
+                "file_updated": target_file['path'],
                 "tailwind_classes_added": tailwind_classes,
                 "inline_styles_added": style_updates
             }

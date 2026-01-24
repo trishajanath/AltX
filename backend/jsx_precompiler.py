@@ -9,10 +9,34 @@ import tempfile
 import os
 import re
 import hashlib
+import sys
+import shutil
 from functools import lru_cache
 
-# Path to esbuild binary
-ESBUILD_PATH = os.path.join(os.path.dirname(__file__), 'node_modules', '.bin', 'esbuild')
+# Path to esbuild binary - handle Windows (.cmd) vs Unix
+def get_esbuild_path():
+    """Get the correct esbuild path for the current OS."""
+    base_dir = os.path.dirname(__file__)
+    
+    if sys.platform == 'win32':
+        # On Windows, use the .cmd wrapper or npx
+        cmd_path = os.path.join(base_dir, 'node_modules', '.bin', 'esbuild.cmd')
+        if os.path.exists(cmd_path):
+            return cmd_path
+        # Fallback: try npx
+        npx_path = shutil.which('npx')
+        if npx_path:
+            return None  # Signal to use npx
+    else:
+        # Unix-like systems
+        bin_path = os.path.join(base_dir, 'node_modules', '.bin', 'esbuild')
+        if os.path.exists(bin_path):
+            return bin_path
+    
+    # Last resort: check if esbuild is in PATH
+    return shutil.which('esbuild')
+
+ESBUILD_PATH = get_esbuild_path()
 
 # Cache for compiled code
 _compile_cache = {}
@@ -87,9 +111,9 @@ def precompile_jsx(jsx_code: str) -> str:
     clean_code = re.sub(r'^(\s*)export\s+(const|let|var|function|class)', r'\1\2', clean_code, flags=re.MULTILINE)
     
     try:
-        # Use stdin to pass code to esbuild (avoids file extension issues)
-        result = subprocess.run(
-            [
+        # Build the command - handle npx fallback
+        if ESBUILD_PATH:
+            cmd = [
                 ESBUILD_PATH,
                 '--format=esm',            # ES modules format
                 '--jsx=transform',         # Transform JSX syntax
@@ -97,11 +121,28 @@ def precompile_jsx(jsx_code: str) -> str:
                 '--jsx-fragment=React.Fragment',
                 '--target=es2020',         # Modern browser target
                 '--loader=jsx',            # Treat input as JSX
-            ],
+            ]
+        else:
+            # Use npx as fallback
+            cmd = [
+                'npx', 'esbuild',
+                '--format=esm',
+                '--jsx=transform',
+                '--jsx-factory=React.createElement',
+                '--jsx-fragment=React.Fragment',
+                '--target=es2020',
+                '--loader=jsx',
+            ]
+        
+        # Use stdin to pass code to esbuild (avoids file extension issues)
+        result = subprocess.run(
+            cmd,
             input=clean_code,
             capture_output=True,
             text=True,
-            timeout=10  # 10 second timeout
+            encoding='utf-8',  # Explicit UTF-8 to handle emojis/Unicode
+            timeout=10,  # 10 second timeout
+            shell=(sys.platform == 'win32')  # Use shell on Windows for .cmd files
         )
         
         if result.returncode != 0:
@@ -146,11 +187,18 @@ def clear_compile_cache():
 def check_esbuild():
     """Check if esbuild is installed and working."""
     try:
+        if ESBUILD_PATH:
+            cmd = [ESBUILD_PATH, '--version']
+        else:
+            cmd = ['npx', 'esbuild', '--version']
+        
         result = subprocess.run(
-            [ESBUILD_PATH, '--version'],
+            cmd,
             capture_output=True,
             text=True,
-            timeout=5
+            encoding='utf-8',  # Explicit UTF-8 to handle emojis/Unicode
+            timeout=10,
+            shell=(sys.platform == 'win32')
         )
         if result.returncode == 0:
             print(f"✅ esbuild available: v{result.stdout.strip()}")

@@ -349,6 +349,92 @@ class CodeValidator:
         if incomplete_arrows:
             errors.append("Empty arrow function component - must return valid JSX")
         
+        # ========== NEW: CRITICAL SANDBOX ERRORS ==========
+        errors.extend(self._check_sandbox_critical_errors(code))
+        
+        return errors
+    
+    def _check_sandbox_critical_errors(self, code: str) -> List[str]:
+        """
+        Check for critical errors that cause sandbox execution failures.
+        These are the most common AI-generated code errors that break apps.
+        """
+        errors = []
+        
+        # ERROR 1: Empty component bodies (CRITICAL - renders nothing)
+        # Pattern: const Component = ({ props }) => {};
+        empty_body_pattern = re.findall(
+            r'const\s+([A-Z]\w*)\s*=\s*\([^)]*\)\s*=>\s*\{\s*\};?',
+            code
+        )
+        for comp_name in empty_body_pattern:
+            errors.append(f"CRITICAL: Component '{comp_name}' has empty body - will render nothing! Must have a return statement with JSX.")
+        
+        # Also check for: const Component = () => {};
+        empty_body_no_props = re.findall(
+            r'const\s+([A-Z]\w*)\s*=\s*\(\s*\)\s*=>\s*\{\s*\};?',
+            code
+        )
+        for comp_name in empty_body_no_props:
+            if comp_name not in empty_body_pattern:  # Avoid duplicates
+                errors.append(f"CRITICAL: Component '{comp_name}' has empty body - will render nothing! Must have a return statement with JSX.")
+        
+        # ERROR 2: Async functions called in useMemo (returns Promise, not data)
+        async_in_usememo = re.search(
+            r'useMemo\s*\(\s*(?:async\s*)?\(\s*\)\s*=>\s*\{[^}]*await',
+            code
+        )
+        if async_in_usememo:
+            errors.append("CRITICAL: Async function inside useMemo - useMemo cannot handle Promises! Use useEffect + useState instead.")
+        
+        # Also check for calling async functions in useMemo
+        usememo_async_call = re.search(
+            r'useMemo\s*\(\s*\(\s*\)\s*=>\s*(?:\{[^}]*return\s+)?(\w+Async|\w+API|fetch\w*|load\w*Data)\s*\(',
+            code
+        )
+        if usememo_async_call:
+            func_name = usememo_async_call.group(1)
+            errors.append(f"CRITICAL: Function '{func_name}' (likely async) called in useMemo - use useEffect + useState for async operations!")
+        
+        # ERROR 3: Wrong export when AppWrapper exists
+        if 'const AppWrapper' in code and 'export default App;' in code:
+            errors.append("CRITICAL: Wrong export! You have AppWrapper but export App. Change to 'export default AppWrapper;'")
+        
+        # ERROR 4: Tailwind peer classes (unreliable in sandbox)
+        if 'peer-checked' in code:
+            errors.append("WARNING: Tailwind 'peer-checked' classes may not work in sandbox. Use state-based styling: className={isChecked ? 'bg-blue-500' : 'bg-gray-500'}")
+        if 'peer-focus' in code:
+            errors.append("WARNING: Tailwind 'peer-focus' classes may not work in sandbox. Use onFocus/onBlur with state instead.")
+        
+        # ERROR 5: Truncated component (has const but no return)
+        # Pattern: const Component = ({ children }) => { const X = y; (no return)
+        truncated_pattern = re.findall(
+            r'const\s+([A-Z]\w*)\s*=\s*\([^)]*\)\s*=>\s*\{\s*const\s+\w+\s*=\s*\w+;\s*\};?(?!\s*return)',
+            code
+        )
+        for comp_name in truncated_pattern:
+            errors.append(f"CRITICAL: Component '{comp_name}' appears truncated - has inner const but no return statement!")
+        
+        # ERROR 6: motion/AnimatePresence usage (causes "a.set is not a function" errors)
+        if '<motion.' in code:
+            # Check if it's being used properly
+            motion_usage = re.findall(r'<motion\.(\w+)', code)
+            errors.append(f"WARNING: motion.{', motion.'.join(set(motion_usage))} components may cause errors. Consider using CSS transitions instead: className=\"transition-all duration-300 hover:scale-105\"")
+        
+        if '<AnimatePresence' in code:
+            errors.append("WARNING: AnimatePresence may cause 'a.set is not a function' errors in sandbox. Use conditional rendering with CSS transitions instead.")
+        
+        # ERROR 7: Using imports in sandbox (everything is global)
+        if 'import React' in code or "import { useState" in code or "from 'react'" in code:
+            errors.append("CRITICAL: Don't use imports in sandbox! React, useState, etc. are globally available. Remove all import statements.")
+        
+        if "from 'framer-motion'" in code or "from 'lucide-react'" in code:
+            errors.append("CRITICAL: Don't import framer-motion or lucide-react! motion and icons are globally available in sandbox.")
+        
+        # ERROR 8: Export statement in sandbox
+        if 'export default' in code:
+            errors.append("NOTE: Sandbox assigns window.App automatically - 'export default' is not needed but won't break anything.")
+        
         return errors
     
     def validate_json_syntax(self, code: str, filename: str = "generated.json") -> ValidationResult:
@@ -890,7 +976,7 @@ def auto_fix_jsx_for_sandbox(code: str, filename: str = "component.jsx") -> str:
     for html_event, react_event in html_events.items():
         code = re.sub(rf'\s{html_event}\s*=', f' {react_event}=', code, flags=re.IGNORECASE)
     
-    # ========== EMPTY COMPONENT FIXES ==========
+    # ========== EMPTY COMPONENT FIXES (CRITICAL - CAUSES RENDER FAILURES) ==========
     
     # Fix empty arrow function components: const Component = () => ();
     code = re.sub(
@@ -903,6 +989,81 @@ def auto_fix_jsx_for_sandbox(code: str, filename: str = "component.jsx") -> str:
     code = re.sub(
         r'const\s+(\w+)\s*=\s*\(\{[^}]*\}\)\s*=>\s*\(\s*\);',
         r'const \1 = (props) => (\n  <div className="p-4 bg-gray-100 rounded-lg">\n    <h3 className="text-lg font-semibold">\1</h3>\n    <p className="text-gray-600">Component ready</p>\n  </div>\n);',
+        code
+    )
+    
+    # FIX CRITICAL: Empty arrow function body with curly braces: const Component = ({ props }) => {};
+    # This is the most common error - component has empty body and renders NOTHING
+    def fix_empty_component_body(match):
+        comp_name = match.group(1)
+        props = match.group(2) if match.group(2) else ''
+        props_str = props.strip() if props else ''
+        # Check if this is a wrapper component (has children in props)
+        if 'children' in props_str:
+            return f'''const {comp_name} = ({{ {props_str} }}) => {{
+  return (
+    <div className="p-4 bg-gray-800 rounded-xl">
+      {{children}}
+    </div>
+  );
+}}'''
+        else:
+            return f'''const {comp_name} = ({props_str}) => {{
+  return (
+    <div className="p-4 bg-gray-100 rounded-lg">
+      <h3 className="text-lg font-semibold">{comp_name}</h3>
+      <p className="text-gray-600">Component rendered</p>
+    </div>
+  );
+}}'''
+    
+    # Pattern 1: const Component = ({ children, className, ...props }) => {};
+    code = re.sub(
+        r'const\s+([A-Z]\w*)\s*=\s*\(\{([^}]*)\}\)\s*=>\s*\{\s*\};?',
+        fix_empty_component_body,
+        code
+    )
+    
+    # Pattern 2: const Component = () => {};
+    code = re.sub(
+        r'const\s+([A-Z]\w*)\s*=\s*\(\s*\)\s*=>\s*\{\s*\};?',
+        lambda m: f'''const {m.group(1)} = () => {{
+  return (
+    <div className="p-4 bg-gray-100 rounded-lg">
+      <h3 className="text-lg font-semibold">{m.group(1)}</h3>
+      <p className="text-gray-600">Component rendered</p>
+    </div>
+  );
+}}''',
+        code
+    )
+    
+    # Pattern 3: Component with arrow but only "const Component = as;" style truncation
+    # This catches: const NeumorphicInput = ({ children, className, as = 'div', ...props }) => { const Component = as; (missing return)
+    def fix_truncated_wrapper_component(match):
+        full_match = match.group(0)
+        comp_name = match.group(1)
+        props_str = match.group(2)
+        inner_statement = match.group(3)  # e.g., "const Component = as" or just "Component = as"
+        
+        # Clean up the inner statement - remove duplicate 'const' if present
+        inner_clean = inner_statement.strip()
+        if not inner_clean.startswith('const '):
+            inner_clean = 'const ' + inner_clean
+        
+        # This component was truncated - add the missing return with children rendering
+        return f'''const {comp_name} = ({{ {props_str} }}) => {{
+  {inner_clean};
+  return (
+    <Component className={{cn('bg-gray-800 rounded-xl p-4', className)}} {{...props}}>
+      {{children}}
+    </Component>
+  );
+}}'''
+    
+    code = re.sub(
+        r'const\s+([A-Z]\w*)\s*=\s*\(\{([^}]+)\}\)\s*=>\s*\{\s*((?:const\s+)?\w+\s*=\s*\w+);?\s*\};?(?!\s*return)',
+        fix_truncated_wrapper_component,
         code
     )
     
@@ -919,6 +1080,31 @@ def auto_fix_jsx_for_sandbox(code: str, filename: str = "component.jsx") -> str:
         r'return (\n    <div className="p-4 bg-gray-100 rounded-lg">\n      <p>Content placeholder</p>\n    </div>\n  );',
         code
     )
+    
+    # ========== ASYNC IN SYNC CONTEXT FIXES ==========
+    # Detect async functions being called in useMemo (common AI error)
+    # Pattern: useMemo(() => someAsyncFunc(), []) or useMemo(() => { return asyncFunc(); }, [])
+    # We can't auto-fix this reliably, but we can add a comment warning
+    if re.search(r'useMemo\s*\(\s*\(\s*\)\s*=>\s*\{?\s*(?:return\s+)?\w+Async|fetch|await', code):
+        print("⚠️ WARNING: Detected possible async function call inside useMemo - this may cause issues!")
+    
+    # ========== EXPORT FIXES (CRITICAL) ==========
+    # If AppWrapper exists, export AppWrapper not App
+    if 'const AppWrapper' in code:
+        # Fix wrong export: export default App; when AppWrapper exists
+        code = re.sub(
+            r'export\s+default\s+App\s*;?\s*$',
+            'export default AppWrapper;',
+            code
+        )
+        # Also fix any duplicate App; statements before export
+        code = re.sub(r'\nApp;\s*\n', '\n', code)
+    
+    # ========== TAILWIND PEER CLASS FIXES ==========
+    # peer-checked classes are unreliable in sandbox - convert to inline conditionals where possible
+    # This is a complex transformation, so we just flag it for now
+    if 'peer-checked' in code or 'peer-focus' in code:
+        print("⚠️ WARNING: Detected Tailwind peer classes (peer-checked/peer-focus) - these may not work in sandbox!")
     
     # ========== ROUTER FIXES ==========
     
