@@ -68,7 +68,18 @@ class UserModel:
             "created_at": datetime.utcnow(),
             "updated_at": datetime.utcnow(),
             "is_active": True,
-            "is_verified": False
+            "is_verified": False,
+            # Stripe Connect fields (for payment-enabled apps)
+            "stripe_connect": {
+                "account_id": None,
+                "status": "not_connected",
+                "charges_enabled": False,
+                "payouts_enabled": False,
+                "details_submitted": False,
+                "default_currency": None,
+                "country": None,
+                "connected_at": None
+            }
         }
         
         try:

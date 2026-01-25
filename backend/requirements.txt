@@ -39,6 +39,9 @@ python-jose[cryptography]
 passlib[bcrypt]
 sqlalchemy
 
+# Payment Processing (Stripe Connect)
+stripe>=7.0.0
+
 # GitHub and Git Integration
 PyGithub==2.6.1
 GitPython==3.1.45

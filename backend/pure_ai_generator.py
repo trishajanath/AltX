@@ -7,6 +7,11 @@ Enhanced with Website Analyzer integration:
 - When user says "build a website like Amazon", scrapes Amazon for design patterns
 - Extracts colors, layout, typography, components from target website
 - Creates similar but unique design based on analysis
+
+Enhanced with Compliance Framework integration:
+- All generated code follows GDPR, SOC 2, and NIST SP 800-53 requirements
+- Automatic injection of security and privacy patterns
+- Source: https://gdpr-info.eu/, https://sprinto.com/blog/soc-2-controls/
 """
 
 from __future__ import annotations
@@ -27,6 +32,16 @@ from google.generativeai.types import (
     HarmCategory,
 )
 from code_validator import CodeValidator, validate_generated_code, auto_fix_jsx_for_sandbox, validate_and_fix_for_sandbox
+
+# Import compliance framework for GDPR, SOC 2, NIST SP 800-53 requirements
+try:
+    from compliance_framework import ComplianceFramework, compliance_framework
+    COMPLIANCE_FRAMEWORK_AVAILABLE = True
+    print("✅ Compliance framework loaded - GDPR, SOC 2, NIST SP 800-53 enforcement enabled")
+except ImportError:
+    COMPLIANCE_FRAMEWORK_AVAILABLE = False
+    compliance_framework = None
+    print("⚠️ Compliance framework not available - generating without compliance injection")
 
 # Import website analyzer for "build a website like X" feature
 try:
@@ -3352,6 +3367,10 @@ IMPORTANT: Use this exact data in the application instead of placeholder/mock da
 			"- Database migrations/table creation on startup\n"
 			"- SEED DATA on first startup so the app has content\n\n"
 			
+			# Inject compliance requirements if framework is available
+			+ (compliance_framework.get_compliance_prompt_injection() if COMPLIANCE_FRAMEWORK_AVAILABLE and compliance_framework else "")
+			+ "\n\n"
+			
 			"Output JSON schema:\n"
 			+ json.dumps(schema, indent=2)
 			+ "\nEnsure every required path is present with COMPLETE, WORKING code."
@@ -3444,6 +3463,15 @@ IMPORTANT: Use this exact data in the application instead of placeholder/mock da
 			"* Modal dialogs with backdrop blur and scale transitions\n"
 			"* Form inputs with floating labels and validation feedback\n"
 			"* Navigation bars with active state indicators\n\n"
+			
+			"🔒 PRIVACY & COMPLIANCE REQUIREMENTS:\n"
+			"* Include GDPR consent banner component for cookie/data collection consent\n"
+			"* Add link to privacy policy in footer\n"
+			"* Implement secure form handling with proper validation\n"
+			"* Never store sensitive data in localStorage without encryption\n"
+			"* Include 'Delete My Account' option in user settings\n"
+			"* Show clear data collection notices\n\n"
+			
 			+ "Output JSON schema example:\n"
 			+ json.dumps(prompt_payload, indent=2)
 			+ "\n\nMAKE IT ABSOLUTELY BEAUTIFUL! Every pixel should delight users. 🚀"

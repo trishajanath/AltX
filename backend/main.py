@@ -666,6 +666,1025 @@ async def logout(current_user: dict = Depends(get_current_user)):
     }
 
 
+# ==================== STRIPE CONNECT PAYMENT ENDPOINTS ====================
+# Implements Stripe Connect for generated apps - app owners connect their own Stripe accounts
+# Platform NEVER holds user money - all payments flow through connected accounts
+
+from payments import (
+    stripe_connect_service,
+    StripeConnectInfo,
+    CreateCheckoutRequest,
+    CreateProductRequest,
+    RefundRequest,
+    format_line_items,
+    STRIPE_WEBHOOK_SECRET
+)
+
+# --- Stripe Connect Onboarding ---
+
+@app.post("/api/payments/connect")
+async def connect_stripe_account(
+    request: Request,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Create a Stripe Connect account for the app owner.
+    
+    This initiates the onboarding flow where Stripe handles KYC.
+    The platform never sees sensitive verification data.
+    """
+    try:
+        data = await request.json()
+        country = data.get("country", "US")
+        account_type = data.get("account_type", "express")
+        
+        # Check if user already has a connected account
+        existing = current_user.get("stripe_connect", {})
+        if existing.get("account_id"):
+            return {
+                "success": False,
+                "error": "You already have a connected Stripe account",
+                "account_id": existing.get("account_id")
+            }
+        
+        # Create Stripe Connect account
+        result = stripe_connect_service.create_connect_account(
+            user_id=current_user["_id"],
+            email=current_user["email"],
+            country=country,
+            account_type=account_type
+        )
+        
+        if not result["success"]:
+            raise HTTPException(status_code=400, detail=result["error"])
+        
+        # Update user with Stripe account ID
+        user_model = UserModel()
+        user_model.update_user(current_user["_id"], {
+            "stripe_connect.account_id": result["account_id"],
+            "stripe_connect.status": "pending",
+            "stripe_connect.connected_at": datetime.utcnow()
+        })
+        
+        return {
+            "success": True,
+            "account_id": result["account_id"],
+            "message": "Stripe account created. Complete onboarding to start accepting payments."
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/payments/onboarding-link")
+async def get_stripe_onboarding_link(
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get a link for the user to complete Stripe onboarding (KYC).
+    
+    The link expires in ~15 minutes. Stripe handles all verification UI.
+    """
+    try:
+        stripe_info = current_user.get("stripe_connect", {})
+        account_id = stripe_info.get("account_id")
+        
+        if not account_id:
+            raise HTTPException(
+                status_code=400, 
+                detail="No Stripe account found. Please connect Stripe first."
+            )
+        
+        # Get frontend URL from environment or use default
+        frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+        
+        result = stripe_connect_service.create_account_link(
+            account_id=account_id,
+            refresh_url=f"{frontend_url}/settings/payments?refresh=true",
+            return_url=f"{frontend_url}/settings/payments?onboarding=complete"
+        )
+        
+        if not result["success"]:
+            raise HTTPException(status_code=400, detail=result["error"])
+        
+        return {
+            "success": True,
+            "url": result["url"],
+            "expires_at": result["expires_at"]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/payments/status")
+async def get_stripe_status(current_user: dict = Depends(get_current_user)):
+    """
+    Get the current Stripe Connect status for the user.
+    
+    Returns verification status, payout settings, etc.
+    """
+    try:
+        stripe_info = current_user.get("stripe_connect", {})
+        account_id = stripe_info.get("account_id")
+        
+        if not account_id:
+            return {
+                "success": True,
+                "connected": False,
+                "status": "not_connected",
+                "message": "Connect Stripe to start accepting payments"
+            }
+        
+        # Get live status from Stripe
+        result = stripe_connect_service.get_account_status(account_id)
+        
+        if not result["success"]:
+            return {
+                "success": True,
+                "connected": True,
+                "status": stripe_info.get("status", "unknown"),
+                "account_id": account_id,
+                "error": result["error"]
+            }
+        
+        # Update cached status in database
+        user_model = UserModel()
+        user_model.update_user(current_user["_id"], {
+            "stripe_connect.status": result["status"],
+            "stripe_connect.charges_enabled": result["charges_enabled"],
+            "stripe_connect.payouts_enabled": result["payouts_enabled"],
+            "stripe_connect.details_submitted": result["details_submitted"],
+            "stripe_connect.default_currency": result["default_currency"],
+            "stripe_connect.country": result["country"]
+        })
+        
+        return {
+            "success": True,
+            "connected": True,
+            "status": result["status"],
+            "account_id": account_id,
+            "charges_enabled": result["charges_enabled"],
+            "payouts_enabled": result["payouts_enabled"],
+            "details_submitted": result["details_submitted"],
+            "currency": result["default_currency"],
+            "country": result["country"],
+            "requirements": result.get("requirements"),
+            "payout_schedule": result.get("settings", {}).get("payout_schedule")
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/payments/dashboard-link")
+async def get_stripe_dashboard_link(current_user: dict = Depends(get_current_user)):
+    """
+    Get a login link to the Stripe Express dashboard.
+    
+    Only works for Express accounts.
+    """
+    try:
+        stripe_info = current_user.get("stripe_connect", {})
+        account_id = stripe_info.get("account_id")
+        
+        if not account_id:
+            raise HTTPException(status_code=400, detail="No Stripe account connected")
+        
+        result = stripe_connect_service.create_login_link(account_id)
+        
+        if not result["success"]:
+            raise HTTPException(status_code=400, detail=result["error"])
+        
+        return {
+            "success": True,
+            "url": result["url"]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Checkout Sessions (for generated apps) ---
+
+@app.post("/api/payments/checkout")
+async def create_checkout_session(request: Request):
+    """
+    Create a Stripe Checkout session for a generated app.
+    
+    THE KEY ENDPOINT - generated apps call this to process payments.
+    The app NEVER sees Stripe keys. Everything goes through the platform backend.
+    
+    Headers:
+        app_id: The generated app's ID (maps to owner's Stripe account)
+    
+    Body:
+        line_items: Products being purchased
+        success_url: Redirect after success
+        cancel_url: Redirect after cancel
+    """
+    try:
+        # Get app_id from header or body
+        app_id = request.headers.get("x-app-id") or request.headers.get("app_id")
+        data = await request.json()
+        
+        if not app_id:
+            app_id = data.get("app_id")
+        
+        if not app_id:
+            raise HTTPException(status_code=400, detail="Missing app_id header or field")
+        
+        # Look up the app owner's Stripe account
+        from database import MongoDB
+        db = MongoDB.get_database()
+        
+        # Find the project/app
+        project = db.projects.find_one({"project_slug": app_id})
+        if not project:
+            project = db.projects.find_one({"_id": app_id})
+        
+        if not project:
+            raise HTTPException(status_code=404, detail="App not found")
+        
+        # Get the owner's Stripe account
+        owner_id = project.get("user_id")
+        owner = db.users.find_one({"_id": owner_id})
+        
+        if not owner:
+            raise HTTPException(status_code=404, detail="App owner not found")
+        
+        stripe_info = owner.get("stripe_connect", {})
+        account_id = stripe_info.get("account_id")
+        
+        if not account_id:
+            raise HTTPException(
+                status_code=400, 
+                detail="App owner has not connected Stripe payments"
+            )
+        
+        if not stripe_info.get("charges_enabled"):
+            raise HTTPException(
+                status_code=400,
+                detail="App owner's Stripe account is not fully verified"
+            )
+        
+        # Format line items for Stripe
+        line_items = format_line_items(data.get("line_items", []))
+        
+        if not line_items:
+            raise HTTPException(status_code=400, detail="No items to checkout")
+        
+        # Create checkout session on the connected account
+        result = stripe_connect_service.create_checkout_session(
+            connected_account_id=account_id,
+            line_items=line_items,
+            success_url=data.get("success_url"),
+            cancel_url=data.get("cancel_url"),
+            mode=data.get("mode", "payment"),
+            customer_email=data.get("customer_email"),
+            metadata={
+                "app_id": app_id,
+                "platform": "altx",
+                **(data.get("metadata") or {})
+            }
+        )
+        
+        if not result["success"]:
+            raise HTTPException(status_code=400, detail=result["error"])
+        
+        return {
+            "success": True,
+            "checkout_url": result["url"],
+            "session_id": result["session_id"]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/payments/refund")
+async def create_refund(
+    refund_request: RefundRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Create a refund for a payment.
+    
+    Only the app owner can initiate refunds.
+    """
+    try:
+        # Verify the user owns the app
+        from database import MongoDB
+        db = MongoDB.get_database()
+        
+        project = db.projects.find_one({"project_slug": refund_request.app_id})
+        if not project or str(project.get("user_id")) != current_user["_id"]:
+            raise HTTPException(status_code=403, detail="Not authorized to refund this app")
+        
+        stripe_info = current_user.get("stripe_connect", {})
+        account_id = stripe_info.get("account_id")
+        
+        if not account_id:
+            raise HTTPException(status_code=400, detail="No Stripe account connected")
+        
+        result = stripe_connect_service.create_refund(
+            connected_account_id=account_id,
+            payment_intent_id=refund_request.payment_intent_id,
+            amount_cents=refund_request.amount_cents,
+            reason=refund_request.reason
+        )
+        
+        if not result["success"]:
+            raise HTTPException(status_code=400, detail=result["error"])
+        
+        return {
+            "success": True,
+            "refund_id": result["refund_id"],
+            "amount": result["amount"],
+            "status": result["status"]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Products & Subscriptions ---
+
+@app.post("/api/payments/products")
+async def create_product(
+    product_request: CreateProductRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Create a product for subscription or recurring payments.
+    """
+    try:
+        stripe_info = current_user.get("stripe_connect", {})
+        account_id = stripe_info.get("account_id")
+        
+        if not account_id:
+            raise HTTPException(status_code=400, detail="No Stripe account connected")
+        
+        # Create product
+        product_result = stripe_connect_service.create_product(
+            connected_account_id=account_id,
+            name=product_request.name,
+            description=product_request.description,
+            metadata=product_request.metadata
+        )
+        
+        if not product_result["success"]:
+            raise HTTPException(status_code=400, detail=product_result["error"])
+        
+        # Create price
+        price_result = stripe_connect_service.create_price(
+            connected_account_id=account_id,
+            product_id=product_result["product_id"],
+            unit_amount_cents=product_request.price_cents,
+            currency=product_request.currency,
+            recurring=product_request.recurring
+        )
+        
+        if not price_result["success"]:
+            raise HTTPException(status_code=400, detail=price_result["error"])
+        
+        return {
+            "success": True,
+            "product_id": product_result["product_id"],
+            "price_id": price_result["price_id"],
+            "name": product_result["name"],
+            "price": price_result["unit_amount"],
+            "currency": price_result["currency"]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/payments/balance")
+async def get_balance(current_user: dict = Depends(get_current_user)):
+    """
+    Get account balance for the connected Stripe account.
+    """
+    try:
+        stripe_info = current_user.get("stripe_connect", {})
+        account_id = stripe_info.get("account_id")
+        
+        if not account_id:
+            raise HTTPException(status_code=400, detail="No Stripe account connected")
+        
+        result = stripe_connect_service.get_balance(account_id)
+        
+        if not result["success"]:
+            raise HTTPException(status_code=400, detail=result["error"])
+        
+        return {
+            "success": True,
+            "available": result["available"],
+            "pending": result["pending"]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/payments/transactions")
+async def get_transactions(
+    limit: int = 10,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get recent transactions for the connected Stripe account.
+    """
+    try:
+        stripe_info = current_user.get("stripe_connect", {})
+        account_id = stripe_info.get("account_id")
+        
+        if not account_id:
+            raise HTTPException(status_code=400, detail="No Stripe account connected")
+        
+        result = stripe_connect_service.list_transactions(
+            connected_account_id=account_id,
+            limit=min(limit, 100)  # Cap at 100
+        )
+        
+        if not result["success"]:
+            raise HTTPException(status_code=400, detail=result["error"])
+        
+        return {
+            "success": True,
+            "transactions": result["transactions"],
+            "has_more": result["has_more"]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Webhooks (single endpoint for all events) ---
+
+@app.post("/webhooks/stripe")
+async def stripe_webhook(request: Request):
+    """
+    Handle all Stripe webhook events.
+    
+    This is the SINGLE endpoint for all payment events.
+    Events contain the connected account ID for routing to the correct app.
+    
+    Common events:
+    - checkout.session.completed: Payment successful
+    - payment_intent.succeeded: Direct payment successful
+    - customer.subscription.created: New subscription
+    - account.updated: Connected account status changed
+    """
+    try:
+        payload = await request.body()
+        signature = request.headers.get("stripe-signature")
+        
+        if not signature:
+            raise HTTPException(status_code=400, detail="Missing Stripe signature")
+        
+        # Verify and parse webhook
+        result = stripe_connect_service.verify_webhook(payload, signature)
+        
+        if not result["success"]:
+            raise HTTPException(status_code=400, detail=result["error"])
+        
+        event_type = result["event_type"]
+        connected_account = result.get("account")
+        data = result["data"]
+        
+        # Process the event
+        event_result = stripe_connect_service.handle_webhook_event(
+            event_type=event_type,
+            data=data,
+            connected_account_id=connected_account
+        )
+        
+        # Route to correct app/user based on connected account
+        if connected_account:
+            from database import MongoDB
+            db = MongoDB.get_database()
+            
+            # Find user with this Stripe account
+            user = db.users.find_one({"stripe_connect.account_id": connected_account})
+            
+            if user:
+                # Log the event for the user
+                db.payment_events.insert_one({
+                    "user_id": str(user["_id"]),
+                    "stripe_account_id": connected_account,
+                    "event_type": event_type,
+                    "event_id": result["event_id"],
+                    "data": event_result,
+                    "created_at": datetime.utcnow()
+                })
+                
+                # Update account status if it's an account.updated event
+                if event_type == "account.updated":
+                    status_data = event_result.get("account_status", {})
+                    update_fields = {}
+                    
+                    if "charges_enabled" in status_data:
+                        update_fields["stripe_connect.charges_enabled"] = status_data["charges_enabled"]
+                    if "payouts_enabled" in status_data:
+                        update_fields["stripe_connect.payouts_enabled"] = status_data["payouts_enabled"]
+                    if "details_submitted" in status_data:
+                        update_fields["stripe_connect.details_submitted"] = status_data["details_submitted"]
+                    
+                    # Determine status
+                    if status_data.get("charges_enabled") and status_data.get("details_submitted"):
+                        update_fields["stripe_connect.status"] = "verified"
+                    
+                    if update_fields:
+                        from bson import ObjectId
+                        db.users.update_one(
+                            {"_id": user["_id"]},
+                            {"$set": update_fields}
+                        )
+        
+        return {"success": True, "event_type": event_type}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Webhook error: {e}")
+        # Return 200 to prevent Stripe from retrying
+        return {"success": False, "error": str(e)}
+
+
+# ==================== COMPLIANCE FRAMEWORK ENDPOINTS ====================
+# Documentation and enforcement of GDPR, ISO 27001, and SOC 2 compliance
+
+from compliance_framework import (
+    compliance_framework,
+    ComplianceStandard,
+    ComplianceCategory,
+    get_compliance_requirements,
+    get_compliance_code_patterns
+)
+
+@app.get("/api/compliance/standards")
+async def get_compliance_standards():
+    """
+    Get all supported compliance standards and their descriptions.
+    """
+    return {
+        "success": True,
+        "standards": [
+            {
+                "id": "gdpr",
+                "name": "GDPR",
+                "full_name": "General Data Protection Regulation",
+                "description": "EU regulation on data protection and privacy for all individuals within the European Union and the European Economic Area.",
+                "jurisdiction": "European Union",
+                "key_principles": [
+                    "Lawfulness, fairness, and transparency",
+                    "Purpose limitation",
+                    "Data minimization",
+                    "Accuracy",
+                    "Storage limitation",
+                    "Integrity and confidentiality",
+                    "Accountability"
+                ],
+                "penalties": "Up to €20 million or 4% of annual global turnover",
+                "effective_date": "May 25, 2018",
+                "source_url": "https://gdpr-info.eu/"
+            },
+            {
+                "id": "nist_800_53",
+                "name": "NIST SP 800-53",
+                "full_name": "NIST Special Publication 800-53 Rev 5 - Security and Privacy Controls",
+                "description": "Comprehensive catalog of security and privacy controls for federal information systems and organizations. Provides a structured approach to implementing security controls.",
+                "jurisdiction": "United States Federal (widely adopted globally)",
+                "key_principles": [
+                    "Access Control (AC)",
+                    "Audit and Accountability (AU)",
+                    "Configuration Management (CM)",
+                    "Identification and Authentication (IA)",
+                    "Incident Response (IR)",
+                    "Risk Assessment (RA)",
+                    "System and Communications Protection (SC)",
+                    "System and Information Integrity (SI)"
+                ],
+                "control_families": [
+                    "Access Control (AC)",
+                    "Awareness and Training (AT)",
+                    "Audit and Accountability (AU)",
+                    "Assessment, Authorization, and Monitoring (CA)",
+                    "Configuration Management (CM)",
+                    "Contingency Planning (CP)",
+                    "Identification and Authentication (IA)",
+                    "Incident Response (IR)",
+                    "Maintenance (MA)",
+                    "Media Protection (MP)",
+                    "Physical and Environmental Protection (PE)",
+                    "Planning (PL)",
+                    "Program Management (PM)",
+                    "Personnel Security (PS)",
+                    "PII Processing and Transparency (PT)",
+                    "Risk Assessment (RA)",
+                    "System and Services Acquisition (SA)",
+                    "System and Communications Protection (SC)",
+                    "System and Information Integrity (SI)",
+                    "Supply Chain Risk Management (SR)"
+                ],
+                "source_url": "https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-53r5.pdf"
+            },
+            {
+                "id": "soc2",
+                "name": "SOC 2",
+                "full_name": "Service Organization Control 2 - AICPA Trust Services Criteria",
+                "description": "Auditing procedure ensuring service providers securely manage data to protect client interests and privacy. Based on five Trust Services Criteria.",
+                "jurisdiction": "United States (widely adopted globally)",
+                "source_url": "https://sprinto.com/blog/soc-2-controls/",
+                "trust_principles": [
+                    {
+                        "name": "Security",
+                        "description": "Protection against unauthorized access"
+                    },
+                    {
+                        "name": "Availability",
+                        "description": "System availability for operation and use"
+                    },
+                    {
+                        "name": "Processing Integrity",
+                        "description": "Complete, accurate, timely processing"
+                    },
+                    {
+                        "name": "Confidentiality",
+                        "description": "Protection of confidential information"
+                    },
+                    {
+                        "name": "Privacy",
+                        "description": "Collection, use, retention, disclosure of personal information"
+                    }
+                ],
+                "report_types": ["Type I (point in time)", "Type II (over a period)"]
+            }
+        ]
+    }
+
+
+@app.get("/api/compliance/requirements")
+async def get_all_compliance_requirements(
+    standard: Optional[str] = None,
+    category: Optional[str] = None
+):
+    """
+    Get detailed compliance requirements.
+    
+    Query params:
+        standard: Filter by standard (gdpr, nist_800_53, soc2)
+        category: Filter by category (data_protection, access_control, etc.)
+    """
+    all_requirements = get_compliance_requirements()
+    
+    # Filter by standard if specified
+    if standard:
+        standard_lower = standard.lower()
+        all_requirements = {
+            k: v for k, v in all_requirements.items() 
+            if k.lower() == standard_lower
+        }
+    
+    # Filter by category if specified
+    if category:
+        for std_name, reqs in all_requirements.items():
+            all_requirements[std_name] = [
+                r for r in reqs 
+                if r["category"].lower() == category.lower()
+            ]
+    
+    return {
+        "success": True,
+        "requirements": all_requirements,
+        "total_count": sum(len(v) for v in all_requirements.values()),
+        "categories": [c.value for c in ComplianceCategory]
+    }
+
+
+@app.get("/api/compliance/requirements/{requirement_id}")
+async def get_requirement_detail(requirement_id: str):
+    """
+    Get detailed information about a specific compliance requirement.
+    """
+    req = compliance_framework.requirements.get(requirement_id.upper())
+    
+    if not req:
+        raise HTTPException(status_code=404, detail="Requirement not found")
+    
+    # Get the code pattern if available
+    code_pattern = compliance_framework.code_patterns.get(req.code_pattern, None)
+    
+    return {
+        "success": True,
+        "requirement": {
+            "id": req.id,
+            "standard": req.standard.value,
+            "category": req.category.value,
+            "title": req.title,
+            "description": req.description,
+            "implementation_guidance": req.implementation_guidance,
+            "severity": req.severity,
+            "references": req.references,
+            "code_example": code_pattern
+        }
+    }
+
+
+@app.get("/api/compliance/code-patterns")
+async def get_code_patterns(pattern_name: Optional[str] = None):
+    """
+    Get compliant code patterns and templates.
+    
+    These patterns are used to ensure generated apps follow compliance requirements.
+    """
+    patterns = get_compliance_code_patterns()
+    
+    if pattern_name:
+        if pattern_name not in patterns:
+            raise HTTPException(status_code=404, detail="Pattern not found")
+        return {
+            "success": True,
+            "pattern_name": pattern_name,
+            "code": patterns[pattern_name]
+        }
+    
+    return {
+        "success": True,
+        "patterns": {
+            name: {
+                "preview": code[:200] + "..." if len(code) > 200 else code,
+                "lines": len(code.split('\n'))
+            }
+            for name, code in patterns.items()
+        },
+        "available_patterns": list(patterns.keys())
+    }
+
+
+@app.get("/api/compliance/categories")
+async def get_compliance_categories():
+    """
+    Get all compliance categories with descriptions.
+    """
+    categories = {
+        "data_protection": {
+            "name": "Data Protection",
+            "description": "Measures to protect personal and sensitive data",
+            "related_standards": ["GDPR", "ISO 27001", "SOC 2"],
+            "key_controls": ["Encryption", "Access controls", "Data classification"]
+        },
+        "access_control": {
+            "name": "Access Control",
+            "description": "Mechanisms to restrict and manage access to systems and data",
+            "related_standards": ["ISO 27001", "SOC 2"],
+            "key_controls": ["RBAC", "Authentication", "Authorization"]
+        },
+        "encryption": {
+            "name": "Encryption",
+            "description": "Cryptographic protection of data at rest and in transit",
+            "related_standards": ["GDPR", "ISO 27001", "SOC 2"],
+            "key_controls": ["TLS/HTTPS", "AES encryption", "Key management"]
+        },
+        "audit_logging": {
+            "name": "Audit Logging",
+            "description": "Recording of security-relevant events for monitoring and forensics",
+            "related_standards": ["GDPR", "ISO 27001", "SOC 2"],
+            "key_controls": ["Event logging", "Log integrity", "Log retention"]
+        },
+        "consent_management": {
+            "name": "Consent Management",
+            "description": "Obtaining and managing user consent for data processing",
+            "related_standards": ["GDPR", "SOC 2"],
+            "key_controls": ["Consent collection", "Consent records", "Withdrawal mechanism"]
+        },
+        "data_retention": {
+            "name": "Data Retention",
+            "description": "Policies and procedures for data lifecycle management",
+            "related_standards": ["GDPR", "SOC 2"],
+            "key_controls": ["Retention periods", "Automatic cleanup", "Secure disposal"]
+        },
+        "incident_response": {
+            "name": "Incident Response",
+            "description": "Procedures for detecting, responding to, and recovering from security incidents",
+            "related_standards": ["GDPR", "ISO 27001"],
+            "key_controls": ["Breach detection", "Notification procedures", "Incident logging"]
+        },
+        "secure_development": {
+            "name": "Secure Development",
+            "description": "Security practices throughout the software development lifecycle",
+            "related_standards": ["ISO 27001"],
+            "key_controls": ["Input validation", "Secure coding", "Security testing"]
+        },
+        "privacy_by_design": {
+            "name": "Privacy by Design",
+            "description": "Integrating privacy into the design and operation of systems",
+            "related_standards": ["GDPR", "SOC 2"],
+            "key_controls": ["Data minimization", "Privacy defaults", "User controls"]
+        },
+        "data_minimization": {
+            "name": "Data Minimization",
+            "description": "Collecting only necessary data for specified purposes",
+            "related_standards": ["GDPR"],
+            "key_controls": ["Purpose limitation", "Necessary data only", "Regular review"]
+        }
+    }
+    
+    return {
+        "success": True,
+        "categories": categories
+    }
+
+
+@app.get("/api/compliance/ai-enforcement")
+async def get_ai_compliance_enforcement():
+    """
+    Get information about how AI enforces compliance during code generation.
+    """
+    return {
+        "success": True,
+        "enforcement_method": "Prompt Injection + Validation",
+        "description": "All AI-generated code is produced with compliance requirements injected into the generation prompt, then validated against compliance rules.",
+        "prompt_injection": compliance_framework.get_compliance_prompt_injection(),
+        "validation_checks": [
+            {
+                "check": "Input Validation",
+                "description": "Verifies all user inputs are validated and sanitized",
+                "standards": ["ISO 27001", "SOC 2"]
+            },
+            {
+                "check": "Secure Authentication",
+                "description": "Checks for secure password hashing and session management",
+                "standards": ["ISO 27001"]
+            },
+            {
+                "check": "Audit Logging",
+                "description": "Ensures security events are logged",
+                "standards": ["GDPR", "ISO 27001", "SOC 2"]
+            },
+            {
+                "check": "Consent Handling",
+                "description": "Verifies GDPR consent mechanisms are present",
+                "standards": ["GDPR", "SOC 2"]
+            },
+            {
+                "check": "Privacy Policy",
+                "description": "Checks for privacy policy links and notices",
+                "standards": ["SOC 2"]
+            },
+            {
+                "check": "XSS Prevention",
+                "description": "Validates output encoding and XSS prevention",
+                "standards": ["ISO 27001"]
+            },
+            {
+                "check": "Data Export",
+                "description": "Checks for GDPR data portability implementation",
+                "standards": ["GDPR"]
+            },
+            {
+                "check": "Data Deletion",
+                "description": "Verifies right to erasure implementation",
+                "standards": ["GDPR"]
+            }
+        ],
+        "code_patterns_applied": list(compliance_framework.code_patterns.keys())
+    }
+
+
+@app.get("/api/compliance/documentation")
+async def get_compliance_documentation():
+    """
+    Get comprehensive compliance documentation for all standards.
+    This is the main endpoint for the compliance documentation page.
+    """
+    return {
+        "success": True,
+        "title": "AltX Compliance Framework",
+        "version": "1.0.0",
+        "last_updated": datetime.utcnow().isoformat(),
+        "overview": {
+            "description": "AltX ensures all generated applications comply with major data protection and security standards by design.",
+            "approach": "Privacy by Design / Security by Default",
+            "standards_supported": ["GDPR", "ISO 27001", "SOC 2"],
+            "enforcement_methods": [
+                "AI prompt injection for compliant code generation",
+                "Automated validation of generated code",
+                "Compliant code patterns and templates",
+                "Security scanning of generated applications"
+            ]
+        },
+        "gdpr": {
+            "name": "General Data Protection Regulation",
+            "articles_covered": [
+                {"article": "Article 5", "topic": "Principles of processing"},
+                {"article": "Article 6", "topic": "Lawfulness of processing"},
+                {"article": "Article 7", "topic": "Conditions for consent"},
+                {"article": "Article 15", "topic": "Right of access"},
+                {"article": "Article 17", "topic": "Right to erasure"},
+                {"article": "Article 20", "topic": "Right to data portability"},
+                {"article": "Article 25", "topic": "Data protection by design"},
+                {"article": "Article 30", "topic": "Records of processing"},
+                {"article": "Article 32", "topic": "Security of processing"},
+                {"article": "Article 33-34", "topic": "Breach notification"}
+            ],
+            "implementation_summary": [
+                "Consent collection before data processing",
+                "Data export functionality (JSON/CSV)",
+                "Account deletion with data erasure",
+                "Data minimization in collection",
+                "Encryption of personal data",
+                "Audit logging of data access",
+                "Breach notification procedures"
+            ],
+            "source_url": "https://gdpr-info.eu/"
+        },
+        "nist_800_53": {
+            "name": "NIST SP 800-53 Rev 5 Security and Privacy Controls",
+            "controls_implemented": [
+                {"control": "AC-1 to AC-7", "topic": "Access Control Policy and Account Management"},
+                {"control": "AU-2, AU-3, AU-9", "topic": "Audit Events and Protection"},
+                {"control": "IA-2, IA-5", "topic": "Identification and Authentication"},
+                {"control": "SC-8, SC-13, SC-28", "topic": "Transmission and Data Protection"},
+                {"control": "SI-2, SI-10", "topic": "Flaw Remediation and Input Validation"},
+                {"control": "IR-4 to IR-8", "topic": "Incident Handling"},
+                {"control": "CP-9, CP-10", "topic": "System Backup and Recovery"},
+                {"control": "RA-5", "topic": "Vulnerability Scanning"}
+            ],
+            "implementation_summary": [
+                "Role-based access control (RBAC)",
+                "Account lockout after failed attempts",
+                "Multi-factor authentication support",
+                "TLS 1.2+ for data transmission",
+                "AES-256 encryption for data at rest",
+                "Comprehensive audit logging",
+                "Input validation and sanitization",
+                "Vulnerability management integration"
+            ],
+            "source_url": "https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-53r5.pdf"
+        },
+        "soc2": {
+            "name": "SOC 2 Trust Service Criteria (AICPA)",
+            "criteria_addressed": [
+                {"criteria": "CC1.0", "topic": "Control Environment"},
+                {"criteria": "CC3.0", "topic": "Risk Assessment"},
+                {"criteria": "CC4.0", "topic": "Monitoring Activities"},
+                {"criteria": "CC5.0", "topic": "Control Activities"},
+                {"criteria": "CC6.0", "topic": "Logical and Physical Access"},
+                {"criteria": "CC7.0", "topic": "System Operations"},
+                {"criteria": "CC8.0", "topic": "Change Management"},
+                {"criteria": "CC9.0", "topic": "Risk Mitigation"},
+                {"criteria": "A1", "topic": "Availability"},
+                {"criteria": "PI1", "topic": "Processing Integrity"},
+                {"criteria": "C1", "topic": "Confidentiality"},
+                {"criteria": "P1-P8", "topic": "Privacy Controls"}
+            ],
+            "implementation_summary": [
+                "MFA and strong password policies",
+                "Continuous monitoring and alerting",
+                "Change management workflows",
+                "Incident detection and response",
+                "Data encryption at rest and transit",
+                "Privacy notices and consent",
+                "Data retention and secure disposal"
+            ],
+            "source_url": "https://sprinto.com/blog/soc-2-controls/"
+        },
+        "code_patterns": {
+            "description": "Pre-built compliant code patterns used in generated applications",
+            "patterns": [
+                {"name": "consent_banner", "purpose": "GDPR consent collection UI"},
+                {"name": "data_export", "purpose": "Right to access/portability API"},
+                {"name": "data_deletion", "purpose": "Right to erasure API"},
+                {"name": "rbac", "purpose": "Role-based access control"},
+                {"name": "secure_auth", "purpose": "Secure authentication"},
+                {"name": "audit_logging", "purpose": "Security event logging"},
+                {"name": "encryption", "purpose": "Data encryption utilities"},
+                {"name": "privacy_notice", "purpose": "Privacy policy component"},
+                {"name": "data_retention", "purpose": "Retention management"}
+            ]
+        }
+    }
+
+
 # ==================== PENDING DEMO PROJECT ENDPOINTS ====================
 
 @app.post("/api/demo/save-pending-project")

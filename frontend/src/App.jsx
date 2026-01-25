@@ -16,6 +16,7 @@ import FeaturesPage from './components/FeaturesPage';
 import AboutPage from './components/AboutPage';
 import PricingPage from './components/PricingPage';
 import OAuthCallback from './components/OAuthCallback';
+import CompliancePage from './components/CompliancePage';
 import { AuthProvider } from './contexts/AuthContext';
 
 function App() {
@@ -34,6 +35,7 @@ function App() {
               <Route path="/features" element={<div className="page"><FeaturesPage /></div>} />
               <Route path="/pricing" element={<div className="page"><PricingPage /></div>} />
               <Route path="/about" element={<div className="page"><AboutPage /></div>} />
+              <Route path="/compliance" element={<div className="page"><CompliancePage /></div>} />
               
               {/* OAuth Callback Handler - processes auth params and redirects */}
               <Route path="/oauth/callback" element={<OAuthCallback />} />
