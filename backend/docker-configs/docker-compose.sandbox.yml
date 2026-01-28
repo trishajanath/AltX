@@ -1,0 +1,48 @@
+# Docker Compose for Sandbox FastAPI Backends
+# Usage: docker-compose -f docker-compose.sandbox.yml up --build
+
+version: '3.8'
+
+services:
+  sandbox-api:
+    build:
+      context: .
+      dockerfile: sandbox.Dockerfile
+    container_name: altx-sandbox-api
+    ports:
+      - "8000:8000"
+    environment:
+      - SANDBOX=true
+      - DATABASE_URL=sqlite:///./data/sandbox.db
+      - JWT_SECRET=${JWT_SECRET:-sandbox-dev-secret-change-in-production}
+    volumes:
+      # Persist SQLite database
+      - sandbox-data:/app/data
+      # Mount source for development (optional)
+      # - ./sandbox_main.py:/app/sandbox_main.py:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - sandbox-network
+
+  # Optional: Redis for caching (not required for basic sandbox)
+  # sandbox-redis:
+  #   image: redis:7-alpine
+  #   container_name: altx-sandbox-redis
+  #   ports:
+  #     - "6379:6379"
+  #   networks:
+  #     - sandbox-network
+
+volumes:
+  sandbox-data:
+    driver: local
+
+networks:
+  sandbox-network:
+    driver: bridge

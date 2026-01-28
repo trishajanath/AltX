@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import Editor, { loader } from '@monaco-editor/react';
 import { Mic, Send, Volume2, VolumeX } from 'lucide-react';
-import { apiUrl } from '../config/api';
+import { apiUrl, wsUrl } from '../config/api';
 import PageWrapper from './PageWrapper';
 import SecurityCanvas from './SecurityCanvas';
 import { useAuth } from '../contexts/AuthContext';
@@ -738,6 +738,11 @@ const MonacoProjectEditor = () => {
   // Security Decision Records (SDR) State
   const [securityDecisions, setSecurityDecisions] = useState([]); // List of SDRs
   
+  // SOC2 Compliance State
+  const [showSOC2Compliance, setShowSOC2Compliance] = useState(false);
+  const [soc2ComplianceData, setSOC2ComplianceData] = useState(null);
+  const [isLoadingSOC2, setIsLoadingSOC2] = useState(false);
+  
   const chatEndRef = useRef(null);
   const changeTimeoutRef = useRef(null);
   const wsRef = useRef(null);
@@ -1038,7 +1043,7 @@ const MonacoProjectEditor = () => {
       
       try {
         // Step 1: Create async job using token from auth context
-        const response = await fetch('http://localhost:8000/api/build-with-ai', {
+        const response = await fetch(apiUrl('api/build-with-ai'), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -1080,7 +1085,7 @@ const MonacoProjectEditor = () => {
         
         const pollJobStatus = async () => {
           try {
-            const statusResponse = await fetch(`http://localhost:8000/api/jobs/${jobId}`, {
+            const statusResponse = await fetch(apiUrl(`api/jobs/${jobId}`), {
               headers: {
                 'Authorization': `Bearer ${token}`
               }
@@ -1424,7 +1429,7 @@ Just tell me what you'd like to do.`
         };
         
         // Call the new Gemini auto-fix endpoint
-        const response = await fetch('http://localhost:8000/api/gemini-fix-console-error', {
+        const response = await fetch(apiUrl('api/gemini-fix-console-error'), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -1725,7 +1730,7 @@ Just tell me what you'd like to do.`
         return;
       }
 
-      const ws = new WebSocket(`ws://localhost:8000/ws/project/${project.name}`);
+      const ws = new WebSocket(wsUrl(`ws/project/${project.name}`));
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -1824,7 +1829,7 @@ Just tell me what you'd like to do.`
   const runProject = async () => {
     setIsBuilding(true);
     try {
-      const response = await fetch('http://localhost:8000/api/run-project', {
+      const response = await fetch(apiUrl('api/run-project'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2226,7 +2231,7 @@ Please try describing the issue manually.`
       error_type: 'manual_fix_request'
     };
     
-    const geminiResponse = await fetch('http://localhost:8000/api/gemini-fix-console-error', {
+    const geminiResponse = await fetch(apiUrl('api/gemini-fix-console-error'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -2264,6 +2269,110 @@ Starting your project again...`
     } else {
       throw new Error(geminiResult.error || 'Gemini AI fix failed');
     }
+  };
+
+  // Fetch SOC2 Compliance Data for the project
+  const fetchSOC2Compliance = async () => {
+    if (!project?.name) return;
+    
+    setIsLoadingSOC2(true);
+    try {
+      const token = localStorage.getItem('access_token') || sessionStorage.getItem('access_token');
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      
+      // Try to fetch compliance data from S3 project
+      const response = await fetch(
+        apiUrl(`api/projects/${encodeURIComponent(project.name)}/compliance`),
+        { headers }
+      );
+      
+      if (response.ok) {
+        const data = await response.json();
+        setSOC2ComplianceData(data);
+      } else {
+        // If no compliance data exists, generate mock data based on security scan
+        const mockData = generateMockComplianceData();
+        setSOC2ComplianceData(mockData);
+      }
+    } catch (error) {
+      console.error('Failed to fetch SOC2 compliance data:', error);
+      // Generate mock data on error
+      const mockData = generateMockComplianceData();
+      setSOC2ComplianceData(mockData);
+    } finally {
+      setIsLoadingSOC2(false);
+    }
+  };
+
+  // Generate mock compliance data based on current security state - ACCURATE VERSION
+  const generateMockComplianceData = () => {
+    const totalIssues = securityIssues.length + errors.length;
+    const criticalIssues = securityIssues.filter(i => i.severity === 'CRITICAL').length;
+    const highIssues = securityIssues.filter(i => i.severity === 'HIGH').length;
+    const medIssues = securityIssues.filter(i => i.severity === 'MEDIUM').length;
+    // Max 50 from code alone - SOC2 is operational, code scanning can only show readiness
+    const score = Math.max(0, 50 - (criticalIssues * 15) - (highIssues * 8) - (medIssues * 4));
+    
+    return {
+      project_name: project?.name,
+      assessment_type: 'SOC2_READINESS_SCAN',
+      assessment_timestamp: new Date().toISOString(),
+      disclaimer: {
+        title: '⚠️ READINESS Assessment - NOT Compliance Certification',
+        text: 'SOC2 is an operational trust framework requiring evidence artifacts, not just code scanning.',
+        checks: ['Code vulnerabilities', 'Hardcoded secrets', 'Dangerous patterns'],
+        cannot_verify: ['IAM policies', 'TLS enforcement', 'Monitoring/alerting', 'Incident response']
+      },
+      readiness_score: score,
+      readiness_level: score >= 40 ? 'PARTIAL_READINESS' : score >= 25 ? 'EARLY_STAGE' : 'NOT_READY',
+      max_possible_score: 50,
+      audit_ready: false,
+      score_breakdown: {
+        code_security: { score: score, max: 50, deductions: `Critical:-${criticalIssues*15} High:-${highIssues*8} Med:-${medIssues*4}` },
+        operational_evidence: { score: 0, max: 50, reason: 'No evidence artifacts provided - upload IAM, monitoring, IR docs' }
+      },
+      findings_summary: {
+        critical: criticalIssues,
+        high: highIssues,
+        medium: medIssues,
+        low: securityIssues.filter(i => i.severity === 'LOW').length,
+        total: totalIssues
+      },
+      controls_assessment: {
+        'CC6.1': { name: 'Access Control', code_status: criticalIssues > 0 ? 'HAS_ISSUES' : 'NOT_VERIFIED', ops_status: 'MISSING', overall: criticalIssues > 0 ? 'FAILING' : 'NOT_VERIFIED', findings: criticalIssues, required_evidence: ['IAM policies', 'Access reviews', 'MFA config'] },
+        'CC6.6': { name: 'System Protection', code_status: errors.length > 0 ? 'HAS_ISSUES' : 'NOT_VERIFIED', ops_status: 'MISSING', overall: errors.length > 0 ? 'FAILING' : 'NOT_VERIFIED', findings: errors.length, required_evidence: ['WAF config', 'Firewall rules'] },
+        'CC6.7': { name: 'Transmission Security', code_status: 'NOT_VERIFIED', ops_status: 'MISSING', overall: 'NOT_VERIFIED', findings: 0, required_evidence: ['TLS 1.2+ config', 'HSTS', 'Cert management'] },
+        'CC7.2': { name: 'Security Monitoring', code_status: 'NOT_VERIFIED', ops_status: 'MISSING', overall: 'NOT_VERIFIED', findings: 0, required_evidence: ['SIEM config', 'Alerts', 'Log retention policy'] },
+        'CC8.1': { name: 'Change Management', code_status: 'NOT_VERIFIED', ops_status: 'MISSING', overall: 'NOT_VERIFIED', findings: 0, required_evidence: ['Change policy', 'Code review requirements'] },
+        'CC7.1': { name: 'Vulnerability Management', code_status: 'NOT_VERIFIED', ops_status: 'MISSING', overall: 'NOT_VERIFIED', findings: 0, required_evidence: ['Scan reports', 'Pen test results'] },
+        'CC7.3': { name: 'Incident Response', code_status: 'NOT_VERIFIED', ops_status: 'MISSING', overall: 'NOT_VERIFIED', findings: 0, required_evidence: ['IR plan', 'Postmortems'] },
+        'CC9.1': { name: 'Vendor Risk', code_status: 'NOT_VERIFIED', ops_status: 'MISSING', overall: 'NOT_VERIFIED', findings: 0, required_evidence: ['Vendor inventory', 'Security assessments'] }
+      },
+      code_vulnerabilities: securityIssues.slice(0, 15).map((issue, idx) => ({
+        id: `VULN-${idx + 1}`,
+        type: issue.type || 'security_finding',
+        file: issue.file_path || issue.file || 'unknown',
+        line: issue.line || 0,
+        severity: issue.severity || 'MEDIUM',
+        category: issue.category || 'Security',
+        control: issue.soc2_control || 'CC6.1',
+        description: issue.description || issue.message,
+        why_critical: 'Security vulnerability detected in code',
+        remediation: issue.remediation || 'Review and fix the identified issue',
+        code_snippet: issue.code_snippet || '',
+        matched: ''
+      })),
+      critical_gaps: [
+        { priority: 1, gap: 'Secrets Management', issue: 'Potential hardcoded secrets', fix: 'Use os.environ[] or secrets manager' },
+        { priority: 2, gap: 'Operational Evidence', issue: '8 controls missing evidence', fix: 'Prepare IAM, monitoring, IR docs' },
+        { priority: 3, gap: 'TLS Enforcement', issue: 'No HSTS/TLS config evidence', fix: 'Configure TLS 1.2+, HSTS' },
+        { priority: 4, gap: 'Monitoring', issue: 'No SIEM/alerting detected', fix: 'Implement centralized logging' }
+      ],
+      limitations: ['Cannot verify runtime behavior', 'Cannot verify production configs', 'Cannot verify operational procedures', 'Pattern matching may have false positives'],
+      files_analyzed: files?.length || 0,
+      files_with_issues: securityIssues.length > 0 ? 1 : 0
+    };
   };
 
   // Load all project files for security analysis
@@ -2550,7 +2659,7 @@ Starting your project again...`
         formData.append('audio', audioBlob, 'recording.webm');
         
         try {
-          const response = await fetch('http://localhost:8000/api/process-speech', {
+          const response = await fetch(apiUrl('api/process-speech'), {
             method: 'POST',
             body: formData
           });
@@ -2694,7 +2803,7 @@ The changes are live in your preview.`
     
     try {
       // Try Chatterbox TTS first
-      const response = await fetch('http://localhost:8000/api/synthesize-chatterbox', {
+      const response = await fetch(apiUrl('api/synthesize-chatterbox'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text, language: 'en' })
@@ -2786,7 +2895,7 @@ The changes are live in your preview.`
         }
       }
       
-      const response = await fetch('http://localhost:8000/api/ai-project-assistant', {
+      const response = await fetch(apiUrl('api/ai-project-assistant'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -3134,6 +3243,43 @@ The changes are live in your preview.`
         </div>
         
         <div style={styles.editorActions}>
+          {/* SOC2 Compliance Button */}
+          <button 
+            style={{
+              padding: '8px 16px',
+              fontSize: '13px',
+              fontWeight: '500',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+              color: '#ffffff',
+              background: 'transparent',
+              border: '1px solid #4ade80',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              ...(isLoadingSOC2 ? { opacity: 0.5 } : {})
+            }}
+            onClick={() => {
+              setShowSOC2Compliance(true);
+              fetchSOC2Compliance();
+            }}
+            disabled={isLoadingSOC2}
+            title="View SOC2 Compliance Report"
+            onMouseEnter={(e) => {
+              e.target.style.background = 'rgba(74, 222, 128, 0.1)';
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.background = 'transparent';
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              <path d="M9 12l2 2 4-4"/>
+            </svg>
+            {isLoadingSOC2 ? 'Loading...' : 'SOC2'}
+          </button>
+
           {hasErrors && (
             <button 
               style={{
@@ -5935,6 +6081,813 @@ The changes are live in your preview.`
           </div>
         </div>
       </div>
+
+      {/* SOC2 Compliance Modal - Detailed View */}
+      {showSOC2Compliance && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.9)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999
+        }}>
+          <div style={{
+            background: '#0a0a0a',
+            border: '1px solid #333',
+            borderRadius: '12px',
+            width: '95%',
+            maxWidth: '1200px',
+            maxHeight: '90vh',
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column'
+          }}>
+            {/* Modal Header */}
+            <div style={{
+              padding: '20px 24px',
+              borderBottom: '1px solid #333',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              background: '#111'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                  <path d="M9 12l2 2 4-4"/>
+                </svg>
+                <div>
+                  <h2 style={{ margin: 0, fontSize: '20px', fontWeight: '600', color: '#fff' }}>
+                    SOC2 Compliance Report
+                  </h2>
+                  <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#888' }}>
+                    {project?.name} • {soc2ComplianceData?.files_analyzed || 0} files analyzed • {new Date().toLocaleDateString()}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowSOC2Compliance(false)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#888',
+                  fontSize: '28px',
+                  cursor: 'pointer',
+                  padding: '4px 8px',
+                  lineHeight: 1
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div style={{
+              flex: 1,
+              overflow: 'auto',
+              padding: '24px'
+            }}>
+              {isLoadingSOC2 ? (
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '60px 20px',
+                  color: '#888'
+                }}>
+                  <div style={{
+                    width: '40px',
+                    height: '40px',
+                    border: '3px solid #333',
+                    borderTopColor: '#4ade80',
+                    borderRadius: '50%',
+                    animation: 'spin 1s linear infinite'
+                  }} />
+                  <p style={{ marginTop: '16px' }}>Performing deep compliance analysis...</p>
+                </div>
+              ) : soc2ComplianceData ? (
+                <>
+                  {/* DISCLAIMER BANNER - CRITICAL */}
+                  {soc2ComplianceData.disclaimer && (
+                    <div style={{
+                      background: 'rgba(251, 191, 36, 0.1)',
+                      border: '1px solid rgba(251, 191, 36, 0.3)',
+                      borderRadius: '8px',
+                      padding: '16px',
+                      marginBottom: '20px'
+                    }}>
+                      <div style={{ fontSize: '14px', fontWeight: '600', color: '#fbbf24', marginBottom: '8px' }}>
+                        {soc2ComplianceData.disclaimer.title}
+                      </div>
+                      <div style={{ fontSize: '13px', color: '#d4d4d4', marginBottom: '12px' }}>
+                        {soc2ComplianceData.disclaimer.text}
+                      </div>
+                      <div style={{ display: 'flex', gap: '24px', fontSize: '12px' }}>
+                        <div>
+                          <span style={{ color: '#4ade80' }}>✓ Can Check:</span>{' '}
+                          <span style={{ color: '#888' }}>{soc2ComplianceData.disclaimer.checks?.join(', ')}</span>
+                        </div>
+                        <div>
+                          <span style={{ color: '#ef4444' }}>✗ Cannot Verify:</span>{' '}
+                          <span style={{ color: '#888' }}>{soc2ComplianceData.disclaimer.cannot_verify?.join(', ')}</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Score Overview Cards */}
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(4, 1fr)',
+                    gap: '16px',
+                    marginBottom: '24px'
+                  }}>
+                    {/* READINESS Score */}
+                    <div style={{
+                      background: '#111',
+                      border: '1px solid #333',
+                      borderRadius: '8px',
+                      padding: '20px',
+                      textAlign: 'center'
+                    }}>
+                      <div style={{
+                        fontSize: '42px',
+                        fontWeight: '700',
+                        color: (soc2ComplianceData.readiness_score || soc2ComplianceData.compliance_score || 0) >= 40 ? '#facc15' : '#ef4444',
+                        lineHeight: 1
+                      }}>
+                        {Math.round(soc2ComplianceData.readiness_score || soc2ComplianceData.compliance_score || 0)}%
+                      </div>
+                      <div style={{ color: '#888', fontSize: '12px', marginTop: '8px' }}>
+                        Readiness Score
+                        <span style={{ color: '#666', fontSize: '10px', display: 'block' }}>
+                          (max {soc2ComplianceData.max_possible_score || 50} from code alone)
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Readiness Level */}
+                    <div style={{
+                      background: '#111',
+                      border: '1px solid #333',
+                      borderRadius: '8px',
+                      padding: '20px',
+                      textAlign: 'center'
+                    }}>
+                      <div style={{
+                        display: 'inline-block',
+                        padding: '6px 14px',
+                        borderRadius: '16px',
+                        fontSize: '13px',
+                        fontWeight: '600',
+                        background: (soc2ComplianceData.readiness_level || soc2ComplianceData.compliance_level) === 'PARTIAL_READINESS' ? 'rgba(250, 204, 21, 0.2)' :
+                                   (soc2ComplianceData.readiness_level || soc2ComplianceData.compliance_level) === 'EARLY_STAGE' ? 'rgba(249, 115, 22, 0.2)' :
+                                   'rgba(239, 68, 68, 0.2)',
+                        color: (soc2ComplianceData.readiness_level || soc2ComplianceData.compliance_level) === 'PARTIAL_READINESS' ? '#facc15' :
+                               (soc2ComplianceData.readiness_level || soc2ComplianceData.compliance_level) === 'EARLY_STAGE' ? '#f97316' : '#ef4444'
+                      }}>
+                        {(soc2ComplianceData.readiness_level || soc2ComplianceData.compliance_level || 'NOT_READY')?.replace(/_/g, ' ')}
+                      </div>
+                      <div style={{ color: '#888', fontSize: '12px', marginTop: '10px' }}>Readiness Level</div>
+                    </div>
+
+                    {/* Audit Ready - Always NO from code alone */}
+                    <div style={{
+                      background: '#111',
+                      border: '1px solid #333',
+                      borderRadius: '8px',
+                      padding: '20px',
+                      textAlign: 'center'
+                    }}>
+                      <div style={{ fontSize: '24px', marginBottom: '4px' }}>
+                        {soc2ComplianceData.audit_ready ? '✅' : '⚠️'}
+                      </div>
+                      <div style={{
+                        fontSize: '13px',
+                        fontWeight: '600',
+                        color: soc2ComplianceData.audit_ready ? '#4ade80' : '#facc15'
+                      }}>
+                        {soc2ComplianceData.audit_ready ? 'Audit Ready' : 'Not Audit Ready'}
+                      </div>
+                    </div>
+
+                    {/* Files Analyzed */}
+                    <div style={{
+                      background: '#111',
+                      border: '1px solid #333',
+                      borderRadius: '8px',
+                      padding: '20px',
+                      textAlign: 'center'
+                    }}>
+                      <div style={{ fontSize: '28px', fontWeight: '600', color: '#fff' }}>
+                        {soc2ComplianceData.files_analyzed || 0}
+                      </div>
+                      <div style={{ color: '#888', fontSize: '12px', marginTop: '4px' }}>
+                        Files Analyzed
+                        {soc2ComplianceData.files_with_issues > 0 && (
+                          <span style={{ color: '#f97316' }}> ({soc2ComplianceData.files_with_issues} with issues)</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Score Breakdown - NEW ACCURATE FORMAT */}
+                  {soc2ComplianceData.score_breakdown && (
+                    <div style={{
+                      background: '#111',
+                      border: '1px solid #333',
+                      borderRadius: '8px',
+                      padding: '20px',
+                      marginBottom: '24px'
+                    }}>
+                      <h3 style={{ margin: '0 0 16px', fontSize: '14px', fontWeight: '600', color: '#fff' }}>
+                        📊 Score Breakdown (Why Code Alone Can't Prove Compliance)
+                      </h3>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '13px' }}>
+                        {/* Code Security Section */}
+                        <div style={{ 
+                          background: '#0a0a0a', 
+                          padding: '12px 16px', 
+                          borderRadius: '6px',
+                          border: '1px solid #222'
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                            <span style={{ color: '#4ade80' }}>🔐 Code Security Analysis</span>
+                            <span style={{ fontWeight: '600' }}>
+                              <span style={{ color: '#fff' }}>{soc2ComplianceData.score_breakdown.code_security?.score || 0}</span>
+                              <span style={{ color: '#666' }}> / {soc2ComplianceData.score_breakdown.code_security?.max || 50}</span>
+                            </span>
+                          </div>
+                          <div style={{ color: '#888', fontSize: '11px' }}>
+                            {soc2ComplianceData.score_breakdown.code_security?.deductions || 'No deductions'}
+                          </div>
+                        </div>
+                        {/* Operational Evidence Section */}
+                        <div style={{ 
+                          background: 'rgba(239, 68, 68, 0.05)', 
+                          padding: '12px 16px', 
+                          borderRadius: '6px',
+                          border: '1px solid rgba(239, 68, 68, 0.2)'
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                            <span style={{ color: '#ef4444' }}>📋 Operational Evidence (Missing)</span>
+                            <span style={{ fontWeight: '600' }}>
+                              <span style={{ color: '#ef4444' }}>{soc2ComplianceData.score_breakdown.operational_evidence?.score || 0}</span>
+                              <span style={{ color: '#666' }}> / {soc2ComplianceData.score_breakdown.operational_evidence?.max || 50}</span>
+                            </span>
+                          </div>
+                          <div style={{ color: '#f97316', fontSize: '11px' }}>
+                            {soc2ComplianceData.score_breakdown.operational_evidence?.reason || 'No evidence artifacts provided'}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Findings Summary */}
+                  <div style={{
+                    background: '#111',
+                    border: '1px solid #333',
+                    borderRadius: '8px',
+                    padding: '20px',
+                    marginBottom: '24px'
+                  }}>
+                    <h3 style={{ margin: '0 0 16px', fontSize: '14px', fontWeight: '600', color: '#fff' }}>
+                      🔍 Security Findings Summary
+                    </h3>
+                    <div style={{ display: 'flex', gap: '32px', flexWrap: 'wrap' }}>
+                      {[
+                        { label: 'Critical', count: soc2ComplianceData.findings_summary?.critical, color: '#ef4444' },
+                        { label: 'High', count: soc2ComplianceData.findings_summary?.high, color: '#f97316' },
+                        { label: 'Medium', count: soc2ComplianceData.findings_summary?.medium, color: '#facc15' },
+                        { label: 'Low', count: soc2ComplianceData.findings_summary?.low, color: '#3b82f6' },
+                      ].map(({ label, count, color }) => (
+                        <div key={label} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ width: '14px', height: '14px', borderRadius: '50%', background: color }} />
+                          <span style={{ color: '#fff', fontSize: '14px' }}>
+                            {label}: <strong style={{ color }}>{count || 0}</strong>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* SOC2 Controls Assessment - NEW ACCURATE FORMAT */}
+                  <div style={{
+                    background: '#111',
+                    border: '1px solid #333',
+                    borderRadius: '8px',
+                    padding: '20px',
+                    marginBottom: '24px'
+                  }}>
+                    <h3 style={{ margin: '0 0 16px', fontSize: '14px', fontWeight: '600', color: '#fff' }}>
+                      🛡️ SOC2 Controls Assessment (Code vs Operational Evidence)
+                    </h3>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      {Object.entries(soc2ComplianceData.controls_assessment || soc2ComplianceData.controls_assessed || {}).map(([controlCode, controlData]) => {
+                        // Handle both old string format and new object format
+                        const isNewFormat = typeof controlData === 'object' && controlData?.ops_status !== undefined;
+                        const controlName = isNewFormat ? controlData?.name : null;
+                        const codeStatus = isNewFormat ? controlData?.code_status : (typeof controlData === 'string' ? controlData : 'NOT_VERIFIED');
+                        const opsStatus = isNewFormat ? controlData?.ops_status : 'MISSING';
+                        const overall = isNewFormat ? controlData?.overall : codeStatus;
+                        const findingsCount = isNewFormat ? controlData?.findings : 0;
+                        const requiredEvidence = isNewFormat ? controlData?.required_evidence : [];
+                        
+                        return (
+                          <div key={controlCode} style={{
+                            background: '#0a0a0a',
+                            borderRadius: '8px',
+                            border: '1px solid #222',
+                            overflow: 'hidden'
+                          }}>
+                            <div style={{
+                              display: 'flex',
+                              alignItems: 'flex-start',
+                              justifyContent: 'space-between',
+                              padding: '14px 16px',
+                              borderBottom: requiredEvidence?.length > 0 ? '1px solid #222' : 'none'
+                            }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                                <span style={{
+                                  padding: '4px 10px',
+                                  background: '#1a1a1a',
+                                  borderRadius: '4px',
+                                  fontFamily: 'monospace',
+                                  fontSize: '13px',
+                                  fontWeight: '600',
+                                  color: '#fff'
+                                }}>
+                                  {controlCode}
+                                </span>
+                                <span style={{ color: '#ccc', fontSize: '13px' }}>
+                                  {controlName || 
+                                   (controlCode === 'CC6.1' ? 'Access Control' :
+                                    controlCode === 'CC6.6' ? 'System Protection' :
+                                    controlCode === 'CC6.7' ? 'Transmission Security' :
+                                    controlCode === 'CC7.1' ? 'Vulnerability Management' :
+                                    controlCode === 'CC7.2' ? 'Security Monitoring' :
+                                    controlCode === 'CC7.3' ? 'Incident Response' :
+                                    controlCode === 'CC8.1' ? 'Change Management' :
+                                    controlCode === 'CC9.1' ? 'Vendor Risk' : 'Control')}
+                                </span>
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                {/* Code Status Badge */}
+                                <span style={{
+                                  padding: '3px 8px',
+                                  borderRadius: '8px',
+                                  fontSize: '10px',
+                                  fontWeight: '500',
+                                  background: codeStatus === 'HAS_ISSUES' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(100, 100, 100, 0.2)',
+                                  color: codeStatus === 'HAS_ISSUES' ? '#ef4444' : '#888'
+                                }}>
+                                  Code: {codeStatus === 'HAS_ISSUES' ? `⚠ ${findingsCount} issues` : '? Not verified'}
+                                </span>
+                                {/* Ops Status Badge */}
+                                <span style={{
+                                  padding: '3px 8px',
+                                  borderRadius: '8px',
+                                  fontSize: '10px',
+                                  fontWeight: '500',
+                                  background: 'rgba(239, 68, 68, 0.2)',
+                                  color: '#ef4444'
+                                }}>
+                                  Ops: ✗ {opsStatus}
+                                </span>
+                                {/* Overall Status Badge */}
+                                <span style={{
+                                  padding: '4px 12px',
+                                  borderRadius: '12px',
+                                  fontSize: '11px',
+                                  fontWeight: '500',
+                                  background: overall === 'FAILING' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(100, 100, 100, 0.2)',
+                                  color: overall === 'FAILING' ? '#ef4444' : '#888'
+                                }}>
+                                  {overall === 'FAILING' ? '✗ Failing' : '? Not Verified'}
+                                </span>
+                              </div>
+                            </div>
+                            
+                            {/* Required Evidence */}
+                            {requiredEvidence?.length > 0 && (
+                              <div style={{ padding: '10px 16px', background: '#0d0d0d' }}>
+                                <div style={{ fontSize: '10px', color: '#888', marginBottom: '6px', textTransform: 'uppercase' }}>
+                                  Required Evidence (Missing):
+                                </div>
+                                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                  {requiredEvidence.map((evidence, idx) => (
+                                    <span key={idx} style={{
+                                      padding: '3px 8px',
+                                      background: '#1a1a1a',
+                                      borderRadius: '4px',
+                                      fontSize: '11px',
+                                      color: '#f97316'
+                                    }}>
+                                      📋 {evidence}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  {/* Detailed Code Vulnerabilities with Snippets */}
+                  {(soc2ComplianceData.code_vulnerabilities?.length > 0 || soc2ComplianceData.detailed_findings?.length > 0) && (
+                    <div style={{
+                      background: '#111',
+                      border: '1px solid #333',
+                      borderRadius: '8px',
+                      padding: '20px',
+                      marginBottom: '24px'
+                    }}>
+                      <h3 style={{ margin: '0 0 16px', fontSize: '14px', fontWeight: '600', color: '#fff' }}>
+                        ⚠️ Code Vulnerabilities Found
+                      </h3>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                        {(soc2ComplianceData.code_vulnerabilities || soc2ComplianceData.detailed_findings || []).slice(0, 15).map((finding, idx) => (
+                          <div key={idx} style={{
+                            background: '#0a0a0a',
+                            borderRadius: '8px',
+                            border: '1px solid #222',
+                            borderLeft: `4px solid ${
+                              finding.severity === 'CRITICAL' ? '#ef4444' :
+                              finding.severity === 'HIGH' ? '#f97316' :
+                              finding.severity === 'MEDIUM' ? '#facc15' : '#3b82f6'
+                            }`,
+                            overflow: 'hidden'
+                          }}>
+                            <div style={{ padding: '14px 16px' }}>
+                              <div style={{
+                                display: 'flex',
+                                alignItems: 'flex-start',
+                                justifyContent: 'space-between',
+                                marginBottom: '10px'
+                              }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                                  <span style={{
+                                    padding: '3px 8px',
+                                    borderRadius: '4px',
+                                    fontSize: '10px',
+                                    fontWeight: '700',
+                                    textTransform: 'uppercase',
+                                    background: finding.severity === 'CRITICAL' ? 'rgba(239, 68, 68, 0.2)' :
+                                               finding.severity === 'HIGH' ? 'rgba(249, 115, 22, 0.2)' :
+                                               finding.severity === 'MEDIUM' ? 'rgba(250, 204, 21, 0.2)' :
+                                               'rgba(59, 130, 246, 0.2)',
+                                    color: finding.severity === 'CRITICAL' ? '#ef4444' :
+                                           finding.severity === 'HIGH' ? '#f97316' :
+                                           finding.severity === 'MEDIUM' ? '#facc15' : '#3b82f6'
+                                  }}>
+                                    {finding.severity}
+                                  </span>
+                                  <span style={{
+                                    padding: '3px 8px',
+                                    background: '#1a1a1a',
+                                    borderRadius: '4px',
+                                    fontSize: '10px',
+                                    color: '#888',
+                                    fontFamily: 'monospace'
+                                  }}>
+                                    {finding.control}
+                                  </span>
+                                  <span style={{ color: '#888', fontSize: '11px' }}>
+                                    {finding.category}
+                                  </span>
+                                </div>
+                                <span style={{
+                                  fontSize: '11px',
+                                  color: '#666',
+                                  fontFamily: 'monospace'
+                                }}>
+                                  {finding.id}
+                                </span>
+                              </div>
+                              
+                              <div style={{ color: '#fff', fontSize: '13px', fontWeight: '500', marginBottom: '8px' }}>
+                                {finding.description}
+                              </div>
+                              
+                              <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                fontSize: '12px',
+                                color: '#666',
+                                marginBottom: '10px'
+                              }}>
+                                <span>📁</span>
+                                <span style={{ fontFamily: 'monospace' }}>{finding.file}</span>
+                                <span>•</span>
+                                <span>Line {finding.line}</span>
+                              </div>
+                              
+                              {finding.code_snippet && (
+                                <pre style={{
+                                  background: '#161616',
+                                  padding: '12px',
+                                  borderRadius: '6px',
+                                  overflow: 'auto',
+                                  fontSize: '11px',
+                                  fontFamily: 'Consolas, Monaco, monospace',
+                                  color: '#d4d4d4',
+                                  margin: '0 0 12px 0',
+                                  maxHeight: '150px',
+                                  border: '1px solid #2a2a2a'
+                                }}>
+                                  {finding.code_snippet}
+                                </pre>
+                              )}
+                              
+                              <div style={{
+                                background: 'rgba(74, 222, 128, 0.1)',
+                                border: '1px solid rgba(74, 222, 128, 0.2)',
+                                borderRadius: '6px',
+                                padding: '10px 12px'
+                              }}>
+                                <div style={{ fontSize: '11px', color: '#888', marginBottom: '4px' }}>
+                                  💡 Remediation:
+                                </div>
+                                <div style={{ fontSize: '12px', color: '#4ade80' }}>
+                                  {finding.remediation}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Control Implementations (Positive Evidence) */}
+                  {soc2ComplianceData.control_implementations && Object.keys(soc2ComplianceData.control_implementations).length > 0 && (
+                    <div style={{
+                      background: '#111',
+                      border: '1px solid #333',
+                      borderRadius: '8px',
+                      padding: '20px',
+                      marginBottom: '24px'
+                    }}>
+                      <h3 style={{ margin: '0 0 16px', fontSize: '14px', fontWeight: '600', color: '#fff' }}>
+                        ✅ Implemented Security Controls (Code Evidence)
+                      </h3>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                        {Object.entries(soc2ComplianceData.control_implementations).map(([control, implementations]) => (
+                          <div key={control} style={{
+                            background: '#0a0a0a',
+                            borderRadius: '8px',
+                            border: '1px solid #222',
+                            borderLeft: '4px solid #4ade80'
+                          }}>
+                            <div style={{ padding: '12px 16px' }}>
+                              <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '8px',
+                                marginBottom: '10px'
+                              }}>
+                                <span style={{
+                                  padding: '3px 8px',
+                                  background: 'rgba(74, 222, 128, 0.2)',
+                                  borderRadius: '4px',
+                                  fontSize: '11px',
+                                  fontWeight: '600',
+                                  color: '#4ade80',
+                                  fontFamily: 'monospace'
+                                }}>
+                                  {control}
+                                </span>
+                                <span style={{ color: '#4ade80', fontSize: '12px' }}>
+                                  {implementations?.length || 0} implementation{implementations?.length !== 1 ? 's' : ''} found
+                                </span>
+                              </div>
+                              
+                              {implementations?.map((impl, idx) => (
+                                <div key={idx} style={{ marginBottom: idx < implementations.length - 1 ? '10px' : 0 }}>
+                                  <div style={{
+                                    fontSize: '12px',
+                                    color: '#ccc',
+                                    marginBottom: '6px'
+                                  }}>
+                                    <span style={{ color: '#4ade80' }}>✓</span> {impl.description}
+                                    <span style={{ color: '#666', marginLeft: '8px', fontFamily: 'monospace', fontSize: '11px' }}>
+                                      ({impl.file}:{impl.line})
+                                    </span>
+                                  </div>
+                                  {impl.snippet && (
+                                    <pre style={{
+                                      background: '#161616',
+                                      padding: '10px 12px',
+                                      borderRadius: '4px',
+                                      overflow: 'auto',
+                                      fontSize: '11px',
+                                      fontFamily: 'Consolas, Monaco, monospace',
+                                      color: '#d4d4d4',
+                                      margin: 0,
+                                      maxHeight: '80px',
+                                      border: '1px solid #2a2a2a'
+                                    }}>
+                                      {impl.snippet}
+                                    </pre>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Critical Gaps Section */}
+                  {soc2ComplianceData.critical_gaps?.length > 0 && (
+                    <div style={{
+                      background: '#111',
+                      border: '1px solid rgba(239, 68, 68, 0.3)',
+                      borderRadius: '8px',
+                      padding: '20px',
+                      marginBottom: '24px'
+                    }}>
+                      <h3 style={{ margin: '0 0 16px', fontSize: '14px', fontWeight: '600', color: '#ef4444' }}>
+                        🚨 Critical Gaps to Address
+                      </h3>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        {soc2ComplianceData.critical_gaps.map((gap, idx) => (
+                          <div key={idx} style={{
+                            display: 'flex',
+                            alignItems: 'flex-start',
+                            gap: '12px',
+                            padding: '12px',
+                            background: '#0a0a0a',
+                            borderRadius: '6px',
+                            border: '1px solid #222'
+                          }}>
+                            <span style={{
+                              padding: '3px 8px',
+                              background: gap.priority === 1 ? 'rgba(239, 68, 68, 0.2)' : 'rgba(249, 115, 22, 0.2)',
+                              borderRadius: '4px',
+                              fontSize: '10px',
+                              fontWeight: '600',
+                              color: gap.priority === 1 ? '#ef4444' : '#f97316'
+                            }}>
+                              P{gap.priority}
+                            </span>
+                            <div style={{ flex: 1 }}>
+                              <div style={{ color: '#fff', fontSize: '13px', fontWeight: '500', marginBottom: '4px' }}>
+                                {gap.gap}
+                              </div>
+                              <div style={{ color: '#888', fontSize: '12px', marginBottom: '4px' }}>
+                                {gap.issue || (gap.count ? `${gap.count} issues found` : '')}
+                              </div>
+                              <div style={{ color: '#4ade80', fontSize: '11px' }}>
+                                💡 {gap.fix}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Limitations Warning */}
+                  {soc2ComplianceData.limitations?.length > 0 && (
+                    <div style={{
+                      background: 'rgba(251, 191, 36, 0.05)',
+                      border: '1px solid rgba(251, 191, 36, 0.2)',
+                      borderRadius: '8px',
+                      padding: '16px',
+                      marginBottom: '24px'
+                    }}>
+                      <div style={{ fontSize: '13px', fontWeight: '600', color: '#fbbf24', marginBottom: '10px' }}>
+                        ⚠️ Assessment Limitations
+                      </div>
+                      <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '12px', color: '#888' }}>
+                        {soc2ComplianceData.limitations.map((limitation, idx) => (
+                          <li key={idx} style={{ marginBottom: '4px' }}>{limitation}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* Trust Services */}
+                  <div style={{
+                    padding: '16px',
+                    background: 'rgba(74, 222, 128, 0.05)',
+                    border: '1px solid rgba(74, 222, 128, 0.2)',
+                    borderRadius: '8px'
+                  }}>
+                    <div style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>
+                      Trust Services Criteria Assessed
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                      {(soc2ComplianceData.trust_services || ['Security']).map((service, idx) => (
+                        <span key={idx} style={{
+                          padding: '4px 12px',
+                          background: 'rgba(74, 222, 128, 0.1)',
+                          border: '1px solid rgba(74, 222, 128, 0.3)',
+                          borderRadius: '12px',
+                          fontSize: '12px',
+                          color: '#4ade80'
+                        }}>
+                          {service}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div style={{
+                  textAlign: 'center',
+                  padding: '40px 20px',
+                  color: '#888'
+                }}>
+                  <p>No compliance data available. Click refresh to analyze the project.</p>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div style={{
+              padding: '16px 24px',
+              borderTop: '1px solid #333',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              background: '#111'
+            }}>
+              <div style={{ fontSize: '12px', color: '#666' }}>
+                SOC2 Readiness Assessment (Code scan only) • {soc2ComplianceData?.files_analyzed || 0} files analyzed • Max score from code: 50%
+              </div>
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <button
+                  onClick={fetchSOC2Compliance}
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: '6px',
+                    border: '1px solid #444',
+                    background: 'transparent',
+                    color: '#fff',
+                    fontSize: '13px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  🔄 Refresh
+                </button>
+                <button
+                  onClick={() => {
+                    const dataStr = JSON.stringify(soc2ComplianceData, null, 2);
+                    const blob = new Blob([dataStr], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `${project?.name}_soc2_compliance.json`;
+                    a.click();
+                  }}
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: '6px',
+                    border: '1px solid #444',
+                    background: 'transparent',
+                    color: '#fff',
+                    fontSize: '13px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  📥 Export JSON
+                </button>
+                <button
+                  onClick={() => setShowSOC2Compliance(false)}
+                  style={{
+                    padding: '8px 20px',
+                    borderRadius: '6px',
+                    border: 'none',
+                    background: '#4ade80',
+                    color: '#000',
+                    fontSize: '13px',
+                    fontWeight: '500',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
     </PageWrapper>
   );

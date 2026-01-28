@@ -12,15 +12,9 @@ export const useRecentProjects = () => {
         setLoading(true);
         
         const response = await fetch(apiUrl('api/project-history'));
-            if (response.ok) break;
-          } catch (err) {
-            lastError = err;
-            continue;
-          }
-        }
         
         if (!response || !response.ok) {
-          throw new Error(lastError?.message || 'Backend server not available');
+          throw new Error('Backend server not available');
         }
         
         const data = await response.json();

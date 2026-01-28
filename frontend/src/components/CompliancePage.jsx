@@ -49,12 +49,12 @@ const CompliancePage = () => {
     try {
       setLoading(true);
       const [docRes, reqRes, patRes, stdRes, catRes, aiRes] = await Promise.all([
-        fetch(`${apiUrl}/api/compliance/documentation`),
-        fetch(`${apiUrl}/api/compliance/requirements`),
-        fetch(`${apiUrl}/api/compliance/code-patterns`),
-        fetch(`${apiUrl}/api/compliance/standards`),
-        fetch(`${apiUrl}/api/compliance/categories`),
-        fetch(`${apiUrl}/api/compliance/ai-enforcement`)
+        fetch(apiUrl('api/compliance/documentation')),
+        fetch(apiUrl('api/compliance/requirements')),
+        fetch(apiUrl('api/compliance/code-patterns')),
+        fetch(apiUrl('api/compliance/standards')),
+        fetch(apiUrl('api/compliance/categories')),
+        fetch(apiUrl('api/compliance/ai-enforcement'))
       ]);
 
       const [docData, reqData, patData, stdData, catData, aiData] = await Promise.all([
@@ -81,7 +81,7 @@ const CompliancePage = () => {
 
   const loadPatternCode = async (patternName) => {
     try {
-      const res = await fetch(`${apiUrl}/api/compliance/code-patterns?pattern_name=${patternName}`);
+      const res = await fetch(apiUrl(`api/compliance/code-patterns?pattern_name=${patternName}`));
       const data = await res.json();
       setPatternCode(data.code);
       setSelectedPattern(patternName);

@@ -4,11 +4,13 @@
  */
 
 class ErrorInterceptor {
-  constructor(projectSlug, userId) {
+  constructor(projectSlug, userId, apiBaseUrl = null) {
     this.projectSlug = projectSlug;
     this.userId = userId;
     this.reportedErrors = new Set();
     this.isEnabled = true;
+    // Use provided URL, window.API_BASE_URL, or fall back to default
+    this.apiBaseUrl = apiBaseUrl || window.API_BASE_URL || 'http://localhost:8000';
     
     this.init();
   }
@@ -66,7 +68,7 @@ class ErrorInterceptor {
     this.showAutoFixNotification(errorMessage);
     
     try {
-      const response = await fetch('http://localhost:8000/api/auto-fix-errors', {
+      const response = await fetch(`${this.apiBaseUrl}/api/auto-fix-errors`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

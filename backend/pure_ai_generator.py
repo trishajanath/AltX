@@ -1209,6 +1209,8 @@ class PureAIGenerator:
 		# NO local directory creation - everything goes to S3
 		files_created: List[str] = []
 		errors_encountered: List[str] = []
+		# Track file contents in memory for compliance scanning (NO LOCAL FILES)
+		all_file_contents: Dict[str, str] = {}
 		
 		# Generate backend files directly to S3
 		backend_path = project_path / "backend"  # Virtual path for S3 key construction
@@ -1261,9 +1263,11 @@ class PureAIGenerator:
 		# Write all backend files with parallel validation directly to S3
 		if backend_file_tasks:
 			backend_written = self._write_files_parallel(backend_file_tasks, project_name)
-			for file_path in backend_written:
+			for file_path, content in backend_written.items():
 				relative_path = Path(file_path).relative_to(project_path)
-				files_created.append(str(relative_path).replace("\\", "/"))
+				rel_path_str = str(relative_path).replace("\\", "/")
+				files_created.append(rel_path_str)
+				all_file_contents[rel_path_str] = content  # Track content for compliance
 			print(f"☁️ Uploaded all {len(backend_written)} backend files to S3!")
 			
 		# Generate frontend files directly to S3
@@ -1547,10 +1551,12 @@ export const cardVariants = {
 			# Write frontend files with parallel validation directly to S3
 			frontend_written = self._write_files_parallel(frontend_file_tasks, project_name)
 			
-			# Add to files_created list
-			for file_path in frontend_written:
+			# Add to files_created list and track content
+			for file_path, content in frontend_written.items():
 				relative_path = Path(file_path).relative_to(project_path)
-				files_created.append(str(relative_path).replace("\\", "/"))
+				rel_path_str = str(relative_path).replace("\\", "/")
+				files_created.append(rel_path_str)
+				all_file_contents[rel_path_str] = content  # Track content for compliance
 			
 			# Add supporting files if they were created successfully
 			if supporting_success and not isinstance(supporting_success, Exception):
@@ -1708,17 +1714,163 @@ export const cardVariants = {
 		except Exception as e:
 			print(f"⚠️ Failed to generate SDRs (non-critical): {e}")
 		
-		# Save validation report
-		validation_report_path = project_path / "VALIDATION_REPORT.json"
-		with open(validation_report_path, 'w', encoding='utf-8') as f:
-			json.dump(validation_summary, f, indent=2)
+		# Save validation report TO S3 (NO LOCAL FILES)
+		if self.s3_uploader:
+			self.s3_uploader(
+				project_name,
+				[{
+					'path': 'VALIDATION_REPORT.json',
+					'content': json.dumps(validation_summary, indent=2)
+				}],
+				self.user_id
+			)
+			files_created.append("VALIDATION_REPORT.json")
+			print(f"☁️ Validation report uploaded to S3")
 		
-		# Save design system report  
-		design_report_path = project_path / "DESIGN_SYSTEM.json"
-		with open(design_report_path, 'w', encoding='utf-8') as f:
-			json.dump(project_report, f, indent=2)
+		# Save design system report TO S3 (NO LOCAL FILES)
+		if self.s3_uploader:
+			self.s3_uploader(
+				project_name,
+				[{
+					'path': 'DESIGN_SYSTEM.json',
+					'content': json.dumps(project_report, indent=2)
+				}],
+				self.user_id
+			)
+			files_created.append("DESIGN_SYSTEM.json")
+			print(f"☁️ Design system report uploaded to S3")
 		
-		print(f"📋 Reports saved: {validation_report_path}, {design_report_path}")
+		# ═══════════════════════════════════════════════════════════════════════════
+		# SOC2 COMPLIANCE VERIFICATION AND AUDIT DOCUMENTATION
+		# ═══════════════════════════════════════════════════════════════════════════
+		try:
+			print(f"\n🔒 SOC2 COMPLIANCE VERIFICATION")
+			print(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+			
+			from soc2_code_compliance import SOC2CodeComplianceEngine, verify_and_document_compliance
+			from soc2_audit_documentation import generate_project_audit_documentation
+			
+			# Use in-memory file contents for compliance scanning (NO LOCAL FILE READS)
+			compliance_files = {
+				fp: content 
+				for fp, content in all_file_contents.items()
+				if any(fp.endswith(ext) for ext in ['.py', '.js', '.jsx', '.ts', '.tsx', '.json'])
+			}
+			
+			if compliance_files:
+				print(f"📋 Scanning {len(compliance_files)} files for SOC2 compliance...")
+				
+				# Initialize compliance engine
+				compliance_engine = SOC2CodeComplianceEngine()
+				
+				# Verify compliance and auto-fix issues
+				compliance_result, fixed_files = await compliance_engine.verify_generated_code(
+					project_name=project_name,
+					files_content=compliance_files,
+					auto_fix=True
+				)
+				
+				print(f"✅ Compliance Score: {compliance_result.compliance_score:.1f}%")
+				print(f"📊 Compliance Level: {compliance_result.compliance_level.value.upper()}")
+				print(f"🔍 Findings: {len(compliance_result.security_findings)} total")
+				print(f"   • Critical: {compliance_result.critical_findings}")
+				print(f"   • High: {compliance_result.high_findings}")
+				print(f"   • Medium: {compliance_result.medium_findings}")
+				print(f"   • Low: {compliance_result.low_findings}")
+				print(f"✏️ Auto-Fixed: {compliance_result.auto_fixes_applied} issues")
+				print(f"📝 Manual Required: {compliance_result.manual_fixes_required} issues")
+				
+				# Upload fixed files directly to S3 (NO LOCAL WRITES)
+				files_fixed = []
+				for file_path, fixed_content in fixed_files.items():
+					if compliance_files.get(file_path) != fixed_content:
+						files_fixed.append(file_path)
+						# Update in-memory tracking
+						all_file_contents[file_path] = fixed_content
+				
+				if files_fixed and self.s3_uploader:
+					print(f"☁️ Uploading {len(files_fixed)} fixed files to S3...")
+					fixed_file_data = [
+						{'path': fp, 'content': fixed_files[fp]}
+						for fp in files_fixed
+					]
+					self.s3_uploader(project_name, fixed_file_data, self.user_id)
+					print(f"☁️ Uploaded fixed files to S3")
+				
+				# Generate audit documentation
+				print(f"\n📄 GENERATING SOC2 AUDIT DOCUMENTATION")
+				print(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+				
+				audit_doc = compliance_engine.generate_audit_documentation(
+					compliance_result,
+					include_remediation_plan=True
+				)
+				
+				# Generate audit documentation content IN MEMORY (NO LOCAL FILES)
+				from dataclasses import asdict
+				audit_md_content = compliance_engine._format_as_markdown(audit_doc)
+				audit_json_content = json.dumps(asdict(audit_doc), indent=2, default=str)
+				
+				print(f"📋 Generated audit reports in memory")
+				
+				# Upload compliance reports directly to S3
+				if self.s3_uploader:
+					compliance_summary = {
+						"project": project_name,
+						"assessment_id": compliance_result.assessment_id,
+						"assessment_date": compliance_result.assessment_date,
+						"compliance_score": compliance_result.compliance_score,
+						"compliance_level": compliance_result.compliance_level.value,
+						"total_findings": len(compliance_result.security_findings),
+						"critical_findings": compliance_result.critical_findings,
+						"high_findings": compliance_result.high_findings,
+						"medium_findings": compliance_result.medium_findings,
+						"low_findings": compliance_result.low_findings,
+						"auto_fixes_applied": compliance_result.auto_fixes_applied,
+						"manual_fixes_required": compliance_result.manual_fixes_required,
+						"controls_assessed": compliance_result.controls_assessed,
+						"gaps_identified": [
+							{
+								"gap_id": g.gap_id,
+								"control": g.control_code,
+								"severity": g.severity,
+								"description": g.description,
+								"remediation_steps": g.remediation_steps
+							}
+							for g in compliance_result.compliance_gaps
+						]
+					}
+					
+					self.s3_uploader(
+						project_name,
+						[
+							{'path': 'compliance/SOC2_AUDIT_REPORT.md', 'content': audit_md_content},
+							{'path': 'compliance/SOC2_AUDIT_REPORT.json', 'content': audit_json_content},
+							{'path': 'compliance/COMPLIANCE_SUMMARY.json', 'content': json.dumps(compliance_summary, indent=2)}
+						],
+						self.user_id
+					)
+					)
+					
+					files_created.extend([
+						"compliance/SOC2_AUDIT_REPORT.md",
+						"compliance/SOC2_AUDIT_REPORT.json", 
+						"compliance/COMPLIANCE_SUMMARY.json"
+					])
+					print(f"☁️ Uploaded SOC2 compliance documentation to S3")
+				
+				print(f"\n✅ SOC2 COMPLIANCE VERIFICATION COMPLETE")
+				print(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+			else:
+				print(f"⚠️ No files available for compliance scanning")
+				
+		except ImportError as e:
+			print(f"⚠️ SOC2 compliance module not available: {e}")
+		except Exception as e:
+			print(f"⚠️ SOC2 compliance verification failed (non-critical): {e}")
+			import traceback
+			traceback.print_exc()
+		
 		print(f"\n🚀 PROJECT READY! Your Awwwards-inspired {project_name} is now generating stunning, award-worthy designs!")
 		
 		return files_created
@@ -1907,30 +2059,46 @@ const loadFromStorage = (key, defaultValue = null) => {{
 }};
 '''
 		
-		# Add cart functionality for e-commerce apps
+		# Add cart functionality for e-commerce apps - NOW WITH REAL API INTEGRATION
 		if any(word in app_type for word in ['shop', 'store', 'ecommerce', 'product', 'cart']):
 			essential_code += f'''
-// === RICH MOCK PRODUCT DATA (Fallback for E-Commerce) ===
-const MOCK_PRODUCTS = [
-  {{ id: 1, name: "Wireless Bluetooth Headphones", price: 79.99, originalPrice: 129.99, rating: 4.5, reviews: 2847, image: "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=400&h=400&q=80", category: "Electronics", badge: "Best Seller", description: "Premium sound quality with active noise cancellation" }},
-  {{ id: 2, name: "Smart Fitness Watch Pro", price: 199.99, originalPrice: 249.99, rating: 4.7, reviews: 1523, image: "https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=400&h=400&q=80", category: "Electronics", badge: "Top Rated", description: "Track your health and fitness goals" }},
-  {{ id: 3, name: "Premium Leather Backpack", price: 89.99, rating: 4.3, reviews: 892, image: "https://images.unsplash.com/photo-1553062407-98eeb64c6a62?w=400&h=400&q=80", category: "Fashion", description: "Stylish and durable for everyday use" }},
-  {{ id: 4, name: "Minimalist Desk Lamp", price: 49.99, rating: 4.6, reviews: 1205, image: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&h=400&q=80", category: "Home", badge: "New", description: "Modern design with adjustable brightness" }},
-  {{ id: 5, name: "Organic Coffee Beans 1kg", price: 24.99, rating: 4.8, reviews: 3421, image: "https://images.unsplash.com/photo-1559056199-641a0ac8b55e?w=400&h=400&q=80", category: "Food & Drink", description: "Premium roasted arabica beans" }},
-  {{ id: 6, name: "Yoga Mat Premium", price: 39.99, rating: 4.4, reviews: 756, image: "https://images.unsplash.com/photo-1601925260368-ae2f83cf8b7f?w=400&h=400&q=80", category: "Sports", description: "Extra thick for comfort and stability" }},
-  {{ id: 7, name: "Stainless Steel Water Bottle", price: 29.99, rating: 4.5, reviews: 2103, image: "https://images.unsplash.com/photo-1602143407151-7111542de6e8?w=400&h=400&q=80", category: "Sports", description: "Keep drinks cold for 24 hours" }},
-  {{ id: 8, name: "Wireless Charging Pad", price: 34.99, originalPrice: 49.99, rating: 4.2, reviews: 1876, image: "https://images.unsplash.com/photo-1586816879360-004f5b0c51e5?w=400&h=400&q=80", category: "Electronics", badge: "Sale", description: "Fast charging for all Qi devices" }},
-  {{ id: 9, name: "Aromatherapy Diffuser Set", price: 44.99, rating: 4.6, reviews: 945, image: "https://images.unsplash.com/photo-1608571423902-eed4a5ad8108?w=400&h=400&q=80", category: "Home", description: "Essential oil diffuser with LED lights" }},
-  {{ id: 10, name: "Running Shoes Ultra", price: 129.99, originalPrice: 159.99, rating: 4.7, reviews: 2567, image: "https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=400&h=400&q=80", category: "Sports", badge: "Popular", description: "Lightweight and breathable for long runs" }},
-  {{ id: 11, name: "Mechanical Keyboard RGB", price: 149.99, rating: 4.8, reviews: 1834, image: "https://images.unsplash.com/photo-1511467687858-23d96c32e4ae?w=400&h=400&q=80", category: "Electronics", description: "Cherry MX switches with RGB backlighting" }},
-  {{ id: 12, name: "Ceramic Plant Pot Set", price: 32.99, rating: 4.4, reviews: 623, image: "https://images.unsplash.com/photo-1485955900006-10f4d324d411?w=400&h=400&q=80", category: "Home", description: "Set of 3 minimalist plant pots" }},
-  {{ id: 13, name: "Portable Bluetooth Speaker", price: 59.99, rating: 4.5, reviews: 1456, image: "https://images.unsplash.com/photo-1608043152269-423dbba4e7e1?w=400&h=400&q=80", category: "Electronics", description: "Waterproof with 20-hour battery life" }},
-  {{ id: 14, name: "Vintage Sunglasses", price: 45.99, rating: 4.3, reviews: 789, image: "https://images.unsplash.com/photo-1572635196237-14b3f281503f?w=400&h=400&q=80", category: "Fashion", description: "Classic style with UV protection" }},
-  {{ id: 15, name: "Scented Candle Collection", price: 28.99, rating: 4.6, reviews: 1102, image: "https://images.unsplash.com/photo-1602028915047-37269d1a73f7?w=400&h=400&q=80", category: "Home", description: "Set of 4 relaxing scents" }},
-  {{ id: 16, name: "Smart Home Hub", price: 89.99, rating: 4.4, reviews: 934, image: "https://images.unsplash.com/photo-1558089687-f282ffcbc126?w=400&h=400&q=80", category: "Electronics", badge: "Smart Home", description: "Control all your smart devices" }},
-];
-
+// === E-COMMERCE: REAL API INTEGRATION (NO MOCK DATA!) ===
 const CATEGORIES = ["All", "Electronics", "Fashion", "Home", "Sports", "Food & Drink"];
+
+// Fetch products from REAL backend API
+const useProducts = (category = null) => {{
+  const [products, setProducts] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState(null);
+  
+  React.useEffect(() => {{
+    const fetchProducts = async () => {{
+      setLoading(true);
+      setError(null);
+      
+      try {{
+        const endpoint = category && category !== 'All' 
+          ? `${{API_BASE}}/products?category=${{encodeURIComponent(category)}}`
+          : `${{API_BASE}}/products`;
+        
+        const response = await fetch(endpoint);
+        if (!response.ok) throw new Error(`HTTP ${{response.status}}`);
+        
+        const result = await response.json();
+        setProducts(result.data || result || []);
+      }} catch (err) {{
+        console.error('Failed to fetch products:', err);
+        setError('Unable to load products. Please try again.');
+      }} finally {{
+        setLoading(false);
+      }}
+    }};
+    
+    fetchProducts();
+  }}, [category]);
+  
+  return {{ products, loading, error, refetch: () => setLoading(true) }};
+}};
 
 // === E-COMMERCE CART FUNCTIONALITY ===
 const useCartState = () => {{
@@ -1973,12 +2141,21 @@ const useCartState = () => {{
       created_at: new Date().toISOString()
     }};
     
-    const result = await db.create('orders', orderData);
-    if (result.success) {{
-      clearCart();
-      showNotification('Order placed successfully!');
-      return result.data;
-    }} else {{
+    try {{
+      const response = await fetch(`${{API_BASE}}/orders`, {{
+        method: 'POST',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify(orderData)
+      }});
+      
+      if (response.ok) {{
+        clearCart();
+        showNotification('Order placed successfully!');
+        return await response.json();
+      }} else {{
+        throw new Error('Order failed');
+      }}
+    }} catch (err) {{
       showNotification('Failed to place order', 'error');
       return null;
     }}
@@ -1988,42 +2165,42 @@ const useCartState = () => {{
   
   return {{ items, addItem, updateQuantity, removeItem, clearCart, checkout, total, count: items.reduce((sum, i) => sum + i.quantity, 0) }};
 }};
-
-// Fetch products from database with fallback to mock data
-const useProducts = (category = null) => {{
-  const [products, setProducts] = React.useState([]);
+'''
+		# Add generic data fetching for non-ecommerce apps
+		else:
+			essential_code += f'''
+// === GENERIC DATA FETCHING HOOK (REAL API) ===
+const useData = (endpoint) => {{
+  const [data, setData] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState(null);
   
   React.useEffect(() => {{
-    const fetchProducts = async () => {{
+    const fetchData = async () => {{
       setLoading(true);
-      const url = category 
-        ? `${{API_BASE}}/${{PROJECT_NAME}}/products?category=${{encodeURIComponent(category)}}`
-        : `${{API_BASE}}/${{PROJECT_NAME}}/products`;
+      setError(null);
       
       try {{
-        const response = await fetch(url);
+        const response = await fetch(`${{API_BASE}}/${{endpoint}}`);
+        if (!response.ok) throw new Error(`HTTP ${{response.status}}`);
+        
         const result = await response.json();
-        if (result.success && result.data.length > 0) {{
-          setProducts(result.data);
-        }} else {{
-          // Use mock data as fallback
-          setProducts(MOCK_PRODUCTS);
-        }}
-      }} catch (error) {{
-        console.warn('Using mock products (API unavailable)');
-        setProducts(MOCK_PRODUCTS);
+        setData(result.data || result || []);
+      }} catch (err) {{
+        console.error(`Failed to fetch ${{endpoint}}:`, err);
+        setError(`Unable to load data. Please try again.`);
       }} finally {{
         setLoading(false);
       }}
     }};
-    fetchProducts();
-  }}, [category]);
+    
+    fetchData();
+  }}, [endpoint]);
   
-  return {{ products, loading }};
+  return {{ data, loading, error }};
 }};
 '''
-		
+
 		# Add auth functionality for all apps - INTEGRATED WITH MONGODB BACKEND
 		essential_code += '''
 // === AUTHENTICATION FUNCTIONALITY (MONGODB BACKEND INTEGRATED) ===
@@ -5075,6 +5252,117 @@ User requested LIGHT/CLEAN theme. You MUST use:
 {ml_integration_section}
 {llm_integration_section}
 
+🚨🚨🚨 CRITICAL: USE REAL BACKEND API - NO MOCK DATA! 🚨🚨🚨
+═══════════════════════════════════════════════════════════════════════
+This application connects to a REAL Dockerized FastAPI backend.
+DO NOT use hardcoded mock data arrays. ALL data must come from API calls!
+
+⛔⛔⛔ ABSOLUTELY FORBIDDEN - MOCK DATA PATTERNS ⛔⛔⛔
+```jsx
+// ❌ NEVER DO THIS - hardcoded mock arrays
+const MOCK_USERS = [{{ id: 1, name: 'Fake User' }}];
+const MOCK_PRODUCTS = [{{ id: 1, name: 'Fake Product', price: 99 }}];
+const mockData = [/* any hardcoded data */];
+const users = [{{ id: 1, name: 'Test' }}]; // ❌ Static data
+const products = [{{ id: 1, name: 'Item', price: 50 }}]; // ❌ Static data
+```
+
+✅✅✅ REQUIRED PATTERN - REAL API CALLS ✅✅✅
+
+The sandbox backend runs at: window.SANDBOX_API_URL (injected by sandbox)
+Fallback to: http://localhost:8000/api
+
+REQUIRED: Include this API configuration at the TOP of your App.jsx:
+```jsx
+// API Configuration - connects to Dockerized FastAPI backend
+const API_BASE = window.SANDBOX_API_URL || 'http://localhost:8000/api';
+
+// Generic API helper with error handling
+const api = {{
+  get: async (endpoint) => {{
+    const response = await fetch(`${{API_BASE}}/${{endpoint}}`);
+    if (!response.ok) throw new Error(`API Error: ${{response.status}}`);
+    return response.json();
+  }},
+  post: async (endpoint, data) => {{
+    const response = await fetch(`${{API_BASE}}/${{endpoint}}`, {{
+      method: 'POST',
+      headers: {{ 'Content-Type': 'application/json' }},
+      body: JSON.stringify(data)
+    }});
+    return response.json();
+  }},
+  put: async (endpoint, data) => {{
+    const response = await fetch(`${{API_BASE}}/${{endpoint}}`, {{
+      method: 'PUT',
+      headers: {{ 'Content-Type': 'application/json' }},
+      body: JSON.stringify(data)
+    }});
+    return response.json();
+  }},
+  delete: async (endpoint) => {{
+    const response = await fetch(`${{API_BASE}}/${{endpoint}}`, {{ method: 'DELETE' }});
+    return response.json();
+  }}
+}};
+```
+
+REQUIRED: Fetch data on component mount using useEffect:
+```jsx
+const [products, setProducts] = useState([]);
+const [users, setUsers] = useState([]);
+const [loading, setLoading] = useState(true);
+const [error, setError] = useState(null);
+
+useEffect(() => {{
+  const fetchData = async () => {{
+    setLoading(true);
+    try {{
+      // Fetch from REAL backend API
+      const productsData = await api.get('products');
+      setProducts(productsData.data || productsData);
+      
+      const usersData = await api.get('users');
+      setUsers(usersData.data || usersData);
+    }} catch (err) {{
+      console.error('API Error:', err);
+      setError('Failed to load data from backend');
+    }} finally {{
+      setLoading(false);
+    }}
+  }};
+  fetchData();
+}}, []);
+```
+
+REQUIRED: Show loading and error states:
+```jsx
+if (loading) return <Loading />;
+if (error) return <div className="text-red-500 p-4">{{error}}</div>;
+```
+
+🎯 BACKEND ENDPOINTS AVAILABLE (Generated FastAPI):
+- GET  /api/products       - List all products
+- GET  /api/products/{{id}} - Get single product  
+- POST /api/products       - Create product
+- PUT  /api/products/{{id}} - Update product
+- DELETE /api/products/{{id}} - Delete product
+- GET  /api/users          - List users
+- POST /api/users          - Create user
+- POST /api/auth/login     - User login
+- POST /api/auth/register  - User registration
+- GET  /api/orders         - List orders
+- POST /api/orders         - Create order
+
+🚨 VERIFICATION CHECKLIST (Must pass all):
+□ NO hardcoded data arrays (MOCK_*, mockData, static arrays)
+□ API_BASE defined at top of file
+□ All data fetched via api.get() in useEffect
+□ Loading state shown while fetching
+□ Error state shown on fetch failure
+□ Create/Update/Delete use api.post/put/delete
+═══════════════════════════════════════════════════════════════════════
+
 🌐 BROWSER SANDBOX ENVIRONMENT - CRITICAL REQUIREMENTS:
 ════════════════════════════════════════════════════════
 This code runs in a BROWSER SANDBOX with globals pre-defined.
@@ -6431,16 +6719,18 @@ EACH PAGE MUST HAVE UNIQUE, SUBSTANTIAL CONTENT:
    
    const fetchProducts = async () => {{
      setLoading(true);
+     setError(null);
      try {{
        const response = await fetch(`${{API_BASE}}/${{PROJECT_NAME}}/products`);
        const result = await response.json();
        if (result.success) {{
          setProducts(result.data);
+       }} else {{
+         setError('No products available');
        }}
      }} catch (error) {{
        console.error('Failed to fetch products:', error);
-       // Fallback to mock data if API fails
-       setProducts(MOCK_PRODUCTS);
+       setError('Failed to load products from server');
      }} finally {{
        setLoading(false);
      }}
@@ -6491,29 +6781,42 @@ EACH PAGE MUST HAVE UNIQUE, SUBSTANTIAL CONTENT:
    }};
    ```
    
-   IMPORTANT: Always have RICH FALLBACK MOCK DATA in case API is unavailable (minimum 12-20 products):
-   ```jsx
-   const MOCK_PRODUCTS = [
-     {{ id: 1, name: "Wireless Bluetooth Headphones", price: 79.99, originalPrice: 129.99, rating: 4.5, reviews: 2847, image: "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=400&h=400&q=80", category: "Electronics", badge: "Best Seller" }},
-     {{ id: 2, name: "Smart Fitness Watch Pro", price: 199.99, originalPrice: 249.99, rating: 4.7, reviews: 1523, image: "https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=400&h=400&q=80", category: "Electronics", badge: "Top Rated" }},
-     {{ id: 3, name: "Premium Leather Backpack", price: 89.99, rating: 4.3, reviews: 892, image: "https://images.unsplash.com/photo-1553062407-98eeb64c6a62?w=400&h=400&q=80", category: "Fashion" }},
-     {{ id: 4, name: "Minimalist Desk Lamp", price: 49.99, rating: 4.6, reviews: 1205, image: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&h=400&q=80", category: "Home", badge: "New" }},
-     {{ id: 5, name: "Organic Coffee Beans 1kg", price: 24.99, rating: 4.8, reviews: 3421, image: "https://images.unsplash.com/photo-1559056199-641a0ac8b55e?w=400&h=400&q=80", category: "Food & Drink" }},
-     {{ id: 6, name: "Yoga Mat Premium", price: 39.99, rating: 4.4, reviews: 756, image: "https://images.unsplash.com/photo-1601925260368-ae2f83cf8b7f?w=400&h=400&q=80", category: "Sports" }},
-     {{ id: 7, name: "Stainless Steel Water Bottle", price: 29.99, rating: 4.5, reviews: 2103, image: "https://images.unsplash.com/photo-1602143407151-7111542de6e8?w=400&h=400&q=80", category: "Sports" }},
-     {{ id: 8, name: "Wireless Charging Pad", price: 34.99, originalPrice: 49.99, rating: 4.2, reviews: 1876, image: "https://images.unsplash.com/photo-1586816879360-004f5b0c51e5?w=400&h=400&q=80", category: "Electronics", badge: "Sale" }},
-     {{ id: 9, name: "Aromatherapy Diffuser Set", price: 44.99, rating: 4.6, reviews: 945, image: "https://images.unsplash.com/photo-1608571423902-eed4a5ad8108?w=400&h=400&q=80", category: "Home" }},
-     {{ id: 10, name: "Running Shoes Ultra", price: 129.99, originalPrice: 159.99, rating: 4.7, reviews: 2567, image: "https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=400&h=400&q=80", category: "Sports", badge: "Popular" }},
-     {{ id: 11, name: "Mechanical Keyboard RGB", price: 149.99, rating: 4.8, reviews: 1834, image: "https://images.unsplash.com/photo-1511467687858-23d96c32e4ae?w=400&h=400&q=80", category: "Electronics" }},
-     {{ id: 12, name: "Ceramic Plant Pot Set", price: 32.99, rating: 4.4, reviews: 623, image: "https://images.unsplash.com/photo-1485955900006-10f4d324d411?w=400&h=400&q=80", category: "Home" }},
-     {{ id: 13, name: "Portable Bluetooth Speaker", price: 59.99, rating: 4.5, reviews: 1456, image: "https://images.unsplash.com/photo-1608043152269-423dbba4e7e1?w=400&h=400&q=80", category: "Electronics" }},
-     {{ id: 14, name: "Vintage Sunglasses", price: 45.99, rating: 4.3, reviews: 789, image: "https://images.unsplash.com/photo-1572635196237-14b3f281503f?w=400&h=400&q=80", category: "Fashion" }},
-     {{ id: 15, name: "Scented Candle Collection", price: 28.99, rating: 4.6, reviews: 1102, image: "https://images.unsplash.com/photo-1602028915047-37269d1a73f7?w=400&h=400&q=80", category: "Home" }},
-     {{ id: 16, name: "Smart Home Hub", price: 89.99, rating: 4.4, reviews: 934, image: "https://images.unsplash.com/photo-1558089687-f282ffcbc126?w=400&h=400&q=80", category: "Electronics", badge: "Smart Home" }},
-   ];
+   ❌ NEVER USE MOCK DATA! The backend API is ALWAYS available.
+   ✅ ALWAYS fetch real data from the backend using the api helper
    
-   // Categories for filtering
-   const CATEGORIES = ["All", "Electronics", "Fashion", "Home", "Sports", "Food & Drink"];
+   PROPER DATA LOADING PATTERN (REQUIRED):
+   ```jsx
+   const [products, setProducts] = useState([]);
+   const [loading, setLoading] = useState(true);
+   const [error, setError] = useState(null);
+   
+   useEffect(() => {{
+     const loadProducts = async () => {{
+       try {{
+         const response = await fetch(`${{API_BASE}}/products`);
+         const data = await response.json();
+         setProducts(data.data || data || []);
+       }} catch (err) {{
+         setError('Failed to load products');
+       }} finally {{
+         setLoading(false);
+       }}
+     }};
+     loadProducts();
+   }}, []);
+   
+   // Show loading state
+   if (loading) return <div className="flex justify-center items-center h-64"><div className="animate-spin h-12 w-12 border-4 border-blue-500 border-t-transparent rounded-full"/></div>;
+   
+   // Show error state
+   if (error) return <div className="text-red-500 p-4">{{error}}</div>;
+   
+   // Show empty state if no data
+   if (products.length === 0) return <div className="text-gray-500 p-4">No products available</div>;
+   ```
+   
+   // Categories should be derived from actual product data:
+   const CATEGORIES = ["All", ...new Set(products.map(p => p.category).filter(Boolean))];
    ```
    
    - Authentication headers: Authorization: Bearer {{token}}
@@ -8508,9 +8811,10 @@ const handleLogout = () => {{
   showNotification('Logged out successfully');
 }};
 
-// Fetch products from backend
+// Fetch products from backend - NO MOCK FALLBACK
 const fetchProducts = async () => {{
   setLoading(true);
+  setError(null);
   try {{
     // Try project-specific API first
     let response = await fetch(`${{PROJECT_API}}/products`);
@@ -8520,11 +8824,16 @@ const fetchProducts = async () => {{
       response = await fetch(`${{DB_API}}/${{PROJECT_NAME}}/products`);
     }}
     
+    if (!response.ok) {{
+      throw new Error(`HTTP ${{response.status}}`);
+    }}
+    
     const data = await response.json();
-    setProducts(data.data || data || MOCK_PRODUCTS);
+    setProducts(data.data || data || []);
   }} catch (error) {{
-    console.warn('API unavailable, using mock data');
-    setProducts(MOCK_PRODUCTS);
+    console.error('Failed to fetch products:', error);
+    setError('Unable to load products. Please check backend connection.');
+    setProducts([]);
   }} finally {{
     setLoading(false);
   }}

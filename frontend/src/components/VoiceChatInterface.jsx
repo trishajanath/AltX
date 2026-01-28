@@ -892,7 +892,7 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
       setIsLoadingHistory(true);
       setHistoryError(null);
       
-      const response = await authenticatedFetch('http://localhost:8000/api/project-history');
+      const response = await authenticatedFetch(apiUrl('api/project-history'));
       
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -935,7 +935,7 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
 
   // Handle preview project - open in new tab
   const handlePreviewProject = (project) => {
-    const previewUrl = project.preview_url || `http://localhost:8000${buildAuthenticatedPreviewUrl(project.slug)}`;
+    const previewUrl = project.preview_url || `${apiUrl('')}${buildAuthenticatedPreviewUrl(project.slug)}`;
     window.open(previewUrl, '_blank', 'noopener,noreferrer');
   };
 
@@ -1241,13 +1241,13 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
         });
         
         // Use the file-enabled endpoint - don't set Content-Type header, browser will set it with boundary
-        response = await authenticatedFetch('http://localhost:8000/api/chat-with-files', {
+        response = await authenticatedFetch(apiUrl('api/chat-with-files'), {
           method: 'POST',
           body: formData
         });
       } else {
         // Standard JSON request without files
-        response = await authenticatedFetch('http://localhost:8000/api/chat', {
+        response = await authenticatedFetch(apiUrl('api/chat'), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { apiUrl } from '../config/api';
+import { apiUrl, wsUrl } from '../config/api';
 import PageWrapper from "./PageWrapper";
 import usePreventZoom from "./usePreventZoom";
 import MonacoProjectEditor from "./MonacoProjectEditor";
@@ -118,7 +118,7 @@ const ProjectBuilder = () => {
     setShowMonacoEditor(true);
     
     // Setup WebSocket connection for real-time updates
-    const ws = new WebSocket(`ws://localhost:8000/ws/project/${projectName}`);
+    const ws = new WebSocket(wsUrl(`ws/project/${projectName}`));
     
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);

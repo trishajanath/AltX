@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { ArrowRight } from 'lucide-react'; // Assuming you have lucide-react installed
 import PageWrapper from './PageWrapper';
 import usePreventZoom from './usePreventZoom';
+import { apiUrl } from '../config/api';
 
 const DeployPage = ({ setScanResult }) => {
     usePreventZoom();
@@ -43,7 +44,7 @@ const DeployPage = ({ setScanResult }) => {
                 setDeployLogs(currentLogs);
             }
 
-            const response = await fetch('http://localhost:8000/api/deploy', {
+            const response = await fetch(apiUrl('api/deploy'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ repo_url: repoUrl.trim() }),

@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+!README.md
+
+# Local development files
+.env
+.env.local
+*.log
+*.sqlite
+*.db
+
+# Node (if any frontend files exist)
+node_modules/
+
+# Generated files
+generated_projects/
+generated_audio/
+
+# Large files
+*.pem
+*.key
+*.json
+!package.json
+
+# OS
+.DS_Store
+Thumbs.db

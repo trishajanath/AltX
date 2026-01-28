@@ -1,0 +1,23 @@
+# Minimal requirements for FastAPI sandbox backends
+# No external service dependencies - runs fully isolated
+
+# Core FastAPI
+fastapi>=0.104.0,<1.0.0
+uvicorn[standard]>=0.24.0,<1.0.0
+pydantic[email]>=2.0.0,<3.0.0
+email-validator>=2.0.0
+
+# Database (SQLite is built into Python, SQLAlchemy for ORM)
+sqlalchemy>=2.0.0,<3.0.0
+aiosqlite>=0.19.0,<1.0.0
+
+# Authentication
+python-jose[cryptography]>=3.3.0,<4.0.0
+passlib[bcrypt]>=1.7.4,<2.0.0
+bcrypt>=4.0.0,<5.0.0
+
+# CORS and middleware
+python-multipart>=0.0.6,<1.0.0
+
+# HTTP client for external API calls (optional)
+httpx>=0.25.0,<1.0.0

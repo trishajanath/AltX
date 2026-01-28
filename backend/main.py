@@ -247,18 +247,214 @@ security = HTTPBearer()
 from voice_chat_api import router as voice_chat_router
 from dynamic_db_api import router as dynamic_db_router
 
+# Import sandbox deployment service
+try:
+    from sandbox_deployment_service import (
+        router as sandbox_router,
+        init_service as init_sandbox_service,
+        shutdown_service as shutdown_sandbox_service,
+        get_service as get_sandbox_service
+    )
+    SANDBOX_SERVICE_AVAILABLE = True
+    print("✅ Sandbox deployment service loaded")
+except ImportError as e:
+    SANDBOX_SERVICE_AVAILABLE = False
+    sandbox_router = None
+    get_sandbox_service = None
+    print(f"⚠️ Sandbox deployment service not available: {e}")
+
+# Import sandbox session registry
+try:
+    from sandbox_session_registry import router as session_registry_router
+    SESSION_REGISTRY_AVAILABLE = True
+    print("✅ Sandbox session registry loaded")
+except ImportError as e:
+    SESSION_REGISTRY_AVAILABLE = False
+    session_registry_router = None
+    print(f"⚠️ Sandbox session registry not available: {e}")
+
+# Import preview orchestrator
+try:
+    from preview_orchestrator import (
+        router as preview_router,
+        init_orchestrator
+    )
+    PREVIEW_ORCHESTRATOR_AVAILABLE = True
+    print("✅ Preview orchestrator loaded")
+except ImportError as e:
+    PREVIEW_ORCHESTRATOR_AVAILABLE = False
+    preview_router = None
+    init_orchestrator = None
+    print(f"⚠️ Preview orchestrator not available: {e}")
+
+# Import sandbox cleanup manager
+try:
+    from sandbox_cleanup_manager import (
+        cleanup_router,
+        init_cleanup_manager,
+        shutdown_cleanup_manager,
+        get_cleanup_manager,
+        integrate_with_deployment_service,
+        CleanupConfig
+    )
+    CLEANUP_MANAGER_AVAILABLE = True
+    print("✅ Sandbox cleanup manager loaded")
+except ImportError as e:
+    CLEANUP_MANAGER_AVAILABLE = False
+    cleanup_router = None
+    init_cleanup_manager = None
+    shutdown_cleanup_manager = None
+    get_cleanup_manager = None
+    print(f"⚠️ Sandbox cleanup manager not available: {e}")
+
+# Import project exporter
+try:
+    from project_exporter import export_router
+    PROJECT_EXPORTER_AVAILABLE = True
+    print("✅ Project exporter loaded")
+except ImportError as e:
+    PROJECT_EXPORTER_AVAILABLE = False
+    export_router = None
+    print(f"⚠️ Project exporter not available: {e}")
+
+# Import sandbox observability service
+try:
+    from sandbox_observability import (
+        router as observability_router,
+        init_observability,
+        get_observability
+    )
+    OBSERVABILITY_AVAILABLE = True
+    print("✅ Sandbox observability service loaded")
+except ImportError as e:
+    OBSERVABILITY_AVAILABLE = False
+    observability_router = None
+    init_observability = None
+    get_observability = None
+    print(f"⚠️ Sandbox observability service not available: {e}")
+
 # Include voice chat router AFTER CORS
 app.include_router(voice_chat_router)
 
 # Include dynamic database API for generated apps
 app.include_router(dynamic_db_router)
 
+# Include sandbox deployment service if available
+if SANDBOX_SERVICE_AVAILABLE and sandbox_router:
+    app.include_router(sandbox_router)
+
+# Include session registry if available
+if SESSION_REGISTRY_AVAILABLE and session_registry_router:
+    app.include_router(session_registry_router)
+
+# Include preview orchestrator if available
+if PREVIEW_ORCHESTRATOR_AVAILABLE and preview_router:
+    app.include_router(preview_router)
+
+# Include cleanup manager if available
+if CLEANUP_MANAGER_AVAILABLE and cleanup_router:
+    app.include_router(cleanup_router)
+
+# Include project exporter if available
+if PROJECT_EXPORTER_AVAILABLE and export_router:
+    app.include_router(export_router)
+
+# Include observability service if available
+if OBSERVABILITY_AVAILABLE and observability_router:
+    app.include_router(observability_router)
+
 # Startup event to initialize job worker
 @app.on_event("startup")
 async def startup_event():
-    """Start background job processor"""
+    """Start background job processor and sandbox service"""
     await job_manager.start_worker()
     print("✅ Job manager worker started")
+    
+    # Initialize cleanup manager first (other services depend on it)
+    cleanup_manager = None
+    if CLEANUP_MANAGER_AVAILABLE and init_cleanup_manager:
+        try:
+            cleanup_config = CleanupConfig(
+                default_ttl_minutes=int(os.getenv("SANDBOX_TTL_MINUTES", "45")),
+                ttl_check_interval_seconds=60,
+                orphan_check_interval_seconds=300
+            )
+            cleanup_manager = await init_cleanup_manager(cleanup_config)
+            print("✅ Sandbox cleanup manager started")
+        except Exception as e:
+            print(f"⚠️ Failed to start cleanup manager: {e}")
+    
+    # Initialize sandbox deployment service
+    if SANDBOX_SERVICE_AVAILABLE:
+        try:
+            host_url = os.getenv("SANDBOX_HOST_URL", "http://localhost")
+            await init_sandbox_service(host_url=host_url)
+            print("✅ Sandbox deployment service started")
+            
+            # Integrate cleanup manager with deployment service
+            if cleanup_manager and get_sandbox_service:
+                try:
+                    deployment_service = get_sandbox_service()
+                    if deployment_service:
+                        await integrate_with_deployment_service(
+                            deployment_service,
+                            cleanup_manager
+                        )
+                        print("✅ Cleanup manager integrated with deployment service")
+                except Exception as e:
+                    print(f"⚠️ Failed to integrate cleanup manager: {e}")
+            
+            # Initialize preview orchestrator with deployment service
+            if PREVIEW_ORCHESTRATOR_AVAILABLE and init_orchestrator:
+                deployment_service = get_sandbox_service() if get_sandbox_service else None
+                orchestrator = init_orchestrator(
+                    deployment_service=deployment_service,
+                    host_url=os.getenv("API_HOST_URL", "http://localhost:8000")
+                )
+                print("✅ Preview orchestrator initialized")
+                
+                # Initialize observability service with both deployment service and orchestrator
+                if OBSERVABILITY_AVAILABLE and init_observability:
+                    try:
+                        observability = init_observability(
+                            deployment_service=deployment_service,
+                            orchestrator=orchestrator
+                        )
+                        await observability.start()
+                        print("✅ Sandbox observability service started")
+                    except Exception as e:
+                        print(f"⚠️ Failed to start observability service: {e}")
+        except Exception as e:
+            print(f"⚠️ Failed to start sandbox service: {e}")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup on shutdown"""
+    # Shutdown observability service
+    if OBSERVABILITY_AVAILABLE and get_observability:
+        try:
+            observability = get_observability()
+            await observability.stop()
+            print("✅ Sandbox observability service stopped")
+        except Exception as e:
+            print(f"⚠️ Error stopping observability service: {e}")
+    
+    # Shutdown cleanup manager (this cleans up all containers)
+    if CLEANUP_MANAGER_AVAILABLE and shutdown_cleanup_manager:
+        try:
+            await shutdown_cleanup_manager()
+            print("✅ Sandbox cleanup manager stopped")
+        except Exception as e:
+            print(f"⚠️ Error stopping cleanup manager: {e}")
+    
+    # Shutdown sandbox service
+    if SANDBOX_SERVICE_AVAILABLE:
+        try:
+            await shutdown_sandbox_service()
+            print("✅ Sandbox deployment service stopped")
+        except Exception as e:
+            print(f"⚠️ Error stopping sandbox service: {e}")
 
 # Job management endpoints
 @app.post("/api/jobs/create")
@@ -1685,6 +1881,246 @@ async def get_compliance_documentation():
     }
 
 
+# ==================== PROJECT SOC2 READINESS ASSESSMENT ENDPOINT ====================
+
+@app.get("/api/projects/{project_name}/compliance")
+async def get_project_compliance(
+    project_name: str,
+    current_user: dict = Depends(get_current_user_optional)
+):
+    """SOC2 READINESS Assessment - NOT a compliance certification."""
+    try:
+        from s3_storage import get_project_from_s3, get_cached_user_id_for_project
+        import re as regex
+        
+        user_id = current_user.get('email') or current_user.get('_id') if current_user else 'anonymous'
+        project_slug = normalize_project_slug(project_name)
+        
+        # Try to load project from S3
+        project_data = get_project_from_s3(project_slug=project_slug, user_id=user_id)
+        if not project_data:
+            project_data = get_project_from_s3(project_slug=project_slug, user_id='anonymous')
+        if not project_data:
+            cached_user_id = get_cached_user_id_for_project(project_slug)
+            if cached_user_id and cached_user_id not in [user_id, 'anonymous']:
+                project_data = get_project_from_s3(project_slug=project_slug, user_id=cached_user_id)
+        if not project_data:
+            try:
+                from s3_storage import s3_client, S3_BUCKET_NAME
+                response = s3_client.list_objects_v2(Bucket=S3_BUCKET_NAME, Prefix='projects/', Delimiter='/')
+                for prefix_obj in response.get('CommonPrefixes', []):
+                    potential_user = prefix_obj.get('Prefix', '').replace('projects/', '').rstrip('/')
+                    if potential_user and potential_user not in [user_id, 'anonymous']:
+                        project_data = get_project_from_s3(project_slug=project_slug, user_id=potential_user)
+                        if project_data:
+                            break
+            except:
+                pass
+        
+        if not project_data:
+            raise HTTPException(status_code=404, detail=f"Project '{project_name}' not found")
+        
+        files = project_data.get('files', [])
+        
+        # STRICT Security Vulnerability Patterns - catches real issues
+        security_vulns = {
+            'secret_with_fallback': {
+                'pattern': r'(os\.getenv|os\.environ\.get|process\.env)[^,]*,\s*["\'"][^\"\'"]{4,}["\'"]',
+                'severity': 'CRITICAL', 'category': 'Secrets Management', 'control': 'CC6.1',
+                'description': 'Secret with hardcoded fallback - SOC2 violation',
+                'why': 'Default values mean secrets ARE in code. SOC2 requires no production secrets in code.',
+                'fix': 'Use os.environ["KEY"] to crash if missing, or use secrets manager'
+            },
+            'hardcoded_secret': {
+                'pattern': r'(password|secret|api_key|jwt_secret|secret_key|private_key)\s*[=:]\s*["\'"][^\"\'"]{8,}["\'"]',
+                'severity': 'CRITICAL', 'category': 'Secrets Management', 'control': 'CC6.1',
+                'description': 'Hardcoded secret in code',
+                'why': 'Can be extracted from repos, logs, or compiled binaries',
+                'fix': 'Move to environment variables or secrets manager'
+            },
+            'eval_exec': {
+                'pattern': r'\b(eval|exec)\s*\(',
+                'severity': 'CRITICAL', 'category': 'Code Injection', 'control': 'CC6.6',
+                'description': 'Dynamic code execution - allows arbitrary code injection',
+                'why': 'eval() is the most dangerous function in any language',
+                'fix': 'Remove eval/exec. Use JSON.parse() for data parsing'
+            },
+            'xss': {
+                'pattern': r'dangerouslySetInnerHTML|innerHTML\s*=',
+                'severity': 'HIGH', 'category': 'XSS', 'control': 'CC6.6',
+                'description': 'XSS vulnerability - direct HTML injection',
+                'why': 'Can steal sessions, credentials, execute malicious actions',
+                'fix': 'Use DOMPurify.sanitize() before rendering HTML'
+            },
+            'ssl_disabled': {
+                'pattern': r'verify\s*=\s*False|rejectUnauthorized\s*:\s*false',
+                'severity': 'CRITICAL', 'category': 'TLS', 'control': 'CC6.7',
+                'description': 'SSL/TLS verification disabled',
+                'why': 'Makes MITM attacks trivial',
+                'fix': 'Never disable certificate verification'
+            },
+            'http_plaintext': {
+                'pattern': r'["\'"]http://(?!localhost|127\.0\.0\.1)[^\s"\']+["\'"]',
+                'severity': 'HIGH', 'category': 'TLS', 'control': 'CC6.7',
+                'description': 'Plaintext HTTP URL',
+                'why': 'Data transmitted unencrypted',
+                'fix': 'Use HTTPS for all external communications'
+            },
+            'localstorage_auth': {
+                'pattern': r'localStorage\.(set|get)Item\([^)]*(?:token|auth|secret)',
+                'severity': 'HIGH', 'category': 'Data Protection', 'control': 'CC6.1',
+                'description': 'Auth tokens in localStorage',
+                'why': 'Any XSS vulnerability can steal localStorage data',
+                'fix': 'Use httpOnly cookies for auth tokens'
+            },
+            'empty_catch': {
+                'pattern': r'catch\s*\([^)]*\)\s*\{\s*\}|except:\s*pass',
+                'severity': 'MEDIUM', 'category': 'Error Handling', 'control': 'CC7.2',
+                'description': 'Swallowed errors - silent failure',
+                'why': 'Hides security incidents and bugs',
+                'fix': 'Log errors: catch(e) { logger.error(e); throw e; }'
+            },
+            'debug_code': {
+                'pattern': r'debugger;|console\.debug',
+                'severity': 'LOW', 'category': 'Code Quality', 'control': 'CC8.1',
+                'description': 'Debug code in codebase',
+                'why': 'Can expose internal state',
+                'fix': 'Remove before production deployment'
+            },
+        }
+        
+        # Operational controls - CANNOT be verified from code alone
+        ops_controls = {
+            'CC6.1': {'name': 'Access Control', 'needs': ['IAM policies', 'Access reviews', 'MFA config']},
+            'CC6.6': {'name': 'System Protection', 'needs': ['WAF config', 'Firewall rules']},
+            'CC6.7': {'name': 'Transmission Security', 'needs': ['TLS 1.2+ config', 'HSTS', 'Cert management']},
+            'CC7.1': {'name': 'Vulnerability Management', 'needs': ['Scan reports', 'Pen test results']},
+            'CC7.2': {'name': 'Security Monitoring', 'needs': ['SIEM config', 'Alerts', 'Log retention policy']},
+            'CC7.3': {'name': 'Incident Response', 'needs': ['IR plan', 'Postmortems', 'Communication procedures']},
+            'CC8.1': {'name': 'Change Management', 'needs': ['Change policy', 'Code review requirements']},
+            'CC9.1': {'name': 'Vendor Risk', 'needs': ['Vendor inventory', 'Security assessments']},
+        }
+        
+        issues = []
+        files_scanned = 0
+        files_with_issues = set()
+        
+        for file in files:
+            path = file.get('path', '')
+            content_str = file.get('content', '')
+            if not content_str or path.endswith(('.md','.json','.lock','.txt','.svg','.png','.jpg','.gif','.ico')):
+                continue
+            files_scanned += 1
+            lines = content_str.split('\n')
+            
+            for vname, vinfo in security_vulns.items():
+                try:
+                    for match in regex.finditer(vinfo['pattern'], content_str, regex.IGNORECASE|regex.MULTILINE):
+                        line_num = content_str[:match.start()].count('\n') + 1
+                        s = max(0, line_num - 3)
+                        e = min(len(lines), line_num + 3)
+                        snippet_lines = []
+                        for i in range(e - s):
+                            actual_line = s + i + 1
+                            marker = ">>>" if actual_line == line_num else "   "
+                            snippet_lines.append(f"{actual_line:4d} {marker} {lines[s + i]}")
+                        snippet = '\n'.join(snippet_lines)
+                        
+                        issues.append({
+                            'id': f"VULN-{len(issues)+1:04d}",
+                            'type': vname,
+                            'file': path,
+                            'line': line_num,
+                            'severity': vinfo['severity'],
+                            'category': vinfo['category'],
+                            'control': vinfo['control'],
+                            'description': vinfo['description'],
+                            'why_critical': vinfo['why'],
+                            'remediation': vinfo['fix'],
+                            'code_snippet': snippet,
+                            'matched': match.group()[:80]
+                        })
+                        files_with_issues.add(path)
+                except Exception as scan_err:
+                    pass
+        
+        # Calculate score (max 50 from code alone - code cannot prove compliance)
+        crit = len([i for i in issues if i['severity']=='CRITICAL'])
+        high = len([i for i in issues if i['severity']=='HIGH'])
+        med = len([i for i in issues if i['severity']=='MEDIUM'])
+        low = len([i for i in issues if i['severity']=='LOW'])
+        
+        code_score = max(0, 50 - (crit*15 + high*8 + med*4 + low))
+        total = code_score  # No ops evidence = no additional points
+        
+        level = 'NOT_READY'
+        if total >= 40: level = 'PARTIAL_READINESS'
+        elif total >= 25: level = 'EARLY_STAGE'
+        
+        # Build controls assessment
+        ctrl_assess = {}
+        for cid, cinfo in ops_controls.items():
+            ctrl_issues = [i for i in issues if i['control']==cid]
+            ctrl_assess[cid] = {
+                'name': cinfo['name'],
+                'code_status': 'HAS_ISSUES' if ctrl_issues else 'NOT_VERIFIED',
+                'ops_status': 'MISSING',
+                'overall': 'FAILING' if ctrl_issues else 'NOT_VERIFIED',
+                'findings': len(ctrl_issues),
+                'required_evidence': cinfo['needs'],
+            }
+        
+        secrets_issues = len([i for i in issues if i['category']=='Secrets Management'])
+        
+        gaps = []
+        if secrets_issues > 0:
+            gaps.append({"priority": 1, "gap": "Secrets Management", "count": secrets_issues, "fix": "Use os.environ[] or secrets manager"})
+        gaps.append({"priority": 2, "gap": "Operational Evidence", "issue": "8 controls missing evidence", "fix": "Prepare IAM, monitoring, IR docs"})
+        gaps.append({"priority": 3, "gap": "TLS Enforcement", "issue": "No HSTS/TLS config evidence", "fix": "Configure TLS 1.2+, HSTS"})
+        gaps.append({"priority": 4, "gap": "Monitoring", "issue": "No SIEM/alerting detected", "fix": "Implement centralized logging"})
+        
+        return {
+            "success": True,
+            "project_name": project_name,
+            "assessment_type": "SOC2_READINESS_SCAN",
+            "assessment_timestamp": datetime.utcnow().isoformat(),
+            
+            "disclaimer": {
+                "title": "⚠️ READINESS Assessment - NOT Compliance Certification",
+                "text": "SOC2 is an operational trust framework requiring evidence artifacts, not just code scanning.",
+                "checks": ["Code vulnerabilities", "Hardcoded secrets (incl. fallback defaults)", "Dangerous patterns (eval, XSS, SQLi)"],
+                "cannot_verify": ["IAM policies", "TLS enforcement in prod", "Monitoring/alerting", "Incident response", "Change management"]
+            },
+            
+            "readiness_score": round(total, 1),
+            "readiness_level": level,
+            "max_possible_score": 50,
+            "audit_ready": False,
+            
+            "score_breakdown": {
+                "code_security": {"score": code_score, "max": 50, "deductions": f"Critical:-{crit*15} High:-{high*8} Med:-{med*4} Low:-{low}"},
+                "operational_evidence": {"score": 0, "max": 50, "reason": "No evidence artifacts provided - upload IAM, monitoring, IR docs"}
+            },
+            
+            "findings_summary": {"critical": crit, "high": high, "medium": med, "low": low, "total": len(issues)},
+            "code_vulnerabilities": issues[:25],
+            "controls_assessment": ctrl_assess,
+            "critical_gaps": gaps,
+            
+            "files_analyzed": files_scanned,
+            "files_with_issues": len(files_with_issues),
+            "limitations": ["Cannot verify runtime behavior", "Cannot verify production configs", "Cannot verify operational procedures", "Pattern matching may have false positives"]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Compliance error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ==================== PENDING DEMO PROJECT ENDPOINTS ====================
 
 @app.post("/api/demo/save-pending-project")
@@ -2442,6 +2878,8 @@ async def get_sandbox_preview(
     user_email: Optional[str] = Query(None),  # Deprecated: use X-User-Email header instead
     user_id_alt: Optional[str] = Query(None),  # Deprecated: use X-User-Id-Alt header instead
     v: Optional[str] = Query(None),  # Version/cache-busting parameter
+    backend_url: Optional[str] = Query(None),  # Backend API URL from Docker container
+    session_id: Optional[str] = Query(None),  # Sandbox session ID
     current_user: Optional[dict] = Depends(get_current_user_optional)
 ):
     """
@@ -2563,8 +3001,12 @@ async def get_sandbox_preview(
                 detail=f"No frontend files found for project '{project_slug}'"
             )
         
-        # Generate the sandbox HTML
-        sandbox_html = generate_sandbox_html(files_content, project_name)
+        # Get backend URL from query param, header, or default
+        effective_backend_url = backend_url or request.headers.get('X-Backend-URL') or 'http://localhost:8000/api'
+        print(f"🔗 Backend URL for sandbox: {effective_backend_url}")
+        
+        # Generate the sandbox HTML with backend URL injected
+        sandbox_html = generate_sandbox_html(files_content, project_name, effective_backend_url)
         
         # Add cache-busting headers to force fresh reload
         return HTMLResponse(
@@ -2601,8 +3043,14 @@ async def get_sandbox_preview(
         """
         return HTMLResponse(content=error_html, status_code=500)
 
-def generate_sandbox_html(files_content: dict, project_name: str) -> str:
-    """Generate a complete HTML page that runs React code in the browser"""
+def generate_sandbox_html(files_content: dict, project_name: str, backend_url: str = 'http://localhost:8000/api') -> str:
+    """Generate a complete HTML page that runs React code in the browser
+    
+    Args:
+        files_content: Dictionary of file paths to content
+        project_name: Name of the project
+        backend_url: URL of the Dockerized backend API (from sandbox deployment)
+    """
     
     # Extract main app content
     app_jsx = files_content.get("src/App.jsx", "")
@@ -2794,6 +3242,14 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{project_name} - Live Preview</title>
     <!-- SANDBOX PREVIEW - Fast loading with conditional libraries -->
+    
+    <!-- CRITICAL: Inject backend API URL for frontend to use -->
+    <script>
+        // 🔗 SANDBOX API URL - This is the real Dockerized backend!
+        window.SANDBOX_API_URL = '{backend_url}';
+        window.API_BASE = '{backend_url}';
+        console.log('🔗 Backend API URL:', window.SANDBOX_API_URL);
+    </script>
     
     <!-- CRITICAL: Protect built-in globals BEFORE any libraries load -->
     <script>
@@ -4008,41 +4464,18 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
         }}
         window.SandboxErrorBoundary = SandboxErrorBoundary;
         
-        // Store original fetch for real API calls (like visual editor)
+        // Store original fetch - ALWAYS prefer real HTTP requests
         const originalFetch = window.fetch.bind(window);
         
-        // Mock API calls for demo purposes with sample data
-        const mockFetch = (url, options) => {{
-            console.log('Mock API call to:', url);
-            
-            // Parse the URL to determine the endpoint
-            const urlObj = new URL(url, window.location.origin);
-            const pathname = urlObj.pathname;
-            
-            // Pass through real Xverta API calls to original fetch
-            const isXvertaApi = pathname.includes('/api/visual-edit-element') || 
-                                pathname.includes('/api/sandbox-preview') ||
-                                pathname.includes('/api/projects') ||
-                                pathname.includes('/api/run-project');
-            
-            // Mock endpoints for demo app (products, cart, etc.)
-            const isMockEndpoint = pathname.includes('/products') || 
-                                   pathname.includes('/cart') || 
-                                   pathname.includes('/orders') || 
-                                   pathname.includes('/users') || 
-                                   pathname.includes('/health');
-            
-            if (isXvertaApi || (pathname.startsWith('/api/') && !isMockEndpoint)) {{
-                console.log('🎨 Passing through to real API:', pathname);
-                return originalFetch(url, options);
-            }}
-            
-            // Mock data for different endpoints
-            let responseData = {{ message: 'Mock API response', data: [] }};
-            
+        // Track whether mock mode is enabled (disabled by default)
+        window._sandboxMockEnabled = false;
+        window._sandboxBackendChecked = false;
+        
+        // Mock data generator for fallback scenarios
+        const getMockData = (pathname) => {{
             // Products endpoint
             if (pathname.includes('/products')) {{
-                responseData = [
+                return [
                     {{
                         id: 1,
                         name: "Fresh Bananas",
@@ -4105,9 +4538,13 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
                     }}
                 ];
             }}
+            // Cart endpoint
+            else if (pathname.includes('/cart')) {{
+                return {{ items: [], total: 0, count: 0 }};
+            }}
             // Orders endpoint
             else if (pathname.includes('/orders')) {{
-                responseData = [
+                return [
                     {{
                         id: 1,
                         user_id: 1,
@@ -4123,7 +4560,7 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
             }}
             // Users endpoint
             else if (pathname.includes('/users')) {{
-                responseData = [
+                return [
                     {{
                         id: 1,
                         email: "demo@example.com",
@@ -4135,20 +4572,105 @@ def generate_sandbox_html(files_content: dict, project_name: str) -> str:
             }}
             // Health check
             else if (pathname.includes('/health')) {{
-                responseData = {{ status: "healthy", service: "mock-api" }};
+                return {{ status: "healthy", service: "mock-fallback-api" }};
             }}
-            
+            // Default response
+            return {{ message: 'Mock API response (fallback mode)', data: [] }};
+        }};
+        
+        // Create mock response helper
+        const createMockResponse = (data) => {{
             return Promise.resolve({{
                 ok: true,
                 status: 200,
                 statusText: 'OK',
-                json: () => Promise.resolve(responseData),
-                text: () => Promise.resolve(JSON.stringify(responseData))
+                json: () => Promise.resolve(data),
+                text: () => Promise.resolve(JSON.stringify(data))
             }});
         }};
         
-        // Replace fetch with mock for demo
-        window.fetch = mockFetch;
+        // Smart fetch wrapper - prefers real requests, falls back to mock on failure
+        const smartFetch = async (url, options) => {{
+            const urlObj = new URL(url, window.location.origin);
+            const pathname = urlObj.pathname;
+            
+            // Xverta platform APIs - ALWAYS use real fetch
+            const isXvertaApi = pathname.includes('/api/visual-edit-element') || 
+                                pathname.includes('/api/sandbox-preview') ||
+                                pathname.includes('/api/projects') ||
+                                pathname.includes('/api/run-project') ||
+                                pathname.includes('/api/auto-fix');
+            
+            if (isXvertaApi) {{
+                console.log('🎨 Xverta API call (always real):', pathname);
+                return originalFetch(url, options);
+            }}
+            
+            // Mock-eligible endpoints (products, cart, orders, users, health)
+            const isMockEligible = pathname.includes('/products') || 
+                                   pathname.includes('/cart') || 
+                                   pathname.includes('/orders') || 
+                                   pathname.includes('/users') || 
+                                   pathname.includes('/health');
+            
+            // If mock mode is already enabled, use mock immediately for eligible endpoints
+            if (window._sandboxMockEnabled && isMockEligible) {{
+                console.log('🔶 [MOCK FALLBACK] Returning mock data for:', pathname);
+                return createMockResponse(getMockData(pathname));
+            }}
+            
+            // Try real fetch first
+            try {{
+                console.log('🌐 Attempting real HTTP request to:', pathname);
+                const response = await originalFetch(url, options);
+                
+                // If successful, keep using real fetch
+                if (response.ok) {{
+                    console.log('✅ Real API response received for:', pathname);
+                    return response;
+                }}
+                
+                // Server returned an error - fall back to mock if eligible
+                if (isMockEligible) {{
+                    console.warn('⚠️ [FALLBACK ACTIVATED] Server returned ' + response.status + ' for ' + pathname + '. Using mock data.');
+                    if (!window._sandboxMockEnabled) {{
+                        window._sandboxMockEnabled = true;
+                        console.warn('🔶 ====================================');
+                        console.warn('🔶 MOCK MODE ENABLED - Backend returned error');
+                        console.warn('🔶 Future mock-eligible requests will use fallback data');
+                        console.warn('🔶 ====================================');
+                    }}
+                    return createMockResponse(getMockData(pathname));
+                }}
+                
+                // Non-mock-eligible endpoint - return the error response as-is
+                return response;
+                
+            }} catch (networkError) {{
+                // Network error (backend unreachable)
+                console.error('❌ Network error for:', pathname, networkError.message);
+                
+                if (isMockEligible) {{
+                    if (!window._sandboxMockEnabled) {{
+                        window._sandboxMockEnabled = true;
+                        console.warn('🔶 ====================================');
+                        console.warn('🔶 MOCK MODE ENABLED - Backend unreachable');
+                        console.warn('🔶 Network error: ' + networkError.message);
+                        console.warn('🔶 Future mock-eligible requests will use fallback data');
+                        console.warn('🔶 ====================================');
+                    }}
+                    console.log('🔶 [MOCK FALLBACK] Returning mock data for:', pathname);
+                    return createMockResponse(getMockData(pathname));
+                }}
+                
+                // Non-mock-eligible endpoint - rethrow the error
+                throw networkError;
+            }}
+        }};
+        
+        // Replace window.fetch with smart fetch (real-first, fallback-on-failure)
+        window.fetch = smartFetch;
+        console.log('✅ Smart fetch initialized - real HTTP requests preferred, mock fallback on failure');
         
         // Create utility functions for className manipulation
         
@@ -5713,6 +6235,259 @@ export default {component_name};"""
     
     return content
 
+
+def auto_integrate_new_component_to_app(
+    new_component_path: str,
+    app_jsx_content: str,
+    user_message: str
+) -> tuple[str, bool]:
+    """
+    Automatically integrates a newly created component into App.jsx by:
+    1. Adding the import statement
+    2. Adding a Route if it's a page component
+    3. Optionally adding navigation
+    
+    Returns: (updated_app_jsx_content, was_modified)
+    """
+    import os
+    import re
+    
+    # Only process components in frontend/src/components/
+    if not new_component_path.startswith('frontend/src/components/') or not new_component_path.endswith('.jsx'):
+        return app_jsx_content, False
+    
+    # Extract component name from file path
+    component_filename = os.path.basename(new_component_path)
+    component_name = component_filename.replace('.jsx', '')
+    
+    # Check if this component is already imported
+    import_pattern = rf"import\s+{component_name}\s+from"
+    if re.search(import_pattern, app_jsx_content):
+        print(f"ℹ️ Component {component_name} already imported in App.jsx")
+        return app_jsx_content, False
+    
+    # Determine if this is a "page" component that needs routing
+    # Check user message for keywords indicating a page/screen
+    page_keywords = ['page', 'screen', 'view', 'section', 'tab', 'route', 'navigate']
+    is_page_component = any(keyword in user_message.lower() for keyword in page_keywords)
+    
+    # Also check component name for page-like patterns
+    page_name_patterns = ['page', 'screen', 'view', 'dashboard', 'profile', 'settings', 'home', 'about', 'contact']
+    is_page_component = is_page_component or any(pattern in component_name.lower() for pattern in page_name_patterns)
+    
+    modified = False
+    updated_content = app_jsx_content
+    
+    # Step 1: Add import statement
+    # Find the last import statement and add after it
+    import_lines = list(re.finditer(r'^import .+;?\s*$', updated_content, re.MULTILINE))
+    if import_lines:
+        last_import = import_lines[-1]
+        insert_pos = last_import.end()
+        new_import = f"\nimport {component_name} from './components/{component_name}';"
+        updated_content = updated_content[:insert_pos] + new_import + updated_content[insert_pos:]
+        modified = True
+        print(f"✅ Added import for {component_name}")
+    else:
+        # No existing imports, add at the top after 'use client' or at very start
+        if "'use client'" in updated_content or '"use client"' in updated_content:
+            # Add after 'use client'
+            updated_content = re.sub(
+                r"(['\"]use client['\"];?\s*\n)",
+                rf"\1import {component_name} from './components/{component_name}';\n",
+                updated_content,
+                count=1
+            )
+        else:
+            updated_content = f"import {component_name} from './components/{component_name}';\n" + updated_content
+        modified = True
+        print(f"✅ Added import for {component_name} at top")
+    
+    # Step 2: Add Route if it's a page component
+    if is_page_component:
+        # Generate a route path from component name (e.g., MatchedPeople -> /matched-people)
+        route_path = re.sub(r'([a-z])([A-Z])', r'\1-\2', component_name).lower()
+        
+        # Check if route already exists
+        route_pattern = rf'<Route[^>]*path=["\']/?{route_path}["\']'
+        if not re.search(route_pattern, updated_content, re.IGNORECASE):
+            # Find the Routes section and add the new route
+            # IMPORTANT: Add BEFORE catch-all "*" route, not after!
+            
+            # First, try to find a catch-all route and insert before it
+            catchall_match = re.search(r'(\s*)(<Route[^>]*path=["\']\*["\'][^>]*/>)', updated_content)
+            if catchall_match:
+                indent = catchall_match.group(1)
+                new_route = f'{indent}<Route path="/{route_path}" element={{<{component_name} />}} />\n'
+                updated_content = updated_content[:catchall_match.start()] + new_route + updated_content[catchall_match.start():]
+                print(f"✅ Added Route for /{route_path} (before catch-all)")
+            else:
+                # No catch-all, look for closing </Routes> tag and add before it
+                routes_match = re.search(r'(\s*)(</Routes>)', updated_content)
+                if routes_match:
+                    indent = routes_match.group(1)
+                    new_route = f'{indent}  <Route path="/{route_path}" element={{<{component_name} />}} />\n'
+                    updated_content = updated_content[:routes_match.start()] + new_route + updated_content[routes_match.start():]
+                    print(f"✅ Added Route for /{route_path}")
+                else:
+                    # Try alternative pattern: look for Route elements
+                    last_route = list(re.finditer(r'<Route[^/]*/>[ \t]*\n', updated_content))
+                    if last_route:
+                        insert_pos = last_route[-1].end()
+                        # Get the indentation of the previous route
+                        prev_line_start = updated_content.rfind('\n', 0, last_route[-1].start()) + 1
+                        indent = ''
+                        for char in updated_content[prev_line_start:]:
+                            if char in ' \t':
+                                indent += char
+                            else:
+                                break
+                        new_route = f'{indent}<Route path="/{route_path}" element={{<{component_name} />}} />\n'
+                        updated_content = updated_content[:insert_pos] + new_route + updated_content[insert_pos:]
+                        print(f"✅ Added Route for /{route_path}")
+    
+    # Step 3: Try to add navigation item if there's a navigation section
+    if is_page_component and modified:
+        # Look for navigation patterns (nav items, tabs, links)
+        # This is complex due to many possible navigation patterns, so we'll be conservative
+        nav_label = re.sub(r'([a-z])([A-Z])', r'\1 \2', component_name)  # "MatchedPeople" -> "Matched People"
+        route_path = re.sub(r'([a-z])([A-Z])', r'\1-\2', component_name).lower()
+        
+        # Look for bottom navigation patterns like: { name: "...", path: "...", icon: ... }
+        nav_array_pattern = r'(\[\s*\{\s*(?:name|label):\s*["\'][^"\']+["\'],\s*(?:path|to|href):\s*["\'][^"\']+["\'])'
+        nav_match = re.search(nav_array_pattern, updated_content)
+        
+        if nav_match:
+            # Found a navigation array, but adding items requires understanding the exact format
+            # For safety, just log that navigation might need manual update
+            print(f"ℹ️ Navigation found - user may want to manually add: {nav_label} -> /{route_path}")
+    
+    return updated_content, modified
+
+
+def auto_integrate_backend_routes(
+    new_route_path: str,
+    main_py_content: str,
+    route_file_content: str
+) -> tuple[str, bool]:
+    """
+    Automatically integrates a newly created backend route file into main.py by:
+    1. Adding the import statement
+    2. Registering the router with the app
+    
+    Returns: (updated_main_py_content, was_modified)
+    """
+    import os
+    import re
+    
+    # Only process Python files in backend/routes/
+    if not (new_route_path.startswith('backend/routes/') or new_route_path.startswith('backend/api/')) or not new_route_path.endswith('.py'):
+        return main_py_content, False
+    
+    # Extract module name from file path
+    route_filename = os.path.basename(new_route_path)
+    module_name = route_filename.replace('.py', '')
+    
+    # Skip __init__.py
+    if module_name == '__init__':
+        return main_py_content, False
+    
+    # Check if already imported
+    import_pattern = rf"from\s+(routes|api)\.{module_name}\s+import|import\s+(routes|api)\.{module_name}"
+    if re.search(import_pattern, main_py_content):
+        print(f"ℹ️ Backend route {module_name} already imported")
+        return main_py_content, False
+    
+    modified = False
+    updated_content = main_py_content
+    
+    # Detect router variable name from the route file
+    router_var = None
+    router_patterns = [
+        r'(\w+)\s*=\s*APIRouter\(',
+        r'(\w+)\s*=\s*Router\(',
+        r'router\s*=',
+    ]
+    for pattern in router_patterns:
+        match = re.search(pattern, route_file_content)
+        if match:
+            router_var = match.group(1) if match.lastindex else 'router'
+            break
+    
+    if not router_var:
+        router_var = 'router'  # Default assumption
+    
+    # Step 1: Add import statement
+    # Find FastAPI/app imports and add after them
+    import_section = re.search(r'(from fastapi import[^\n]+\n)', updated_content)
+    if import_section:
+        insert_pos = import_section.end()
+        folder = 'routes' if 'routes/' in new_route_path else 'api'
+        new_import = f"from {folder}.{module_name} import {router_var} as {module_name}_router\n"
+        updated_content = updated_content[:insert_pos] + new_import + updated_content[insert_pos:]
+        modified = True
+        print(f"✅ Added import for {module_name} router")
+    
+    # Step 2: Register router with app
+    if modified:
+        # Look for app.include_router patterns and add after them
+        include_router_pattern = r'(app\.include_router\([^)]+\)\s*\n)'
+        matches = list(re.finditer(include_router_pattern, updated_content))
+        if matches:
+            last_include = matches[-1]
+            insert_pos = last_include.end()
+            api_prefix = f"/api/{module_name.replace('_', '-')}"
+            new_include = f'app.include_router({module_name}_router, prefix="{api_prefix}", tags=["{module_name}"])\n'
+            updated_content = updated_content[:insert_pos] + new_include + updated_content[insert_pos:]
+            print(f"✅ Registered {module_name}_router at {api_prefix}")
+        else:
+            # No existing include_router, add after app creation
+            app_creation = re.search(r'(app\s*=\s*FastAPI\([^)]*\)\s*\n)', updated_content)
+            if app_creation:
+                insert_pos = app_creation.end()
+                api_prefix = f"/api/{module_name.replace('_', '-')}"
+                new_include = f'\napp.include_router({module_name}_router, prefix="{api_prefix}", tags=["{module_name}"])\n'
+                updated_content = updated_content[:insert_pos] + new_include + updated_content[insert_pos:]
+                print(f"✅ Registered {module_name}_router at {api_prefix}")
+    
+    return updated_content, modified
+
+
+def auto_integrate_backend_models(
+    new_model_path: str,
+    models_init_content: str
+) -> tuple[str, bool]:
+    """
+    Automatically integrates a newly created model into models/__init__.py
+    
+    Returns: (updated_init_content, was_modified)
+    """
+    import os
+    import re
+    
+    # Only process Python files in backend/models/
+    if not new_model_path.startswith('backend/models/') or not new_model_path.endswith('.py'):
+        return models_init_content, False
+    
+    model_filename = os.path.basename(new_model_path)
+    module_name = model_filename.replace('.py', '')
+    
+    if module_name == '__init__':
+        return models_init_content, False
+    
+    # Check if already imported
+    if f"from .{module_name}" in models_init_content or f"import {module_name}" in models_init_content:
+        print(f"ℹ️ Model {module_name} already in __init__.py")
+        return models_init_content, False
+    
+    # Add import at the end of __init__.py
+    new_import = f"\nfrom .{module_name} import *\n"
+    updated_content = models_init_content.rstrip() + new_import
+    print(f"✅ Added {module_name} to models/__init__.py")
+    
+    return updated_content, True
+
+
 # --- AI Project Assistant Endpoint ---
 # ⚠️ LEGACY - LOCAL STORAGE ONLY (EC2 INCOMPATIBLE)
 # Use /api/ai-customize-project instead (line 2869+) - S3-enabled
@@ -6101,7 +6876,17 @@ ANALYZING PROJECT FILES FOR SPECIFIC FIXES..."""
         
         # For editing requests, include relevant file content
         file_context = ""
-        if any(keyword in user_message.lower() for keyword in ['change', 'update', 'modify', 'edit', 'fix', 'button', 'color', 'style']):
+        
+        # Keywords that suggest frontend changes
+        frontend_keywords = ['change', 'update', 'modify', 'edit', 'fix', 'button', 'color', 'style', 'page', 'component', 'ui', 'layout', 'design', 'display', 'show', 'view']
+        # Keywords that suggest backend changes  
+        backend_keywords = ['api', 'endpoint', 'route', 'database', 'data', 'fetch', 'save', 'delete', 'update', 'create', 'model', 'backend', 'server', 'auth', 'login', 'user']
+        
+        needs_frontend = any(keyword in user_message.lower() for keyword in frontend_keywords)
+        needs_backend = any(keyword in user_message.lower() for keyword in backend_keywords)
+        
+        # Include frontend context
+        if needs_frontend or not needs_backend:
             # Try to find and include App.jsx content for context
             app_file = project_path / "frontend" / "src" / "App.jsx"
             if app_file.exists():
@@ -6110,7 +6895,42 @@ ANALYZING PROJECT FILES FOR SPECIFIC FIXES..."""
                         content = f.read()
                     # Include first 150 lines (usually contains components and UI)
                     lines = content.split('\n')[:150]
-                    file_context = f"\n\nRELEVANT FILE CONTENT (App.jsx first 150 lines):\n```jsx\n" + '\n'.join(lines) + "\n```\n"
+                    file_context += f"\n\nFRONTEND FILE CONTENT (App.jsx first 150 lines):\n```jsx\n" + '\n'.join(lines) + "\n```\n"
+                except:
+                    pass
+        
+        # Include backend context when needed
+        if needs_backend:
+            # Try to include backend main.py
+            backend_main = project_path / "backend" / "main.py"
+            if backend_main.exists():
+                try:
+                    with open(backend_main, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                    lines = content.split('\n')[:100]
+                    file_context += f"\n\nBACKEND FILE CONTENT (main.py first 100 lines):\n```python\n" + '\n'.join(lines) + "\n```\n"
+                except:
+                    pass
+            
+            # Try to include models.py
+            backend_models = project_path / "backend" / "models.py"
+            if backend_models.exists():
+                try:
+                    with open(backend_models, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                    lines = content.split('\n')[:80]
+                    file_context += f"\n\nBACKEND MODELS (models.py first 80 lines):\n```python\n" + '\n'.join(lines) + "\n```\n"
+                except:
+                    pass
+            
+            # Try to include routes.py
+            backend_routes = project_path / "backend" / "routes.py"
+            if backend_routes.exists():
+                try:
+                    with open(backend_routes, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                    lines = content.split('\n')[:80]
+                    file_context += f"\n\nBACKEND ROUTES (routes.py first 80 lines):\n```python\n" + '\n'.join(lines) + "\n```\n"
                 except:
                     pass
 
@@ -6136,11 +6956,40 @@ CRITICAL RULES - TARGETED EDITS ONLY:
 7. NEVER send full file replacements for existing files - only send the specific lines to change
 8. Keep search/replace strings SHORT - edit ONE line at a time for complex changes
 9. Make MULTIPLE small targeted edits instead of one large edit
+10. CRITICAL: When adding a feature, modify ALL related code - handlers, navigation, state, etc.
 
 EDIT TYPES:
 - "new_file": Create a completely new file (for new components only)
 - "targeted_edit": Modify existing files with search/replace patterns (PREFERRED - use multiple small edits)
 - "append": Add content to end of file
+
+FULL-STACK INTEGRATION RULES:
+When creating a NEW PAGE or FEATURE that needs to be accessible:
+1. Create the component file in frontend/src/components/
+2. The system will AUTO-INTEGRATE it into App.jsx (import + Route)
+3. BUT YOU MUST STILL modify any handlers/functions that should NAVIGATE to the new page!
+4. If a user action (like swiping, clicking) should show the new page, YOU MUST modify that handler to use navigate()
+
+IMPORTANT - MAKING FEATURES ACTUALLY WORK:
+When a user asks for "a page that shows after X action":
+1. Create the new page component
+2. ALSO modify the handler for "X action" to navigate to the new page
+3. Pass necessary data (like user ID) via route params or state
+
+Example: "add a page after right swipe" requires:
+- Creating the new component (new_file)
+- Modifying handleSwipe/handleLike to navigate to the new page (targeted_edit)
+- Passing the user data to the new page
+
+For BACKEND changes (Python/FastAPI):
+- New routes go in backend/routes.py or backend/main.py
+- New models go in backend/models.py
+- Always include proper imports and exports
+
+For FRONTEND changes (React):
+- New pages/components go in frontend/src/components/
+- The system automatically adds imports and routes to App.jsx
+- BUT you must modify existing handlers to navigate to new pages when needed
 
 EXAMPLE - For vague requests like "add more features":
 {{
@@ -6836,6 +7685,173 @@ RESPOND WITH ONLY JSON NOW:"""
                         f.write(cleaned)
                     files_modified.append(file_path)
                     modified_contents[file_path] = cleaned
+
+            # AUTO-INTEGRATE: Check if any new components were created and update App.jsx
+            new_component_files = [
+                fp for fp in files_modified 
+                if fp.startswith('frontend/src/components/') and fp.endswith('.jsx')
+            ]
+            
+            if new_component_files:
+                print(f"🔗 Checking if new components need App.jsx integration: {new_component_files}")
+                
+                # Get App.jsx content (prefer S3, fallback to local)
+                app_jsx_path = 'frontend/src/App.jsx'
+                app_jsx_content = None
+                
+                if app_jsx_path in modified_contents:
+                    app_jsx_content = modified_contents[app_jsx_path]
+                elif app_jsx_path in s3_files_map:
+                    app_jsx_content = s3_files_map[app_jsx_path]
+                else:
+                    app_jsx_local = project_path / app_jsx_path
+                    if app_jsx_local.exists():
+                        with open(app_jsx_local, 'r', encoding='utf-8') as f:
+                            app_jsx_content = f.read()
+                
+                if app_jsx_content:
+                    app_jsx_modified = False
+                    
+                    for new_component_path in new_component_files:
+                        updated_app_jsx, was_modified = auto_integrate_new_component_to_app(
+                            new_component_path,
+                            app_jsx_content,
+                            user_message
+                        )
+                        if was_modified:
+                            app_jsx_content = updated_app_jsx
+                            app_jsx_modified = True
+                    
+                    if app_jsx_modified:
+                        # Save updated App.jsx
+                        app_jsx_local = project_path / app_jsx_path
+                        app_jsx_local.parent.mkdir(parents=True, exist_ok=True)
+                        with open(app_jsx_local, 'w', encoding='utf-8', newline='\n') as f:
+                            f.write(app_jsx_content)
+                        
+                        if app_jsx_path not in files_modified:
+                            files_modified.append(app_jsx_path)
+                        modified_contents[app_jsx_path] = app_jsx_content
+                        
+                        await manager.send_to_project(project_name, {
+                            "type": "file_changed",
+                            "file_path": app_jsx_path,
+                            "message": f"🔗 Auto-integrated new component(s) into App.jsx routing"
+                        })
+                        print(f"✅ Auto-integrated components into App.jsx")
+
+            # AUTO-INTEGRATE BACKEND: Check if any new backend routes/models were created
+            new_backend_route_files = [
+                fp for fp in files_modified 
+                if (fp.startswith('backend/routes/') or fp.startswith('backend/api/')) and fp.endswith('.py') and '__init__' not in fp
+            ]
+            
+            new_backend_model_files = [
+                fp for fp in files_modified 
+                if fp.startswith('backend/models/') and fp.endswith('.py') and '__init__' not in fp
+            ]
+            
+            # Integrate new backend routes into main.py
+            if new_backend_route_files:
+                print(f"🔗 Checking if new backend routes need main.py integration: {new_backend_route_files}")
+                
+                # Get backend main.py content
+                backend_main_path = 'backend/main.py'
+                backend_main_content = None
+                
+                if backend_main_path in modified_contents:
+                    backend_main_content = modified_contents[backend_main_path]
+                elif backend_main_path in s3_files_map:
+                    backend_main_content = s3_files_map[backend_main_path]
+                else:
+                    backend_main_local = project_path / backend_main_path
+                    if backend_main_local.exists():
+                        with open(backend_main_local, 'r', encoding='utf-8') as f:
+                            backend_main_content = f.read()
+                
+                if backend_main_content:
+                    backend_main_modified = False
+                    
+                    for new_route_path in new_backend_route_files:
+                        # Get the route file content
+                        route_content = modified_contents.get(new_route_path, '')
+                        if not route_content and new_route_path in s3_files_map:
+                            route_content = s3_files_map[new_route_path]
+                        
+                        updated_backend_main, was_modified = auto_integrate_backend_routes(
+                            new_route_path,
+                            backend_main_content,
+                            route_content
+                        )
+                        if was_modified:
+                            backend_main_content = updated_backend_main
+                            backend_main_modified = True
+                    
+                    if backend_main_modified:
+                        backend_main_local = project_path / backend_main_path
+                        backend_main_local.parent.mkdir(parents=True, exist_ok=True)
+                        with open(backend_main_local, 'w', encoding='utf-8', newline='\n') as f:
+                            f.write(backend_main_content)
+                        
+                        if backend_main_path not in files_modified:
+                            files_modified.append(backend_main_path)
+                        modified_contents[backend_main_path] = backend_main_content
+                        
+                        await manager.send_to_project(project_name, {
+                            "type": "file_changed",
+                            "file_path": backend_main_path,
+                            "message": f"🔗 Auto-integrated new backend route(s)"
+                        })
+                        print(f"✅ Auto-integrated backend routes into main.py")
+            
+            # Integrate new models into models/__init__.py
+            if new_backend_model_files:
+                print(f"🔗 Checking if new models need __init__.py integration: {new_backend_model_files}")
+                
+                models_init_path = 'backend/models/__init__.py'
+                models_init_content = None
+                
+                if models_init_path in modified_contents:
+                    models_init_content = modified_contents[models_init_path]
+                elif models_init_path in s3_files_map:
+                    models_init_content = s3_files_map[models_init_path]
+                else:
+                    models_init_local = project_path / models_init_path
+                    if models_init_local.exists():
+                        with open(models_init_local, 'r', encoding='utf-8') as f:
+                            models_init_content = f.read()
+                    else:
+                        # Create empty __init__.py if it doesn't exist
+                        models_init_content = "# Auto-generated models init\n"
+                
+                if models_init_content:
+                    models_init_modified = False
+                    
+                    for new_model_path in new_backend_model_files:
+                        updated_models_init, was_modified = auto_integrate_backend_models(
+                            new_model_path,
+                            models_init_content
+                        )
+                        if was_modified:
+                            models_init_content = updated_models_init
+                            models_init_modified = True
+                    
+                    if models_init_modified:
+                        models_init_local = project_path / models_init_path
+                        models_init_local.parent.mkdir(parents=True, exist_ok=True)
+                        with open(models_init_local, 'w', encoding='utf-8', newline='\n') as f:
+                            f.write(models_init_content)
+                        
+                        if models_init_path not in files_modified:
+                            files_modified.append(models_init_path)
+                        modified_contents[models_init_path] = models_init_content
+                        
+                        await manager.send_to_project(project_name, {
+                            "type": "file_changed",
+                            "file_path": models_init_path,
+                            "message": f"🔗 Auto-integrated new model(s)"
+                        })
+                        print(f"✅ Auto-integrated models into __init__.py")
 
             # Validate and fix critical files
             await manager.send_to_project(project_name, {

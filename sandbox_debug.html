@@ -1054,20 +1054,17 @@
             }
         }
         
-        // Mock API calls for demo purposes with sample data
-        const mockFetch = (url, options) => {
-            console.log('Mock API call to:', url);
-            
-            // Parse the URL to determine the endpoint
-            const urlObj = new URL(url, window.location.origin);
-            const pathname = urlObj.pathname;
-            
-            // Mock data for different endpoints
-            let responseData = { message: 'Mock API response', data: [] };
-            
+        // Store original fetch - ALWAYS prefer real HTTP requests
+        const originalFetch = window.fetch.bind(window);
+        
+        // Track whether mock mode is enabled (disabled by default)
+        window._sandboxMockEnabled = false;
+        
+        // Mock data generator for fallback scenarios
+        const getMockData = (pathname) => {
             // Products endpoint
             if (pathname.includes('/products')) {
-                responseData = [
+                return [
                     {
                         id: 1,
                         name: "Fresh Bananas",
@@ -1075,7 +1072,7 @@
                         price: 2.99,
                         stock: 50,
                         category: "fruits",
-                        image_url: "https://placehold.co/400x300/FFD700/FFFFFF/png?text=Bananas",
+                        image_url: "https://images.unsplash.com/photo-1571771894821-ce9b6c11b08e?w=400&h=300&fit=crop&auto=format",
                         created_at: "2024-01-01T00:00:00"
                     },
                     {
@@ -1085,7 +1082,7 @@
                         price: 3.49,
                         stock: 25,
                         category: "dairy",
-                        image_url: "https://placehold.co/400x300/87CEEB/FFFFFF/png?text=Milk",
+                        image_url: "https://images.unsplash.com/photo-1563636619-e9143da7973b?w=400&h=300&fit=crop&auto=format",
                         created_at: "2024-01-01T00:00:00"
                     },
                     {
@@ -1095,7 +1092,7 @@
                         price: 2.79,
                         stock: 30,
                         category: "bakery",
-                        image_url: "https://placehold.co/400x300/DEB887/FFFFFF/png?text=Bread",
+                        image_url: "https://images.unsplash.com/photo-1509440159596-0249088772ff?w=400&h=300&fit=crop&auto=format",
                         created_at: "2024-01-01T00:00:00"
                     },
                     {
@@ -1105,7 +1102,7 @@
                         price: 4.99,
                         stock: 40,
                         category: "fruits",
-                        image_url: "https://placehold.co/400x300/DC143C/FFFFFF/png?text=Apples",
+                        image_url: "https://images.unsplash.com/photo-1560806887-1e4cd0b6cbd6?w=400&h=300&fit=crop&auto=format",
                         created_at: "2024-01-01T00:00:00"
                     },
                     {
@@ -1115,7 +1112,7 @@
                         price: 5.99,
                         stock: 20,
                         category: "dairy",
-                        image_url: "https://placehold.co/400x300/F0F8FF/000000/png?text=Yogurt",
+                        image_url: "https://images.unsplash.com/photo-1488477181946-6428a0291777?w=400&h=300&fit=crop&auto=format",
                         created_at: "2024-01-01T00:00:00"
                     },
                     {
@@ -1125,14 +1122,18 @@
                         price: 12.99,
                         stock: 15,
                         category: "bakery",
-                        image_url: "https://placehold.co/400x300/8B4513/FFFFFF/png?text=Cake",
+                        image_url: "https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=400&h=300&fit=crop&auto=format",
                         created_at: "2024-01-01T00:00:00"
                     }
                 ];
             }
+            // Cart endpoint
+            else if (pathname.includes('/cart')) {
+                return { items: [], total: 0, count: 0 };
+            }
             // Orders endpoint
             else if (pathname.includes('/orders')) {
-                responseData = [
+                return [
                     {
                         id: 1,
                         user_id: 1,
@@ -1148,7 +1149,7 @@
             }
             // Users endpoint
             else if (pathname.includes('/users')) {
-                responseData = [
+                return [
                     {
                         id: 1,
                         email: "demo@example.com",
@@ -1160,20 +1161,105 @@
             }
             // Health check
             else if (pathname.includes('/health')) {
-                responseData = { status: "healthy", service: "mock-api" };
+                return { status: "healthy", service: "mock-fallback-api" };
             }
-            
+            // Default response
+            return { message: 'Mock API response (fallback mode)', data: [] };
+        };
+        
+        // Create mock response helper
+        const createMockResponse = (data) => {
             return Promise.resolve({
                 ok: true,
                 status: 200,
                 statusText: 'OK',
-                json: () => Promise.resolve(responseData),
-                text: () => Promise.resolve(JSON.stringify(responseData))
+                json: () => Promise.resolve(data),
+                text: () => Promise.resolve(JSON.stringify(data))
             });
         };
         
-        // Replace fetch with mock for demo
-        window.fetch = mockFetch;
+        // Smart fetch wrapper - prefers real requests, falls back to mock on failure
+        const smartFetch = async (url, options) => {
+            const urlObj = new URL(url, window.location.origin);
+            const pathname = urlObj.pathname;
+            
+            // Xverta platform APIs - ALWAYS use real fetch
+            const isXvertaApi = pathname.includes('/api/visual-edit-element') || 
+                                pathname.includes('/api/sandbox-preview') ||
+                                pathname.includes('/api/projects') ||
+                                pathname.includes('/api/run-project') ||
+                                pathname.includes('/api/auto-fix');
+            
+            if (isXvertaApi) {
+                console.log('🎨 Xverta API call (always real):', pathname);
+                return originalFetch(url, options);
+            }
+            
+            // Mock-eligible endpoints (products, cart, orders, users, health)
+            const isMockEligible = pathname.includes('/products') || 
+                                   pathname.includes('/cart') || 
+                                   pathname.includes('/orders') || 
+                                   pathname.includes('/users') || 
+                                   pathname.includes('/health');
+            
+            // If mock mode is already enabled, use mock immediately for eligible endpoints
+            if (window._sandboxMockEnabled && isMockEligible) {
+                console.log('🔶 [MOCK FALLBACK] Returning mock data for:', pathname);
+                return createMockResponse(getMockData(pathname));
+            }
+            
+            // Try real fetch first
+            try {
+                console.log('🌐 Attempting real HTTP request to:', pathname);
+                const response = await originalFetch(url, options);
+                
+                // If successful, keep using real fetch
+                if (response.ok) {
+                    console.log('✅ Real API response received for:', pathname);
+                    return response;
+                }
+                
+                // Server returned an error - fall back to mock if eligible
+                if (isMockEligible) {
+                    console.warn('⚠️ [FALLBACK ACTIVATED] Server returned ' + response.status + ' for ' + pathname + '. Using mock data.');
+                    if (!window._sandboxMockEnabled) {
+                        window._sandboxMockEnabled = true;
+                        console.warn('🔶 ====================================');
+                        console.warn('🔶 MOCK MODE ENABLED - Backend returned error');
+                        console.warn('🔶 Future mock-eligible requests will use fallback data');
+                        console.warn('🔶 ====================================');
+                    }
+                    return createMockResponse(getMockData(pathname));
+                }
+                
+                // Non-mock-eligible endpoint - return the error response as-is
+                return response;
+                
+            } catch (networkError) {
+                // Network error (backend unreachable)
+                console.error('❌ Network error for:', pathname, networkError.message);
+                
+                if (isMockEligible) {
+                    if (!window._sandboxMockEnabled) {
+                        window._sandboxMockEnabled = true;
+                        console.warn('🔶 ====================================');
+                        console.warn('🔶 MOCK MODE ENABLED - Backend unreachable');
+                        console.warn('🔶 Network error: ' + networkError.message);
+                        console.warn('🔶 Future mock-eligible requests will use fallback data');
+                        console.warn('🔶 ====================================');
+                    }
+                    console.log('🔶 [MOCK FALLBACK] Returning mock data for:', pathname);
+                    return createMockResponse(getMockData(pathname));
+                }
+                
+                // Non-mock-eligible endpoint - rethrow the error
+                throw networkError;
+            }
+        };
+        
+        // Replace window.fetch with smart fetch (real-first, fallback-on-failure)
+        window.fetch = smartFetch;
+        console.log('✅ Smart fetch initialized - real HTTP requests preferred, mock fallback on failure');
         
         // Create utility functions for className manipulation
         
