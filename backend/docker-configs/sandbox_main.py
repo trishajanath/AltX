@@ -703,6 +703,278 @@ async def delete_item(
     
     return {"message": "Item deleted successfully"}
 
+
+# =============================================================================
+# 🚀 UNIVERSAL DYNAMIC API - Handles ANY endpoint automatically!
+# =============================================================================
+# This handles /api/{resource}, /api/{resource}/{id}, etc.
+# Works with ANY resource name: products, posts, users, orders, menu, etc.
+
+from typing import Dict
+import uuid as uuid_module
+
+# In-memory storage for all dynamic resources
+# Structure: { "products": [{id: 1, ...}, ...], "posts": [...], ... }
+_dynamic_storage: Dict[str, list] = {}
+
+# Counter for auto-incrementing IDs per resource
+_id_counters: Dict[str, int] = {}
+
+
+def _get_resource_storage(resource: str) -> list:
+    """Get or create storage for a resource."""
+    if resource not in _dynamic_storage:
+        _dynamic_storage[resource] = []
+        _id_counters[resource] = 0
+        
+        # Pre-populate with sample data for common resources
+        if resource in ["products", "items"]:
+            _dynamic_storage[resource] = [
+                {"id": 1, "name": "Sample Product 1", "description": "A great product", "price": 29.99, "category": "general", "in_stock": True, "image": "https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=400"},
+                {"id": 2, "name": "Sample Product 2", "description": "Another product", "price": 49.99, "category": "general", "in_stock": True, "image": "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=400"},
+                {"id": 3, "name": "Sample Product 3", "description": "Premium item", "price": 99.99, "category": "premium", "in_stock": True, "image": "https://images.unsplash.com/photo-1572635196237-14b3f281503f?w=400"},
+            ]
+            _id_counters[resource] = 3
+        elif resource == "users":
+            _dynamic_storage[resource] = [
+                {"id": 1, "name": "John Doe", "email": "john@example.com", "role": "admin"},
+                {"id": 2, "name": "Jane Smith", "email": "jane@example.com", "role": "user"},
+            ]
+            _id_counters[resource] = 2
+        elif resource == "posts":
+            _dynamic_storage[resource] = [
+                {"id": 1, "title": "Welcome Post", "content": "Welcome to our blog!", "author": "Admin", "created_at": datetime.utcnow().isoformat()},
+                {"id": 2, "title": "Getting Started", "content": "Here's how to get started...", "author": "Admin", "created_at": datetime.utcnow().isoformat()},
+            ]
+            _id_counters[resource] = 2
+        elif resource == "categories":
+            _dynamic_storage[resource] = [
+                {"id": 1, "name": "Electronics", "slug": "electronics"},
+                {"id": 2, "name": "Clothing", "slug": "clothing"},
+                {"id": 3, "name": "Home & Garden", "slug": "home-garden"},
+            ]
+            _id_counters[resource] = 3
+        elif resource == "orders":
+            _dynamic_storage[resource] = []
+            _id_counters[resource] = 0
+        elif resource == "cart":
+            _dynamic_storage[resource] = []
+            _id_counters[resource] = 0
+            
+    return _dynamic_storage[resource]
+
+
+def _next_id(resource: str) -> int:
+    """Get next auto-increment ID for a resource."""
+    _id_counters[resource] = _id_counters.get(resource, 0) + 1
+    return _id_counters[resource]
+
+
+# GET /api/{resource} - List all items
+@app.get("/api/{resource}", tags=["Dynamic API"])
+async def dynamic_list(
+    resource: str,
+    skip: int = 0,
+    limit: int = 100,
+    search: Optional[str] = None,
+    category: Optional[str] = None
+):
+    """
+    🚀 UNIVERSAL LIST ENDPOINT
+    Works with ANY resource: /api/products, /api/posts, /api/menu, /api/anything
+    """
+    # Skip auth endpoints
+    if resource in ["auth", "health"]:
+        raise HTTPException(status_code=404, detail="Use specific auth endpoints")
+    
+    storage = _get_resource_storage(resource)
+    result = storage.copy()
+    
+    # Apply filters
+    if search:
+        search_lower = search.lower()
+        result = [
+            item for item in result
+            if any(search_lower in str(v).lower() for v in item.values())
+        ]
+    
+    if category:
+        result = [item for item in result if item.get("category") == category]
+    
+    # Apply pagination
+    total = len(result)
+    result = result[skip:skip + limit]
+    
+    print(f"📦 [DYNAMIC API] GET /api/{resource} -> {len(result)} items")
+    
+    return {
+        "data": result,
+        "total": total,
+        "skip": skip,
+        "limit": limit,
+        "success": True
+    }
+
+
+# GET /api/{resource}/{item_id} - Get single item
+@app.get("/api/{resource}/{item_id}", tags=["Dynamic API"])
+async def dynamic_get(resource: str, item_id: str):
+    """
+    🚀 UNIVERSAL GET ENDPOINT
+    Works with ANY resource: /api/products/1, /api/posts/abc, etc.
+    """
+    # Skip auth endpoints
+    if resource == "auth":
+        raise HTTPException(status_code=404, detail="Use specific auth endpoints")
+    
+    storage = _get_resource_storage(resource)
+    
+    # Try to find by ID (support both int and string IDs)
+    for item in storage:
+        if str(item.get("id")) == str(item_id) or item.get("_id") == item_id:
+            print(f"📦 [DYNAMIC API] GET /api/{resource}/{item_id} -> Found")
+            return {"data": item, "success": True}
+    
+    # Not found - return empty with 404
+    raise HTTPException(status_code=404, detail=f"{resource[:-1] if resource.endswith('s') else resource} not found")
+
+
+# POST /api/{resource} - Create new item
+@app.post("/api/{resource}", tags=["Dynamic API"])
+async def dynamic_create(resource: str, data: dict):
+    """
+    🚀 UNIVERSAL CREATE ENDPOINT
+    Works with ANY resource: POST /api/products, POST /api/orders, etc.
+    """
+    # Skip auth endpoints
+    if resource == "auth":
+        raise HTTPException(status_code=404, detail="Use specific auth endpoints")
+    
+    storage = _get_resource_storage(resource)
+    
+    # Create new item with auto-generated ID
+    new_item = {
+        "id": _next_id(resource),
+        **data,
+        "created_at": datetime.utcnow().isoformat(),
+        "updated_at": datetime.utcnow().isoformat()
+    }
+    
+    storage.append(new_item)
+    
+    print(f"📦 [DYNAMIC API] POST /api/{resource} -> Created ID {new_item['id']}")
+    
+    return {
+        "data": new_item,
+        "success": True,
+        "message": f"{resource[:-1] if resource.endswith('s') else resource} created successfully"
+    }
+
+
+# PUT /api/{resource}/{item_id} - Update item
+@app.put("/api/{resource}/{item_id}", tags=["Dynamic API"])
+async def dynamic_update(resource: str, item_id: str, data: dict):
+    """
+    🚀 UNIVERSAL UPDATE ENDPOINT
+    Works with ANY resource: PUT /api/products/1, PUT /api/posts/abc, etc.
+    """
+    storage = _get_resource_storage(resource)
+    
+    # Find and update item
+    for i, item in enumerate(storage):
+        if str(item.get("id")) == str(item_id) or item.get("_id") == item_id:
+            # Preserve ID and created_at, update everything else
+            updated_item = {
+                **item,
+                **data,
+                "id": item.get("id"),
+                "_id": item.get("_id"),
+                "updated_at": datetime.utcnow().isoformat()
+            }
+            storage[i] = updated_item
+            
+            print(f"📦 [DYNAMIC API] PUT /api/{resource}/{item_id} -> Updated")
+            
+            return {
+                "data": updated_item,
+                "success": True,
+                "message": f"{resource[:-1] if resource.endswith('s') else resource} updated successfully"
+            }
+    
+    raise HTTPException(status_code=404, detail=f"{resource[:-1] if resource.endswith('s') else resource} not found")
+
+
+# PATCH /api/{resource}/{item_id} - Partial update
+@app.patch("/api/{resource}/{item_id}", tags=["Dynamic API"])
+async def dynamic_patch(resource: str, item_id: str, data: dict):
+    """
+    🚀 UNIVERSAL PATCH ENDPOINT
+    Works with ANY resource for partial updates
+    """
+    return await dynamic_update(resource, item_id, data)
+
+
+# DELETE /api/{resource}/{item_id} - Delete item
+@app.delete("/api/{resource}/{item_id}", tags=["Dynamic API"])
+async def dynamic_delete(resource: str, item_id: str):
+    """
+    🚀 UNIVERSAL DELETE ENDPOINT
+    Works with ANY resource: DELETE /api/products/1, DELETE /api/posts/abc, etc.
+    """
+    storage = _get_resource_storage(resource)
+    
+    # Find and remove item
+    for i, item in enumerate(storage):
+        if str(item.get("id")) == str(item_id) or item.get("_id") == item_id:
+            removed = storage.pop(i)
+            
+            print(f"📦 [DYNAMIC API] DELETE /api/{resource}/{item_id} -> Deleted")
+            
+            return {
+                "success": True,
+                "message": f"{resource[:-1] if resource.endswith('s') else resource} deleted successfully",
+                "deleted": removed
+            }
+    
+    raise HTTPException(status_code=404, detail=f"{resource[:-1] if resource.endswith('s') else resource} not found")
+
+
+# POST /api/{resource}/{item_id}/{action} - Custom actions (e.g., /api/cart/1/checkout)
+@app.post("/api/{resource}/{item_id}/{action}", tags=["Dynamic API"])
+async def dynamic_action(resource: str, item_id: str, action: str, data: dict = {}):
+    """
+    🚀 UNIVERSAL ACTION ENDPOINT
+    Handles custom actions like: POST /api/orders/1/cancel, POST /api/cart/checkout
+    """
+    storage = _get_resource_storage(resource)
+    
+    # Find item
+    for i, item in enumerate(storage):
+        if str(item.get("id")) == str(item_id) or item.get("_id") == item_id:
+            # Apply action
+            item["last_action"] = action
+            item["action_data"] = data
+            item["action_at"] = datetime.utcnow().isoformat()
+            
+            # Handle specific common actions
+            if action == "cancel":
+                item["status"] = "cancelled"
+            elif action == "complete":
+                item["status"] = "completed"
+            elif action == "archive":
+                item["archived"] = True
+            
+            print(f"📦 [DYNAMIC API] POST /api/{resource}/{item_id}/{action} -> Action applied")
+            
+            return {
+                "data": item,
+                "success": True,
+                "message": f"Action '{action}' applied successfully"
+            }
+    
+    raise HTTPException(status_code=404, detail=f"{resource[:-1] if resource.endswith('s') else resource} not found")
+
+
 # =============================================================================
 # MAIN ENTRY POINT
 # =============================================================================

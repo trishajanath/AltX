@@ -3003,8 +3003,67 @@ async def get_sandbox_preview(
         
         # Get backend URL from query param, header, or default
         effective_backend_url = backend_url or request.headers.get('X-Backend-URL') or 'http://localhost:8000/api'
-        print(f"🔗 Backend URL for sandbox: {effective_backend_url}")
-        
+        print(f"🔗 Backend URL for sandbox (initial): {effective_backend_url}")
+
+        # If the project includes backend files, attempt to auto-deploy a Docker sandbox
+        try:
+            # Collect backend files from the project data (if present)
+            backend_files = {}
+            for f in project_data.get('files', []):
+                p = f.get('path', '')
+                if p.startswith('backend/'):
+                    rel = p[8:]
+                    backend_files[rel] = f.get('content', '')
+
+            if backend_files and PREVIEW_ORCHESTRATOR_AVAILABLE:
+                try:
+                    from preview_orchestrator import get_orchestrator, PreviewRequest
+
+                    print(f"🐳 Auto-deploy: backend files detected ({len(backend_files)} files). Attempting to deploy Docker sandbox...")
+
+                    # Ensure orchestrator is initialized (init_orchestrator is available at module scope)
+                    try:
+                        orchestrator = get_orchestrator()
+                    except Exception:
+                        # Try to initialize orchestrator if possible
+                        if 'init_orchestrator' in globals() and get_sandbox_service:
+                            try:
+                                deployment_service = get_sandbox_service() if get_sandbox_service else None
+                                orchestrator = init_orchestrator(deployment_service=deployment_service, host_url=os.getenv('API_HOST_URL', 'http://localhost:8000'))
+                                print("✅ Preview orchestrator initialized on-demand for sandbox preview")
+                            except Exception as e:
+                                print(f"⚠️ Failed to initialize orchestrator on-demand: {e}")
+                                orchestrator = None
+                        else:
+                            orchestrator = None
+
+                    if orchestrator and getattr(orchestrator, '_deployment_service', None):
+                        preview_request = PreviewRequest(
+                            project_name=project_slug,
+                            project_files={k: v for k, v in files_content.items()},
+                            backend_files=backend_files,
+                            ttl_minutes=30,
+                            generate_backend=False
+                        )
+
+                        print(f"🔁 Starting orchestrator.start_preview for project {project_slug}...")
+                        result = await orchestrator.start_preview(preview_request)
+
+                        if result and getattr(result, 'backend_url', None):
+                            effective_backend_url = result.backend_url
+                            session_id = getattr(result, 'session_id', None)
+                            print(f"✅ Auto-deployed backend at: {effective_backend_url} (session: {session_id})")
+                        else:
+                            print(f"⚠️ Orchestrator returned no backend_url, falling back to {effective_backend_url}")
+                    else:
+                        print("⚠️ Orchestrator or deployment service unavailable for auto-deploy; continuing with default backend_url")
+                except Exception as e:
+                    print(f"⚠️ Auto-deploy failed: {e}")
+        except Exception as e:
+            print(f"⚠️ Error while preparing auto-deploy: {e}")
+
+        print(f"🔗 Backend URL for sandbox (final): {effective_backend_url}")
+
         # Generate the sandbox HTML with backend URL injected
         sandbox_html = generate_sandbox_html(files_content, project_name, effective_backend_url)
         
@@ -4589,29 +4648,61 @@ def generate_sandbox_html(files_content: dict, project_name: str, backend_url: s
             }});
         }};
         
-        // Smart fetch wrapper - prefers real requests, falls back to mock on failure
+        // Smart fetch wrapper - routes API calls to Docker backend, falls back to mock on failure
         const smartFetch = async (url, options) => {{
             const urlObj = new URL(url, window.location.origin);
             const pathname = urlObj.pathname;
             
-            // Xverta platform APIs - ALWAYS use real fetch
+            // Xverta platform APIs - ALWAYS use real fetch to main backend
             const isXvertaApi = pathname.includes('/api/visual-edit-element') || 
                                 pathname.includes('/api/sandbox-preview') ||
                                 pathname.includes('/api/projects') ||
                                 pathname.includes('/api/run-project') ||
-                                pathname.includes('/api/auto-fix');
+                                pathname.includes('/api/auto-fix') ||
+                                pathname.includes('/api/gemini') ||
+                                pathname.includes('/api/jobs') ||
+                                pathname.includes('/api/auth') ||
+                                pathname.includes('/api/compliance');
             
             if (isXvertaApi) {{
                 console.log('🎨 Xverta API call (always real):', pathname);
                 return originalFetch(url, options);
             }}
             
-            // Mock-eligible endpoints (products, cart, orders, users, health)
-            const isMockEligible = pathname.includes('/products') || 
-                                   pathname.includes('/cart') || 
-                                   pathname.includes('/orders') || 
-                                   pathname.includes('/users') || 
-                                   pathname.includes('/health');
+            // Generated app API endpoints - route to Docker backend if available
+            const isAppApi = pathname.startsWith('/api/') && (
+                pathname.includes('/products') || 
+                pathname.includes('/cart') || 
+                pathname.includes('/orders') || 
+                pathname.includes('/users') || 
+                pathname.includes('/health') ||
+                pathname.includes('/items') ||
+                pathname.includes('/categories')
+            );
+            
+            // If we have a Docker backend URL, route API calls there
+            const backendUrl = window.SANDBOX_API_URL || window.API_BASE;
+            const hasDockerBackend = backendUrl && !backendUrl.includes('localhost:8000');
+            
+            if (isAppApi && hasDockerBackend) {{
+                // Rewrite URL to Docker backend
+                const dockerUrl = backendUrl + pathname.replace('/api', '');
+                console.log('🐳 Routing to Docker backend:', dockerUrl);
+                
+                try {{
+                    const response = await originalFetch(dockerUrl, options);
+                    if (response.ok) {{
+                        console.log('✅ Docker backend response received for:', pathname);
+                        return response;
+                    }}
+                    console.warn('⚠️ Docker backend returned:', response.status);
+                }} catch (dockerError) {{
+                    console.warn('⚠️ Docker backend unreachable:', dockerError.message);
+                }}
+            }}
+            
+            // Mock-eligible endpoints (fallback if Docker backend fails)
+            const isMockEligible = isAppApi;
             
             // If mock mode is already enabled, use mock immediately for eligible endpoints
             if (window._sandboxMockEnabled && isMockEligible) {{
@@ -4619,7 +4710,7 @@ def generate_sandbox_html(files_content: dict, project_name: str, backend_url: s
                 return createMockResponse(getMockData(pathname));
             }}
             
-            // Try real fetch first
+            // Try real fetch to original URL (main backend or relative)
             try {{
                 console.log('🌐 Attempting real HTTP request to:', pathname);
                 const response = await originalFetch(url, options);
@@ -9279,12 +9370,13 @@ install_dependencies_endpoint = install_dependencies
 # --- Run Project Endpoint ---
 @app.post("/api/run-project")
 async def run_project(request: dict = Body(...)):
-    """Build and run the project using sandboxed preview"""
+    """Build and run the project using sandboxed preview with Docker backend deployment"""
     try:
         from s3_storage import get_project_from_s3, find_project_user_id, _project_user_cache
         
         project_name = request.get("project_name")
         tech_stack = request.get("tech_stack", [])
+        deploy_backend = request.get("deploy_backend", True)  # Enable backend deployment by default
         
         print(f"🚀 Run project requested for: '{project_name}'")
         project_slug = normalize_project_slug(project_name)
@@ -9322,12 +9414,24 @@ async def run_project(request: dict = Body(...)):
         frontend_path = project_path / "frontend"
         frontend_exists = frontend_path.exists() if project_exists_locally else False
         
-        if project_exists_in_s3 and not frontend_exists:
-            # Check if S3 project has frontend files
-            # s3_data['files'] is a LIST of dicts with 'path' key, not a dict
-            s3_files = s3_data.get('files', []) if s3_data else []
-            if any(f.get('path', '').startswith('frontend/') for f in s3_files):
-                frontend_exists = True
+        # Collect all project files for orchestration
+        project_files = {}
+        backend_files = {}
+        
+        if project_exists_in_s3 and s3_data:
+            s3_files = s3_data.get('files', [])
+            for f in s3_files:
+                file_path = f.get('path', '')
+                file_content = f.get('content', '')
+                if file_path.startswith('frontend/'):
+                    frontend_exists = True
+                    # Store frontend files for analysis
+                    relative_path = file_path[9:]  # Remove 'frontend/' prefix
+                    project_files[relative_path] = file_content
+                elif file_path.startswith('backend/'):
+                    # Store backend files for Docker deployment
+                    relative_path = file_path[8:]  # Remove 'backend/' prefix
+                    backend_files[relative_path] = file_content
         
         if not frontend_exists:
             return {"success": False, "error": "Frontend not found"}
@@ -9338,8 +9442,93 @@ async def run_project(request: dict = Body(...)):
             "level": "info"
         })
         
-        # Generate sandbox preview URL
+        # =====================================================================
+        # DEPLOY BACKEND DOCKER CONTAINER (if available and enabled)
+        # =====================================================================
+        backend_url = None
+        session_id = None
+        
+        # DEBUG: Log the conditions
+        print(f"🔍 DEBUG Docker deployment check:")
+        print(f"   - deploy_backend: {deploy_backend}")
+        print(f"   - backend_files count: {len(backend_files) if backend_files else 0}")
+        print(f"   - PREVIEW_ORCHESTRATOR_AVAILABLE: {PREVIEW_ORCHESTRATOR_AVAILABLE}")
+        
+        if deploy_backend and backend_files and PREVIEW_ORCHESTRATOR_AVAILABLE:
+            try:
+                from preview_orchestrator import get_orchestrator, PreviewRequest
+                
+                print(f"🔍 DEBUG: Attempting to get orchestrator...")
+                orchestrator = get_orchestrator()
+                print(f"🔍 DEBUG: Orchestrator: {orchestrator}")
+                print(f"🔍 DEBUG: Deployment service: {orchestrator._deployment_service if orchestrator else None}")
+                
+                if orchestrator and orchestrator._deployment_service:
+                    await manager.send_to_project(project_name, {
+                        "type": "terminal_output",
+                        "message": "🐳 Deploying backend Docker container...",
+                        "level": "info"
+                    })
+                    
+                    # Create preview request with backend files
+                    preview_request = PreviewRequest(
+                        project_name=project_slug,
+                        project_files=project_files,
+                        backend_files=backend_files,
+                        ttl_minutes=45,
+                        generate_backend=False  # We already have backend files
+                    )
+                    
+                    # Start the orchestration (deploys Docker container)
+                    result = await orchestrator.start_preview(preview_request)
+                    
+                    if result.success and result.backend_url:
+                        backend_url = result.backend_url
+                        session_id = result.session_id
+                        print(f"✅ Backend deployed at: {backend_url}")
+                        
+                        await manager.send_to_project(project_name, {
+                            "type": "terminal_output",
+                            "message": f"✅ Backend API running at: {backend_url}",
+                            "level": "info"
+                        })
+                    else:
+                        print(f"⚠️ Backend deployment returned: {result.message}")
+                        await manager.send_to_project(project_name, {
+                            "type": "terminal_output",
+                            "message": f"⚠️ Backend deployment: {result.message}. Using mock mode.",
+                            "level": "warning"
+                        })
+                else:
+                    print("⚠️ Orchestrator or deployment service not available")
+                    
+            except Exception as e:
+                print(f"⚠️ Backend deployment failed: {e}")
+                import traceback
+                traceback.print_exc()
+                await manager.send_to_project(project_name, {
+                    "type": "terminal_output",
+                    "message": f"⚠️ Backend deployment failed: {str(e)}. Using mock fallback.",
+                    "level": "warning"
+                })
+        elif not backend_files:
+            print("ℹ️ No backend files found - frontend will use mock data")
+        elif not PREVIEW_ORCHESTRATOR_AVAILABLE:
+            print("⚠️ Preview orchestrator not available")
+        
+        # =====================================================================
+        # GENERATE SANDBOX PREVIEW URL WITH BACKEND URL
+        # =====================================================================
+        
+        # Build sandbox URL with backend_url parameter if available
         sandbox_url = f"http://localhost:8000/api/sandbox-preview/{project_slug}"
+        if backend_url:
+            # Encode backend URL as query parameter
+            from urllib.parse import urlencode
+            params = {"backend_url": backend_url}
+            if session_id:
+                params["session_id"] = session_id
+            sandbox_url = f"{sandbox_url}?{urlencode(params)}"
         
         # Validate that essential files exist (skip for S3 - sandbox will handle it)
         if project_exists_locally:
@@ -9365,17 +9554,24 @@ async def run_project(request: dict = Body(...)):
         # Send preview ready signal
         await manager.send_to_project(project_name, {
             "type": "preview_ready",
-            "url": sandbox_url
+            "url": sandbox_url,
+            "backend_url": backend_url,
+            "session_id": session_id
         })
         
         return {
             "success": True,
             "preview_url": sandbox_url,
-            "message": "Sandbox preview is ready",
-            "type": "sandbox"
+            "backend_url": backend_url,
+            "session_id": session_id,
+            "message": "Sandbox preview is ready" + (f" with backend at {backend_url}" if backend_url else " (mock mode)"),
+            "type": "sandbox",
+            "mock_mode": backend_url is None
         }
         
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         await manager.send_to_project(project_name, {
             "type": "terminal_output",
             "message": f"❌ Failed to start preview: {str(e)}",

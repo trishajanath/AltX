@@ -1849,8 +1849,7 @@ export const cardVariants = {
 							{'path': 'compliance/COMPLIANCE_SUMMARY.json', 'content': json.dumps(compliance_summary, indent=2)}
 						],
 						self.user_id
-					)
-					)
+  				)
 					
 					files_created.extend([
 						"compliance/SOC2_AUDIT_REPORT.md",
