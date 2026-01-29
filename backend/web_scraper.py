@@ -229,7 +229,13 @@ def force_update_knowledge_base():
         if os.path.exists(pdf_script):
             try:
                 print("📄 Auto-generating PDF from fresh data...")
-                result = subprocess.run(["python", pdf_script], capture_output=True, text=True)
+                result = subprocess.run(
+                    ["python", pdf_script],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace"
+                )
                 if result.returncode == 0:
                     print("✅ PDF regenerated successfully")
                 else:

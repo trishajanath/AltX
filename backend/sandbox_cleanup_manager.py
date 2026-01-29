@@ -89,7 +89,9 @@ class ContainerCleanup:
                 lambda: subprocess.run(
                     ["docker", "inspect", "-f", "{{.State.Running}}", container_name],
                     capture_output=True,
-                    text=True
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace"
                 )
             )
             
@@ -104,15 +106,17 @@ class ContainerCleanup:
                 return True
             
             # Stop the container
-            result = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: subprocess.run(
-                    ["docker", "stop", "-t", str(timeout), container_name],
-                    capture_output=True,
-                    text=True,
-                    timeout=timeout + 5
+                result = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: subprocess.run(
+                        ["docker", "stop", "-t", str(timeout), container_name],
+                        capture_output=True,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                        timeout=timeout + 5
+                    )
                 )
-            )
             
             if result.returncode == 0:
                 logger.info(f"✅ Stopped container: {container_name}")
@@ -140,7 +144,9 @@ class ContainerCleanup:
                 lambda: subprocess.run(
                     ["docker", "rm", "-f" if force else "", container_name],
                     capture_output=True,
-                    text=True
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace"
                 )
             )
             
@@ -170,7 +176,13 @@ class ContainerCleanup:
             
             result = await asyncio.get_event_loop().run_in_executor(
                 None,
-                lambda: subprocess.run(args, capture_output=True, text=True)
+                lambda: subprocess.run(
+                    args,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace"
+                )
             )
             
             # Success or "no such image" both count as idempotent success

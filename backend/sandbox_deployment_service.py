@@ -144,12 +144,17 @@ class SandboxDeploymentService:
             result = subprocess.run(
                 ["docker", "network", "inspect", self.network_name],
                 capture_output=True,
-                text=True
+                text=True,
+                encoding="utf-8",
+                errors="replace"
             )
             if result.returncode != 0:
                 subprocess.run(
                     ["docker", "network", "create", self.network_name],
                     capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     check=True
                 )
                 logger.info(f"Created Docker network: {self.network_name}")
@@ -183,9 +188,16 @@ class SandboxDeploymentService:
         return f"sandbox-{short_id}-{timestamp}"
     
     def _generate_image_name(self, session_id: str) -> str:
-        """Generate a unique image name."""
-        short_id = session_id[:8] if len(session_id) > 8 else session_id
-        return f"sandbox-backend-{short_id}:latest"
+        """Generate a unique image name with a valid tag."""
+        import re
+        if not session_id or not isinstance(session_id, str):
+            session_id = "sandbox"
+        safe_id = re.sub(r'[^a-zA-Z0-9_-]', '', session_id)
+        if not safe_id:
+            safe_id = "sandbox"
+        tag = f"sandbox-backend-preview-{safe_id.lower()}-v1:latest"
+        print(f"[DEBUG] Docker image tag generated: {tag}")
+        return tag
     
     async def start(self):
         """Start the deployment service and background cleanup."""
@@ -351,6 +363,8 @@ class SandboxDeploymentService:
                     cwd=build_dir,
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     timeout=300  # 5 minute build timeout
                 )
             )
@@ -379,7 +393,9 @@ class SandboxDeploymentService:
                         container.image_name
                     ],
                     capture_output=True,
-                    text=True
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace"
                 )
             )
             
@@ -537,11 +553,12 @@ class SandboxDeploymentService:
             lambda: subprocess.run(
                 ["docker", "logs", "--tail", str(tail), container.container_name],
                 capture_output=True,
-                text=True
+                text=True,
+                encoding="utf-8",
+                errors="replace"
             )
         )
-        
-        return result.stdout + result.stderr
+        return (result.stdout or "") + (result.stderr or "")
     
     async def health_check(self, session_id: str) -> Dict[str, Any]:
         """Perform a health check on a sandbox."""

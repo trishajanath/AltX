@@ -14176,9 +14176,15 @@ async def analyze_repo_comprehensive(request: RepoAnalysisRequest):
                                 print("🔧 Trying Windows command line cleanup...")
                                 
                                 # Method 1: rmdir with force
-                                result = subprocess.run([
-                                    'rmdir', '/s', '/q', temp_dir
-                                ], shell=True, capture_output=True, text=True, timeout=30)
+                                result = subprocess.run(
+                                    ['rmdir', '/s', '/q', temp_dir],
+                                    shell=True,
+                                    capture_output=True,
+                                    text=True,
+                                    encoding="utf-8",
+                                    errors="replace",
+                                    timeout=30
+                                )
                                 
                                 if result.returncode == 0:
                                     print(f"✅ Directory cleaned up using rmdir")
@@ -14193,10 +14199,17 @@ async def analyze_repo_comprehensive(request: RepoAnalysisRequest):
                         if os.name == 'nt' and not removal_success:
                             try:
                                 print("🔧 Trying PowerShell cleanup...")
-                                ps_result = subprocess.run([
-                                    'powershell', '-Command', 
-                                    f'Get-ChildItem -Path "{temp_dir}" -Recurse | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue; Remove-Item -Path "{temp_dir}" -Force -ErrorAction SilentlyContinue'
-                                ], capture_output=True, text=True, timeout=30)
+                                ps_result = subprocess.run(
+                                    [
+                                        'powershell', '-Command',
+                                        f'Get-ChildItem -Path "{temp_dir}" -Recurse | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue; Remove-Item -Path "{temp_dir}" -Force -ErrorAction SilentlyContinue'
+                                    ],
+                                    capture_output=True,
+                                    text=True,
+                                    encoding="utf-8",
+                                    errors="replace",
+                                    timeout=30
+                                )
                                 
                                 if ps_result.returncode == 0:
                                     print(f"✅ Directory cleaned up using PowerShell")

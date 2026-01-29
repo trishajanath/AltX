@@ -125,7 +125,14 @@ class CodeValidator:
     def _check_eslint_available(self) -> bool:
         """Check if ESLint is available."""
         try:
-            result = subprocess.run(['npx', 'eslint', '--version'], capture_output=True, text=True, timeout=5)
+            result = subprocess.run(
+                ['npx', 'eslint', '--version'],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=5
+            )
             return result.returncode == 0
         except:
             return False
@@ -182,6 +189,8 @@ class CodeValidator:
                 ['npx', 'eslint', '--no-eslintrc', '--config', config_path, '--format', 'json', temp_path],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=30
             )
             
@@ -585,7 +594,13 @@ class CodeValidator:
     def _check_node_available(self) -> bool:
         """Check if Node.js is available for validation."""
         try:
-            result = subprocess.run(['node', '--version'], capture_output=True, text=True)
+            result = subprocess.run(
+                ['node', '--version'],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace"
+            )
             return result.returncode == 0
         except FileNotFoundError:
             return False
@@ -600,9 +615,11 @@ class CodeValidator:
                 temp_path = f.name
             
             result = subprocess.run(
-                ['node', '--check', temp_path], 
-                capture_output=True, 
-                text=True
+                ['node', '--check', temp_path],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace"
             )
             
             if result.returncode != 0:
