@@ -1,15 +1,10 @@
-import boto3, os
-from dotenv import load_dotenv
+import boto3
+import os
 
 load_dotenv()
 
-s3 = boto3.client(
-    "s3",
-    aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-    aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-    region_name=os.getenv("AWS_REGION", "us-east-1")
-)
 
+from backend.s3_storage import s3_client as s3
 bucket = os.getenv("S3_BUCKET_NAME")
 key = "projects/6917910c004fca6f164755e6/web-ecommerce-busy-557776/frontend/src/App.jsx"
 

@@ -5,15 +5,24 @@ from datetime import datetime
 from typing import List, Dict, Optional
 from dotenv import load_dotenv
 from botocore.exceptions import ClientError
+from botocore.config import Config
 
 load_dotenv()
 
 # Initialize S3 client
+_botocore_config = Config(
+    retries={"max_attempts": 3, "mode": "standard"},
+    max_pool_connections=int(os.getenv('S3_MAX_POOL_CONNECTIONS', '50'))
+)
+
+# Use a long-lived boto3 client with an increased connection pool to avoid
+# "Connection pool is full" urllib3 warnings when listing/getting many objects.
 s3_client = boto3.client(
     's3',
     aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
     aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
-    region_name=os.getenv('AWS_REGION', 'us-east-1')
+    region_name=os.getenv('AWS_REGION', 'us-east-1'),
+    config=_botocore_config
 )
 
 S3_BUCKET_NAME = os.getenv('S3_BUCKET_NAME')

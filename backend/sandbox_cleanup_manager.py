@@ -82,6 +82,7 @@ class ContainerCleanup:
         Stop a container gracefully.
         Idempotent: Returns True even if already stopped.
         """
+        result = None
         try:
             # Check if container exists and is running
             inspect = await asyncio.get_event_loop().run_in_executor(
@@ -94,37 +95,32 @@ class ContainerCleanup:
                     errors="replace"
                 )
             )
-            
             if inspect.returncode != 0:
                 # Container doesn't exist - idempotent success
                 logger.debug(f"Container {container_name} not found (already removed)")
                 return True
-            
             if inspect.stdout.strip() == "false":
                 # Already stopped - idempotent success
                 logger.debug(f"Container {container_name} already stopped")
                 return True
-            
             # Stop the container
-                result = await asyncio.get_event_loop().run_in_executor(
-                    None,
-                    lambda: subprocess.run(
-                        ["docker", "stop", "-t", str(timeout), container_name],
-                        capture_output=True,
-                        text=True,
-                        encoding="utf-8",
-                        errors="replace",
-                        timeout=timeout + 5
-                    )
+            result = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: subprocess.run(
+                    ["docker", "stop", "-t", str(timeout), container_name],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=timeout + 5
                 )
-            
+            )
             if result.returncode == 0:
                 logger.info(f"✅ Stopped container: {container_name}")
                 return True
             else:
                 logger.warning(f"⚠️ Failed to stop {container_name}: {result.stderr}")
                 return False
-                
         except subprocess.TimeoutExpired:
             logger.warning(f"⏰ Timeout stopping {container_name}, will force remove")
             return False
@@ -675,33 +671,33 @@ class SandboxCleanupManager:
         return result
     
     async def cleanup_all(self) -> Dict[str, Any]:
-        """Clean up all tracked containers."""
+        """Clean up all tracked containers in parallel for speed."""
+        import time
         results = {
             "total": 0,
             "success": 0,
             "failed": 0,
             "details": []
         }
-        
         # Get all tracked session IDs
         session_ids = await self.ttl_manager.get_all_session_ids()
         results["total"] = len(session_ids)
-        
-        for session_id in session_ids:
-            try:
-                result = await self.cleanup_container(session_id, reason="shutdown")
-                if result["success"]:
-                    results["success"] += 1
-                else:
-                    results["failed"] += 1
-                results["details"].append(result)
-            except Exception as e:
+        start = time.perf_counter()
+        # Run all cleanups in parallel
+        cleanup_tasks = [self.cleanup_container(session_id, reason="shutdown") for session_id in session_ids]
+        cleanup_results = await asyncio.gather(*cleanup_tasks, return_exceptions=True)
+        for result in cleanup_results:
+            if isinstance(result, Exception):
                 results["failed"] += 1
-                results["details"].append({
-                    "session_id": session_id,
-                    "success": False,
-                    "error": str(e)
-                })
+                results["details"].append({"success": False, "error": str(result)})
+            elif result.get("success"):
+                results["success"] += 1
+                results["details"].append(result)
+            else:
+                results["failed"] += 1
+                results["details"].append(result)
+        elapsed = time.perf_counter() - start
+        logger.info(f"🧹 Parallel cleanup complete in {elapsed:.2f}s: {results['success']}/{results['total']} containers cleaned")
         
         # Also cleanup any orphans
         orphan_detector = OrphanDetector(self.config, set())

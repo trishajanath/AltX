@@ -17,13 +17,8 @@ load_dotenv()
 genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
 model = genai.GenerativeModel('gemini-1.5-flash')
 
-# Initialize S3
-s3_client = boto3.client(
-    's3',
-    aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
-    aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
-    region_name=os.getenv('AWS_REGION', 'us-east-1')
-)
+# Reuse central S3 client configured with a larger connection pool
+from backend.s3_storage import s3_client
 S3_BUCKET_NAME = os.getenv('S3_BUCKET_NAME')
 
 

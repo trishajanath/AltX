@@ -34,7 +34,7 @@ boto3
 botocore
 
 # Authentication and Security
-bcrypt
+bcrypt==3.2.0
 python-jose[cryptography]
 passlib[bcrypt]
 sqlalchemy

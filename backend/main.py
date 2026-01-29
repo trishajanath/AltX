@@ -726,6 +726,8 @@ async def get_current_user_optional(credentials: Optional[HTTPAuthorizationCrede
 
 @app.post("/api/auth/signup")
 async def signup(request: SignupRequest):
+
+# Alias route for legacy clients: /auth/register → /api/auth/signup
     """
     Register a new user account.
     """
