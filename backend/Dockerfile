@@ -4,23 +4,44 @@ FROM python:3.11-slim
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies required for PyAudio and other packages
-RUN apt-get update && apt-get install -y \
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_DEFAULT_TIMEOUT=100
+
+# Install system dependencies required for packages
+# Note: portaudio19-dev removed as pyaudio is optional
+RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
-    portaudio19-dev \
+    libffi-dev \
     python3-dev \
     git \
-    && rm -rf /var/lib/apt/lists/*
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# Upgrade pip first to avoid installation issues
+RUN pip install --upgrade pip setuptools wheel
 
 # Copy requirements.txt and install dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt || \
+    (echo "Some packages failed, installing core dependencies..." && \
+     pip install --no-cache-dir fastapi uvicorn gunicorn pydantic python-multipart \
+     requests httpx beautifulsoup4 google-generativeai \
+     pymongo motor boto3 botocore \
+     bcrypt python-jose passlib sqlalchemy \
+     PyGithub GitPython bandit dnspython python-dotenv regex)
 
-# Copy Google Cloud credentials
-COPY xverta-convo-e1ac5d825bfb.json /app/xverta-convo-e1ac5d825bfb.json
+# Copy Google Cloud credentials (if exists) - using multi-stage approach
+# Note: Using ARG to make this optional
+ARG GOOGLE_CREDS_FILE=xverta-convo-e1ac5d825bfb.json
+COPY ${GOOGLE_CREDS_FILE}* /app/
 
-# Set Google Cloud credentials environment variable
+# Set Google Cloud credentials environment variable (if file exists)
 ENV GOOGLE_APPLICATION_CREDENTIALS=/app/xverta-convo-e1ac5d825bfb.json
 
 # Copy the rest of the backend code

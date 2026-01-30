@@ -1,15 +1,28 @@
 # AltX Security Scanner - Python Build Container
 FROM python:3.11-slim
 
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_DEFAULT_TIMEOUT=100
+
 # Install build dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     gcc \
     g++ \
     make \
     rsync \
     gzip \
-    && rm -rf /var/lib/apt/lists/*
+    libffi-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# Upgrade pip first
+RUN pip install --upgrade pip setuptools wheel
 
 # Set working directory
 WORKDIR /app

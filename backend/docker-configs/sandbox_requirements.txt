@@ -4,7 +4,7 @@
 # Core FastAPI
 fastapi>=0.104.0,<1.0.0
 uvicorn[standard]>=0.24.0,<1.0.0
-pydantic[email]>=2.0.0,<3.0.0
+pydantic>=2.0.0,<3.0.0
 email-validator>=2.0.0
 
 # Database (SQLite is built into Python, SQLAlchemy for ORM)

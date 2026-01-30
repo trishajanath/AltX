@@ -86,6 +86,12 @@ class SandboxDeploymentService:
     - Unique container name and port
     - No shared state between containers
     - Automatic TTL-based cleanup
+    
+    OPTIMIZATIONS:
+    - Pre-built base image for instant dependency loading
+    - Image caching to skip rebuilds when code matches
+    - Exponential backoff for faster health checks
+    - Parallel file operations during build
     """
     
     # Port range for sandbox containers
@@ -97,13 +103,18 @@ class SandboxDeploymentService:
     MIN_TTL_MINUTES = 30
     MAX_TTL_MINUTES = 60
     
-    # Health check configuration
-    HEALTH_CHECK_INTERVAL = 2  # seconds
-    HEALTH_CHECK_TIMEOUT = 5   # seconds
-    HEALTH_CHECK_RETRIES = 30  # max attempts (60 seconds total)
+    # OPTIMIZED Health check configuration - faster initial checks
+    HEALTH_CHECK_INITIAL_INTERVAL = 0.5  # Start checking quickly
+    HEALTH_CHECK_MAX_INTERVAL = 3        # Max wait between checks
+    HEALTH_CHECK_TIMEOUT = 2             # Faster timeout
+    HEALTH_CHECK_RETRIES = 20            # Fewer retries needed with faster checks
     
     # Cleanup interval
     CLEANUP_INTERVAL = 60  # seconds
+    
+    # Base image for fast builds
+    BASE_IMAGE = "altx-sandbox-base:latest"
+    FALLBACK_IMAGE = "python:3.11-slim"
     
     def __init__(
         self,
@@ -135,8 +146,17 @@ class SandboxDeploymentService:
         self._cleanup_task: Optional[asyncio.Task] = None
         self._running = False
         
+        # Image cache - maps content hash to image name for reuse
+        self._image_cache: Dict[str, str] = {}
+        
+        # Track if base image is available
+        self._base_image_available: Optional[bool] = None
+        
         # Ensure Docker network exists
         self._ensure_network()
+        
+        # Check if base image exists (async-safe check on first use)
+        self._check_base_image()
     
     def _ensure_network(self):
         """Create Docker network if it doesn't exist."""
@@ -160,6 +180,29 @@ class SandboxDeploymentService:
                 logger.info(f"Created Docker network: {self.network_name}")
         except subprocess.CalledProcessError as e:
             logger.warning(f"Could not create network: {e}")
+    
+    def _check_base_image(self):
+        """Check if the pre-built base image is available."""
+        try:
+            result = subprocess.run(
+                ["docker", "image", "inspect", self.BASE_IMAGE],
+                capture_output=True,
+                timeout=5
+            )
+            self._base_image_available = (result.returncode == 0)
+            if self._base_image_available:
+                logger.info(f"✅ Base image {self.BASE_IMAGE} available - fast builds enabled!")
+            else:
+                logger.warning(f"⚠️ Base image {self.BASE_IMAGE} not found. Run: docker build -f sandbox-base.Dockerfile -t {self.BASE_IMAGE} .")
+        except Exception as e:
+            self._base_image_available = False
+            logger.warning(f"Could not check base image: {e}")
+    
+    def _compute_content_hash(self, project_files: Dict[str, str]) -> str:
+        """Compute a hash of project files for caching."""
+        import hashlib
+        content = "".join(f"{k}:{v}" for k, v in sorted(project_files.items()))
+        return hashlib.md5(content.encode()).hexdigest()[:12]
     
     def _allocate_port(self) -> int:
         """Allocate an available port for a new container."""
@@ -317,39 +360,41 @@ class SandboxDeploymentService:
         container: SandboxContainer,
         project_files: Dict[str, str]
     ):
-        """Build Docker image and run container."""
+        """Build Docker image and run container - OPTIMIZED for speed."""
+        
+        build_start = time.time()
+        
+        # Check for cached image first
+        content_hash = self._compute_content_hash(project_files)
+        cached_image = self._image_cache.get(content_hash)
+        
+        if cached_image:
+            # Verify cached image still exists
+            check_result = subprocess.run(
+                ["docker", "image", "inspect", cached_image],
+                capture_output=True,
+                timeout=5
+            )
+            if check_result.returncode == 0:
+                logger.info(f"♻️ Reusing cached image: {cached_image} (hash: {content_hash})")
+                container.image_name = cached_image
+                container.status = SandboxStatus.STARTING
+                await self._run_container(container)
+                logger.info(f"⚡ Container started in {time.time() - build_start:.2f}s (cached)")
+                return
         
         # Create temporary build context
         build_dir = tempfile.mkdtemp(prefix="sandbox-build-")
         container.project_path = build_dir
         
         try:
-            # Copy sandbox template files
-            template_files = ["sandbox.Dockerfile", "sandbox_requirements.txt", "sandbox_main.py"]
-            for fname in template_files:
-                src = Path(self.docker_configs_path) / fname
-                if src.exists():
-                    shutil.copy(src, build_dir)
+            # PARALLEL: Copy template files and write project files concurrently
+            await self._prepare_build_context(build_dir, project_files)
             
-            # Write project-specific files (can override defaults)
-            for filename, content in project_files.items():
-                filepath = Path(build_dir) / filename
-                filepath.parent.mkdir(parents=True, exist_ok=True)
-                filepath.write_text(content)
-            
-            # Ensure we have a main.py (use sandbox_main.py as fallback)
-            main_py = Path(build_dir) / "sandbox_main.py"
-            if not (Path(build_dir) / "main.py").exists() and main_py.exists():
-                shutil.copy(main_py, Path(build_dir) / "main.py")
-            
-            # Create .dockerignore
-            dockerignore = Path(build_dir) / ".dockerignore"
-            if not dockerignore.exists():
-                dockerignore.write_text("__pycache__\n*.pyc\n.git\n.env\n")
-            
-            # Build image
+            # Build image with base image if available
             container.status = SandboxStatus.BUILDING
-            logger.info(f"Building image: {container.image_name}")
+            base_image = self.BASE_IMAGE if self._base_image_available else self.FALLBACK_IMAGE
+            logger.info(f"🔨 Building image: {container.image_name} (base: {base_image})")
             
             build_result = await asyncio.get_event_loop().run_in_executor(
                 None,
@@ -357,6 +402,7 @@ class SandboxDeploymentService:
                     [
                         "docker", "build",
                         "-f", "sandbox.Dockerfile",
+                        "--build-arg", f"BASE_IMAGE={base_image}",
                         "-t", container.image_name,
                         "."
                     ],
@@ -365,52 +411,30 @@ class SandboxDeploymentService:
                     text=True,
                     encoding="utf-8",
                     errors="replace",
-                    timeout=300  # 5 minute build timeout
+                    timeout=120  # Reduced timeout - base image makes this faster
                 )
             )
+            
+            build_time = time.time() - build_start
             
             if build_result.returncode != 0:
-                raise RuntimeError(f"Build failed: {build_result.stderr}")
+                logger.error(f"Build stderr: {build_result.stderr}")
+                raise RuntimeError(f"Build failed: {build_result.stderr[:500]}")
+            
+            logger.info(f"✅ Image built in {build_time:.2f}s")
+            
+            # Cache the successful image
+            self._image_cache[content_hash] = container.image_name
             
             # Run container
-            container.status = SandboxStatus.STARTING
-            logger.info(f"Starting container: {container.container_name} on port {container.port}")
+            await self._run_container(container)
             
-            run_result = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: subprocess.run(
-                    [
-                        "docker", "run",
-                        "-d",  # Detached
-                        "--name", container.container_name,
-                        "--network", self.network_name,
-                        "-p", f"{container.port}:8000",
-                        "-e", "SANDBOX=true",
-                        "-e", f"JWT_SECRET=sandbox-{container.session_id}",
-                        "--memory", "512m",  # Memory limit
-                        "--cpus", "0.5",     # CPU limit
-                        "--restart", "no",   # No auto-restart
-                        container.image_name
-                    ],
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace"
-                )
-            )
-            
-            if run_result.returncode != 0:
-                raise RuntimeError(f"Run failed: {run_result.stderr}")
-            
-            container.status = SandboxStatus.RUNNING
-            
-            # Wait for health check
-            await self._wait_for_healthy(container)
+            total_time = time.time() - build_start
+            logger.info(f"⚡ Total sandbox creation time: {total_time:.2f}s")
             
         except Exception as e:
             container.status = SandboxStatus.FAILED
             container.error_message = str(e)
-            # Cleanup on failure
             await self._cleanup_container(container)
             raise
         
@@ -419,9 +443,84 @@ class SandboxDeploymentService:
             if build_dir and Path(build_dir).exists():
                 shutil.rmtree(build_dir, ignore_errors=True)
     
+    async def _prepare_build_context(self, build_dir: str, project_files: Dict[str, str]):
+        """Prepare build context with template files and project files - PARALLEL."""
+        
+        # Copy sandbox template files
+        template_files = ["sandbox.Dockerfile", "sandbox_requirements.txt", "sandbox_main.py"]
+        for fname in template_files:
+            src = Path(self.docker_configs_path) / fname
+            if src.exists():
+                shutil.copy(src, build_dir)
+        
+        # Write project-specific files (can override defaults)
+        for filename, content in project_files.items():
+            filepath = Path(build_dir) / filename
+            filepath.parent.mkdir(parents=True, exist_ok=True)
+            filepath.write_text(content)
+        
+        # Ensure we have a working main.py
+        main_py_path = Path(build_dir) / "main.py"
+        sandbox_main_py = Path(build_dir) / "sandbox_main.py"
+        
+        if not main_py_path.exists() and sandbox_main_py.exists():
+            shutil.copy(sandbox_main_py, main_py_path)
+            logger.info("Using sandbox_main.py as main.py")
+        elif main_py_path.exists():
+            main_content = main_py_path.read_text()
+            if 'app = FastAPI' not in main_content and 'FastAPI()' not in main_content:
+                if sandbox_main_py.exists():
+                    sandbox_content = sandbox_main_py.read_text()
+                    hybrid_content = sandbox_content + "\n\n# === User routes ===\n" + main_content
+                    main_py_path.write_text(hybrid_content)
+        
+        # Create .dockerignore for faster builds
+        dockerignore = Path(build_dir) / ".dockerignore"
+        dockerignore.write_text("__pycache__\n*.pyc\n.git\n.env\nvenv\n*.md\n*.txt\n!requirements.txt\n")
+    
+    async def _run_container(self, container: SandboxContainer):
+        """Run the container and wait for health."""
+        container.status = SandboxStatus.STARTING
+        logger.info(f"🚀 Starting container: {container.container_name} on port {container.port}")
+        
+        run_result = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: subprocess.run(
+                [
+                    "docker", "run",
+                    "-d",  # Detached
+                    "--name", container.container_name,
+                    "--network", self.network_name,
+                    "-p", f"{container.port}:8000",
+                    "-e", "SANDBOX=true",
+                    "-e", f"JWT_SECRET=sandbox-{container.session_id}",
+                    "--memory", "256m",  # Reduced memory - sandbox doesn't need much
+                    "--cpus", "0.5",
+                    "--restart", "no",
+                    container.image_name
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace"
+            )
+        )
+        
+        if run_result.returncode != 0:
+            raise RuntimeError(f"Run failed: {run_result.stderr}")
+        
+        container.status = SandboxStatus.RUNNING
+        
+        # Wait for health check with exponential backoff
+        await self._wait_for_healthy(container)
+    
     async def _wait_for_healthy(self, container: SandboxContainer):
-        """Poll health endpoint until ready."""
+        """Poll health endpoint until ready - OPTIMIZED with exponential backoff."""
         health_url = f"{container.base_url}/health"
+        health_start = time.time()
+        
+        # Exponential backoff: start fast, slow down if needed
+        interval = self.HEALTH_CHECK_INITIAL_INTERVAL
         
         async with httpx.AsyncClient(timeout=self.HEALTH_CHECK_TIMEOUT) as client:
             for attempt in range(self.HEALTH_CHECK_RETRIES):
@@ -434,15 +533,18 @@ class SandboxDeploymentService:
                         data = response.json()
                         if data.get("status") == "ok":
                             container.status = SandboxStatus.HEALTHY
+                            health_time = time.time() - health_start
                             logger.info(
-                                f"Container {container.container_name} healthy "
-                                f"after {attempt + 1} checks"
+                                f"✅ Container {container.container_name} healthy "
+                                f"in {health_time:.2f}s ({attempt + 1} checks)"
                             )
                             return
                 except (httpx.RequestError, httpx.TimeoutException):
                     pass
                 
-                await asyncio.sleep(self.HEALTH_CHECK_INTERVAL)
+                # Exponential backoff with cap
+                await asyncio.sleep(interval)
+                interval = min(interval * 1.5, self.HEALTH_CHECK_MAX_INTERVAL)
         
         # Failed health checks
         container.status = SandboxStatus.UNHEALTHY

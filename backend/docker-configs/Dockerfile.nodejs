@@ -9,10 +9,17 @@ RUN apk add --no-cache \
     make \
     g++ \
     rsync \
-    gzip
+    gzip \
+    curl
 
 # Set working directory
 WORKDIR /app
+
+# Set npm configuration for better reliability
+ENV NPM_CONFIG_LOGLEVEL=warn \
+    NPM_CONFIG_FUND=false \
+    NPM_CONFIG_AUDIT=false \
+    NODE_ENV=production
 
 # Copy build script from the correct path
 COPY build.sh /usr/local/bin/build.sh

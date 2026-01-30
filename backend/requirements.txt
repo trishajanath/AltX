@@ -1,79 +1,77 @@
 # Core FastAPI and Web Framework
-fastapi==0.116.1
-uvicorn==0.35.0
-gunicorn==23.0.0
-starlette
-websockets
-pydantic==2.9.2
-python-multipart
+fastapi>=0.104.0,<1.0.0
+uvicorn[standard]>=0.24.0,<1.0.0
+gunicorn>=21.0.0,<24.0.0
+starlette>=0.27.0,<1.0.0
+websockets>=11.0.0,<13.0.0
+pydantic>=2.5.0,<3.0.0
+python-multipart>=0.0.6,<1.0.0
+email-validator>=2.0.0
 
 # HTTP Clients and Web Scraping
-requests==2.32.3
-httpx==0.28.1
-beautifulsoup4==4.13.4
+requests>=2.31.0,<3.0.0
+httpx>=0.25.0,<1.0.0
+beautifulsoup4>=4.12.0,<5.0.0
 
 # AI and Language Models
-google-generativeai
-torch
-torchaudio
+google-generativeai>=0.3.0
 
-# Langchain and RAG
-langchain
-langchain-community
-langchain-chroma
-langchain-huggingface
-langchain-google-genai
-
-# NLP and ML
-sentence-transformers==5.0.0
+# Langchain and RAG (lightweight)
+langchain>=0.1.0,<1.0.0
+langchain-community>=0.0.10,<1.0.0
+langchain-google-genai>=0.0.5,<1.0.0
 
 # Database and Storage
-pymongo
-motor
-boto3
-botocore
+pymongo>=4.6.0,<5.0.0
+motor>=3.3.0,<4.0.0
+boto3>=1.33.0,<2.0.0
+botocore>=1.33.0,<2.0.0
+aiosqlite>=0.19.0,<1.0.0
 
 # Authentication and Security
-bcrypt
-python-jose[cryptography]
-passlib[bcrypt]
-sqlalchemy
+bcrypt>=4.0.0,<5.0.0
+python-jose[cryptography]>=3.3.0,<4.0.0
+passlib[bcrypt]>=1.7.4,<2.0.0
+sqlalchemy>=2.0.0,<3.0.0
 
 # Payment Processing (Stripe Connect)
-stripe>=7.0.0
+stripe>=7.0.0,<10.0.0
 
 # GitHub and Git Integration
-PyGithub==2.6.1
-GitPython==3.1.45
+PyGithub>=2.1.0,<3.0.0
+GitPython>=3.1.40,<4.0.0
 
 # Security Scanning Tools
-bandit==1.8.6
-safety==3.3.0
+bandit>=1.7.0,<2.0.0
+safety>=2.3.0,<4.0.0
 
-# Audio Processing (for voice features)
-pyaudio
-google-cloud-speech
-google-cloud-texttospeech
+# Audio Processing (optional - requires system deps)
+# pyaudio  # Uncomment if portaudio is installed
+google-cloud-speech>=2.21.0,<3.0.0
+google-cloud-texttospeech>=2.14.0,<3.0.0
 
 # PDF Processing (for document upload)
-PyPDF2
-Pillow
+PyPDF2>=3.0.0,<4.0.0
+Pillow>=10.0.0,<11.0.0
 
 # Web Automation and Testing
-playwright==1.44.0
-docker==7.0.0
+playwright>=1.40.0,<2.0.0
+docker>=6.1.0,<8.0.0
 
 # Network and DNS
-dnspython==2.7.0
+dnspython>=2.4.0,<3.0.0
 
 # Environment and Configuration
-python-dotenv==1.1.1
+python-dotenv>=1.0.0,<2.0.0
+
+# Security Scanning
+python-owasp-zap-v2.4>=0.0.21
 
 # Utilities
-regex==2025.9.1
+regex>=2023.10.0
 
 # Development and Testing
-pytest==8.2.2
-pytest-asyncio==0.23.7
-black==24.4.2
-flake8==7.0.0
+pytest>=7.4.0,<9.0.0
+pytest-asyncio>=0.21.0,<1.0.0
+black>=23.0.0,<25.0.0
+flake8>=6.1.0,<8.0.0
