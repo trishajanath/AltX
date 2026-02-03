@@ -133,6 +133,12 @@ class SandboxDeploymentService:
         self.docker_configs_path = docker_configs_path or str(
             Path(__file__).parent / "docker-configs"
         )
+        # Verify docker_configs_path exists
+        if not Path(self.docker_configs_path).exists():
+            logger.error(f"Docker configs path does not exist: {self.docker_configs_path}")
+        else:
+            logger.debug(f"Docker configs path: {self.docker_configs_path}")
+        
         self.host_url = host_url.rstrip("/")
         self.network_name = network_name
         
@@ -450,8 +456,27 @@ class SandboxDeploymentService:
         template_files = ["sandbox.Dockerfile", "sandbox_requirements.txt", "sandbox_main.py"]
         for fname in template_files:
             src = Path(self.docker_configs_path) / fname
+            dest = Path(build_dir) / fname
             if src.exists():
-                shutil.copy(src, build_dir)
+                shutil.copy(src, dest)
+                logger.debug(f"Copied template: {fname}")
+            else:
+                logger.warning(f"Template file not found: {src}")
+        
+        # Verify critical files were copied
+        req_file = Path(build_dir) / "sandbox_requirements.txt"
+        if not req_file.exists():
+            # Create a minimal requirements file as fallback
+            logger.warning("sandbox_requirements.txt not found, creating minimal version")
+            req_file.write_text("""# Minimal sandbox requirements
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.0.0
+sqlalchemy>=2.0.0
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+python-multipart>=0.0.6
+""")
         
         # Write project-specific files (can override defaults)
         for filename, content in project_files.items():
@@ -521,6 +546,7 @@ class SandboxDeploymentService:
         
         # Exponential backoff: start fast, slow down if needed
         interval = self.HEALTH_CHECK_INITIAL_INTERVAL
+        last_error = None
         
         async with httpx.AsyncClient(timeout=self.HEALTH_CHECK_TIMEOUT) as client:
             for attempt in range(self.HEALTH_CHECK_RETRIES):
@@ -539,16 +565,32 @@ class SandboxDeploymentService:
                                 f"in {health_time:.2f}s ({attempt + 1} checks)"
                             )
                             return
-                except (httpx.RequestError, httpx.TimeoutException):
-                    pass
+                except (httpx.RequestError, httpx.TimeoutException) as e:
+                    last_error = str(e)
                 
                 # Exponential backoff with cap
                 await asyncio.sleep(interval)
                 interval = min(interval * 1.5, self.HEALTH_CHECK_MAX_INTERVAL)
         
-        # Failed health checks
+        # Failed health checks - get container logs for debugging
+        try:
+            logs_result = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: subprocess.run(
+                    ["docker", "logs", "--tail", "50", container.container_name],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace"
+                )
+            )
+            container_logs = logs_result.stdout + logs_result.stderr
+            logger.error(f"Container {container.container_name} logs:\n{container_logs}")
+        except Exception as log_err:
+            logger.error(f"Could not get container logs: {log_err}")
+        
         container.status = SandboxStatus.UNHEALTHY
-        container.error_message = f"Health check failed after {self.HEALTH_CHECK_RETRIES} attempts"
+        container.error_message = f"Health check failed after {self.HEALTH_CHECK_RETRIES} attempts. Last error: {last_error}"
         raise RuntimeError(container.error_message)
     
     async def _cleanup_container(self, container: SandboxContainer):
