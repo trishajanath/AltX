@@ -3293,6 +3293,24 @@ def generate_sandbox_html(files_content: dict, project_name: str, backend_url: s
     jsx_code = f"{components_code}\n\n{app_content}"
     print("🔄 Precompiling JSX to JavaScript using esbuild...")
     precompiled_code = precompile_jsx(jsx_code)
+    
+    # SAFETY CHECK: Ensure precompiled code doesn't contain raw JSX or HTML
+    # This would cause "Unexpected token '<'" errors in the browser
+    if precompiled_code.strip().startswith('<!DOCTYPE') or precompiled_code.strip().startswith('<html'):
+        print("❌ ERROR: Precompiled code contains HTML! This would break the sandbox.")
+        precompiled_code = '''
+console.error('Build error: JSX compilation returned HTML instead of JavaScript');
+const App = function() {
+    return React.createElement('div', {
+        style: { padding: '20px', backgroundColor: '#1e1e1e', color: '#f87171' }
+    },
+        React.createElement('h2', null, '⚠️ Build Error'),
+        React.createElement('p', null, 'The code compilation failed. Please check the server logs.')
+    );
+};
+window.App = App;
+'''
+    
     print("✅ JSX precompilation complete - sending pure JS to browser")
     
     return f"""
@@ -4639,7 +4657,7 @@ def generate_sandbox_html(files_content: dict, project_name: str, backend_url: s
             return {{ message: 'Mock API response (fallback mode)', data: [] }};
         }};
         
-        // Create mock response helper
+        // Create mock response helper with safe JSON parsing
         const createMockResponse = (data) => {{
             return Promise.resolve({{
                 ok: true,
@@ -4649,6 +4667,27 @@ def generate_sandbox_html(files_content: dict, project_name: str, backend_url: s
                 text: () => Promise.resolve(JSON.stringify(data))
             }});
         }};
+        
+        // Safe JSON parse wrapper - handles HTML error pages gracefully
+        const safeJsonParse = async (response, pathname, getMockData) => {{
+            try {{
+                const text = await response.text();
+                // Check if response looks like HTML (error page)
+                if (text.trim().startsWith('<') || text.trim().startsWith('<!DOCTYPE')) {{
+                    console.warn('⚠️ Received HTML instead of JSON for:', pathname);
+                    console.warn('Response preview:', text.substring(0, 100));
+                    return getMockData(pathname);
+                }}
+                return JSON.parse(text);
+            }} catch (e) {{
+                console.error('❌ JSON parse error for', pathname, ':', e.message);
+                return getMockData(pathname);
+            }}
+        }};
+        
+        // Expose safe JSON parse for use in app code
+        window.safeJsonParse = safeJsonParse;
+        window.getMockData = getMockData;
         
         // Smart fetch wrapper - routes API calls to Docker backend, falls back to mock on failure
         const smartFetch = async (url, options) => {{
@@ -4717,8 +4756,18 @@ def generate_sandbox_html(files_content: dict, project_name: str, backend_url: s
                 console.log('🌐 Attempting real HTTP request to:', pathname);
                 const response = await originalFetch(url, options);
                 
-                // If successful, keep using real fetch
+                // If successful, check for HTML responses (server returning error page instead of JSON)
                 if (response.ok) {{
+                    const contentType = response.headers.get('content-type') || '';
+                    // If we expected JSON but got HTML, treat it as an error
+                    if (isMockEligible && contentType.includes('text/html')) {{
+                        console.warn('⚠️ Received HTML instead of JSON for:', pathname);
+                        if (!window._sandboxMockEnabled) {{
+                            window._sandboxMockEnabled = true;
+                            console.warn('🔶 MOCK MODE ENABLED - Server returned HTML instead of JSON');
+                        }}
+                        return createMockResponse(getMockData(pathname));
+                    }}
                     console.log('✅ Real API response received for:', pathname);
                     return response;
                 }}

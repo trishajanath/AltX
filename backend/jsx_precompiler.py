@@ -148,8 +148,35 @@ def precompile_jsx(jsx_code: str) -> str:
         if result.returncode != 0:
             error_msg = result.stderr or 'Unknown esbuild error'
             print(f"❌ esbuild transform error: {error_msg}")
-            # Return original code with error comment
-            return f"// JSX Transform Error: {error_msg}\n// Falling back to original code\n{clean_code}"
+            # Return a SAFE fallback that doesn't contain JSX - just show an error message
+            safe_error = error_msg.replace('\\', '\\\\').replace("'", "\\'").replace('\n', '\\n').replace('\r', '')
+            return f'''// JSX Transform Error - esbuild failed
+console.error('JSX compilation failed:', '{safe_error[:200]}');
+const App = function() {{
+    return React.createElement('div', {{
+        style: {{
+            padding: '20px',
+            backgroundColor: '#1e1e1e',
+            color: '#f87171',
+            fontFamily: 'monospace',
+            minHeight: '100vh'
+        }}
+    }},
+        React.createElement('h2', null, '⚠️ JSX Compilation Error'),
+        React.createElement('p', null, 'The code could not be transformed. Please check the syntax.'),
+        React.createElement('pre', {{
+            style: {{ 
+                background: '#2d2d2d', 
+                padding: '10px', 
+                borderRadius: '4px',
+                overflow: 'auto',
+                maxHeight: '200px'
+            }}
+        }}, '{safe_error[:500]}')
+    );
+}};
+window.App = App;
+'''
         
         compiled = result.stdout
         
@@ -167,14 +194,39 @@ def precompile_jsx(jsx_code: str) -> str:
             
     except FileNotFoundError:
         print("❌ esbuild not found. Run: cd backend && npm install esbuild")
-        # Fallback: return code as-is (will likely fail in browser but better than nothing)
-        return clean_code
+        # Return a safe fallback that doesn't contain JSX
+        return _create_error_fallback("esbuild not found. Please install it with: npm install esbuild")
     except subprocess.TimeoutExpired:
         print("❌ esbuild timeout - code too complex?")
-        return clean_code
+        return _create_error_fallback("Code compilation timed out. The code may be too complex.")
     except Exception as e:
         print(f"❌ JSX precompile error: {e}")
-        return clean_code
+        return _create_error_fallback(f"JSX precompile error: {str(e)}")
+
+
+def _create_error_fallback(error_msg: str) -> str:
+    """Create a safe JavaScript fallback that displays an error without using JSX."""
+    safe_error = error_msg.replace('\\', '\\\\').replace("'", "\\'").replace('\n', '\\n').replace('\r', '').replace('<', '&lt;').replace('>', '&gt;')
+    return f'''// JSX Transform Error - Fallback Mode
+console.error('JSX compilation failed:', '{safe_error[:300]}');
+const App = function() {{
+    return React.createElement('div', {{
+        style: {{
+            padding: '20px',
+            backgroundColor: '#1e1e1e',
+            color: '#f87171',
+            fontFamily: 'monospace',
+            minHeight: '100vh'
+        }}
+    }},
+        React.createElement('h2', null, '⚠️ Build Error'),
+        React.createElement('p', null, '{safe_error[:200]}'),
+        React.createElement('p', {{style: {{color: '#888', marginTop: '20px'}}}}, 
+            'Please check the server logs for more details.')
+    );
+}};
+window.App = App;
+'''
 
 
 def clear_compile_cache():

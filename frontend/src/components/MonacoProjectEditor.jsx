@@ -303,7 +303,10 @@ const styles = {
     justifyContent: 'center',
     background: 'transparent',
     color: '#666666',
-    border: 'none',
+    borderTop: 'none',
+    borderLeft: 'none',
+    borderRight: 'none',
+    borderBottom: 'none',
     padding: '10px 16px',
     cursor: 'pointer',
     fontSize: '12px',
@@ -1239,12 +1242,26 @@ Just tell me what you'd like to do.`
         };
         setChatMessages([welcomeMessage]);
         
-        // Speak welcome message
+        // Speak welcome message only after user interaction to avoid NotAllowedError
+        // Browser autoplay policies block audio before user gesture
         if (!isMuted) {
           const welcomeText = "Welcome to your AI product assistant! I'm here to help you build, design, and improve your project. You can ask me to change the look and feel, add new sections, find and fix issues, or improve this page. Just tell me what you'd like to do.";
-          setTimeout(() => {
+          
+          // Track if welcome has been spoken
+          let hasSpoken = false;
+          const speakOnInteraction = () => {
+            if (hasSpoken) return;
+            hasSpoken = true;
             speakText(welcomeText);
-          }, 1500); // Delay to ensure audio context is ready
+            window.removeEventListener('click', speakOnInteraction);
+            window.removeEventListener('touchstart', speakOnInteraction);
+            window.removeEventListener('keydown', speakOnInteraction);
+          };
+          
+          // Wait for user interaction before speaking
+          window.addEventListener('click', speakOnInteraction, { once: true });
+          window.addEventListener('touchstart', speakOnInteraction, { once: true });
+          window.addEventListener('keydown', speakOnInteraction, { once: true });
         }
       }
       
@@ -2829,18 +2846,39 @@ The changes are live in your preview.`
           URL.revokeObjectURL(audioUrl);
         };
         
-        await audio.play();
+        try {
+          await audio.play();
+        } catch (playError) {
+          // Silently handle autoplay blocking - this is expected before user interaction
+          if (playError.name === 'NotAllowedError') {
+            console.log('TTS blocked by autoplay policy - waiting for user interaction');
+          } else {
+            console.error('Audio play error:', playError);
+          }
+          setIsPlaying(false);
+          currentAudioRef.current = null;
+          URL.revokeObjectURL(audioUrl);
+        }
       } else {
         // Fallback to browser TTS
-        const cleanText = text.replace(/[#*_`]/g, '').replace(/\*\*/g, '');
-        const utterance = new SpeechSynthesisUtterance(cleanText);
-        utterance.rate = 0.9;
-        utterance.pitch = 1;
-        utterance.volume = 0.8;
-        speechSynthesis.speak(utterance);
+        try {
+          const cleanText = text.replace(/[#*_`]/g, '').replace(/\*\*/g, '');
+          const utterance = new SpeechSynthesisUtterance(cleanText);
+          utterance.rate = 0.9;
+          utterance.pitch = 1;
+          utterance.volume = 0.8;
+          speechSynthesis.speak(utterance);
+        } catch (ttsError) {
+          if (ttsError.name !== 'NotAllowedError') {
+            console.error('Browser TTS error:', ttsError);
+          }
+        }
       }
     } catch (error) {
-      console.error('TTS error:', error);
+      // Silently handle autoplay errors
+      if (error.name !== 'NotAllowedError') {
+        console.error('TTS error:', error);
+      }
     }
   };
 
@@ -5804,7 +5842,9 @@ The changes are live in your preview.`
                         flex: 1,
                         padding: '8px 12px',
                         background: 'transparent',
-                        border: 'none',
+                        borderTop: 'none',
+                        borderLeft: 'none',
+                        borderRight: 'none',
                         borderBottom: explorerTab === 'files' ? '2px solid #007acc' : '2px solid transparent',
                         color: explorerTab === 'files' ? '#ffffff' : '#888888',
                         cursor: 'pointer',
@@ -5821,7 +5861,9 @@ The changes are live in your preview.`
                         flex: 1,
                         padding: '8px 12px',
                         background: 'transparent',
-                        border: 'none',
+                        borderTop: 'none',
+                        borderLeft: 'none',
+                        borderRight: 'none',
                         borderBottom: explorerTab === 'problems' ? '2px solid #007acc' : '2px solid transparent',
                         color: explorerTab === 'problems' ? '#ffffff' : '#888888',
                         cursor: 'pointer',

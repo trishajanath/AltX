@@ -187,18 +187,36 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
   }, [isPlaying, isListening, realTimeTranscript]);
   
   // Separate effect to speak welcome message in demo mode
+  // Only speak after user interaction to avoid NotAllowedError
   useEffect(() => {
     if (isDemo && conversation.length === 1 && conversation[0].content === 'Hi! What would you like to build today?') {
-      const timer = setTimeout(() => {
+      // Wait for user interaction before playing TTS
+      const speakWelcome = () => {
         if (!isMuted) {
-          const utterance = new SpeechSynthesisUtterance('Hi! What would you like to build today?');
-          utterance.rate = 1.8;
-          utterance.pitch = 1.0;
-          utterance.volume = 1.0;
-          window.speechSynthesis.speak(utterance);
+          try {
+            const utterance = new SpeechSynthesisUtterance('Hi! What would you like to build today?');
+            utterance.rate = 1.8;
+            utterance.pitch = 1.0;
+            utterance.volume = 1.0;
+            window.speechSynthesis.speak(utterance);
+          } catch (e) {
+            // Silently ignore autoplay errors
+            if (e.name !== 'NotAllowedError') console.error('TTS error:', e);
+          }
         }
-      }, 500);
-      return () => clearTimeout(timer);
+        // Remove listener after first interaction
+        window.removeEventListener('click', speakWelcome);
+        window.removeEventListener('touchstart', speakWelcome);
+      };
+      
+      // Add listeners for user interaction
+      window.addEventListener('click', speakWelcome, { once: true });
+      window.addEventListener('touchstart', speakWelcome, { once: true });
+      
+      return () => {
+        window.removeEventListener('click', speakWelcome);
+        window.removeEventListener('touchstart', speakWelcome);
+      };
     }
   }, [conversation, isDemo, isMuted]);
 
@@ -1355,7 +1373,12 @@ const VoiceChatInterface = ({ onProjectGenerated, isDemo = false }) => {
           await audio.play();
           return; // Success
         } catch (playError) {
-          console.error('Failed to play Google TTS audio:', playError);
+          // Silently handle autoplay blocking - this is expected before user interaction
+          if (playError.name === 'NotAllowedError') {
+            console.log('TTS blocked by autoplay policy - waiting for user interaction');
+          } else {
+            console.error('Failed to play Google TTS audio:', playError);
+          }
           setIsPlaying(false);
           currentAudioRef.current = null;
           URL.revokeObjectURL(audioUrl);
