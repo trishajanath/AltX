@@ -26,8 +26,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 import logging
-import signal
-import atexit
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -815,31 +813,16 @@ class SandboxCleanupManager:
             return False
     
     def _register_shutdown_handlers(self):
-        """Register handlers for graceful shutdown."""
-        def sync_shutdown(signum=None, frame=None):
-            """Synchronous shutdown handler for signals."""
-            logger.info(f"Received shutdown signal, cleaning up...")
-            # Create event loop if needed
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    loop.create_task(self.stop())
-                else:
-                    loop.run_until_complete(self.stop())
-            except RuntimeError:
-                # No event loop, can't cleanup async
-                logger.warning("No event loop for async cleanup")
+        """
+        Register handlers for graceful shutdown.
         
-        # Register atexit handler
-        atexit.register(sync_shutdown)
-        
-        # Register signal handlers (if possible)
-        try:
-            signal.signal(signal.SIGTERM, sync_shutdown)
-            signal.signal(signal.SIGINT, sync_shutdown)
-        except (ValueError, OSError):
-            # Can't set signal handlers (not main thread)
-            pass
+        NOTE: With FastAPI/uvicorn, shutdown is handled by the @app.on_event("shutdown")
+        handler in main.py which calls shutdown_cleanup_manager(). We don't register
+        signal handlers here to avoid conflicts with uvicorn's signal handling.
+        """
+        # FastAPI's shutdown event handles cleanup - no need for signal handlers
+        # This prevents conflicts with uvicorn's signal handling and reloader
+        pass
 
 
 # =============================================================================
