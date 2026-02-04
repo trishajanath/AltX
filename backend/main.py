@@ -3387,19 +3387,81 @@ window.App = App;
         }};
         
         // GLOBAL IMAGE ERROR HANDLER - Fix broken images automatically
-        // This handles any images that fail to load by replacing them with a reliable fallback
-        const FALLBACK_IMAGES = [
-            'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=400&h=300&fit=crop&auto=format',
-            'https://images.unsplash.com/photo-1557683316-973673baf926?w=400&h=300&fit=crop&auto=format',
-            'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=400&h=300&fit=crop&auto=format'
-        ];
+        // Enhanced with category-aware fallbacks for better visual consistency
+        const FALLBACK_IMAGES = {{
+            // General/Abstract backgrounds
+            abstract: [
+                'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&h=600&fit=crop&auto=format',
+                'https://images.unsplash.com/photo-1557683316-973673baf926?w=800&h=600&fit=crop&auto=format',
+                'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=800&h=600&fit=crop&auto=format',
+                'https://images.unsplash.com/photo-1558591710-4b4a1ae0f04d?w=800&h=600&fit=crop&auto=format',
+                'https://images.unsplash.com/photo-1614850523459-c2f4c699c52e?w=800&h=600&fit=crop&auto=format'
+            ],
+            // Products/E-commerce
+            product: [
+                'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=800&h=600&fit=crop&auto=format',
+                'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=800&h=600&fit=crop&auto=format',
+                'https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f?w=800&h=600&fit=crop&auto=format',
+                'https://images.unsplash.com/photo-1572635196237-14b3f281503f?w=800&h=600&fit=crop&auto=format',
+                'https://images.unsplash.com/photo-1560343090-f0409e92791a?w=800&h=600&fit=crop&auto=format'
+            ],
+            // Food/Grocery
+            food: [
+                'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=800&h=600&fit=crop&auto=format',
+                'https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=800&h=600&fit=crop&auto=format',
+                'https://images.unsplash.com/photo-1540189549336-e6e99c3679fe?w=800&h=600&fit=crop&auto=format',
+                'https://images.unsplash.com/photo-1567306226416-28f0efdc88ce?w=800&h=600&fit=crop&auto=format',
+                'https://images.unsplash.com/photo-1488459716781-31db52582fe9?w=800&h=600&fit=crop&auto=format'
+            ],
+            // People/Team
+            people: [
+                'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&h=400&fit=crop&auto=format',
+                'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400&h=400&fit=crop&auto=format',
+                'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400&h=400&fit=crop&auto=format',
+                'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=400&h=400&fit=crop&auto=format',
+                'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=400&h=400&fit=crop&auto=format'
+            ],
+            // Technology
+            tech: [
+                'https://images.unsplash.com/photo-1518770660439-4636190af475?w=800&h=600&fit=crop&auto=format',
+                'https://images.unsplash.com/photo-1461749280684-dccba630e2f6?w=800&h=600&fit=crop&auto=format',
+                'https://images.unsplash.com/photo-1504639725590-34d0984388bd?w=800&h=600&fit=crop&auto=format',
+                'https://images.unsplash.com/photo-1550751827-4bd374c3f58b?w=800&h=600&fit=crop&auto=format',
+                'https://images.unsplash.com/photo-1488590528505-98d2b5aba04b?w=800&h=600&fit=crop&auto=format'
+            ],
+            // Nature/Landscape
+            nature: [
+                'https://images.unsplash.com/photo-1469474968028-56623f02e42e?w=800&h=600&fit=crop&auto=format',
+                'https://images.unsplash.com/photo-1426604966848-d7adac402bff?w=800&h=600&fit=crop&auto=format',
+                'https://images.unsplash.com/photo-1447752875215-b2761acb3c5d?w=800&h=600&fit=crop&auto=format',
+                'https://images.unsplash.com/photo-1433086966358-54859d0ed716?w=800&h=600&fit=crop&auto=format'
+            ]
+        }};
+        
+        // Detect image category from src URL or alt text
+        function detectImageCategory(src, alt) {{
+            const text = (src + ' ' + (alt || '')).toLowerCase();
+            if (text.match(/product|shop|item|cart|buy|price/)) return 'product';
+            if (text.match(/food|grocery|fruit|vegetable|meal|dish|cook/)) return 'food';
+            if (text.match(/team|person|people|avatar|profile|user|author/)) return 'people';
+            if (text.match(/tech|code|computer|laptop|device|software/)) return 'tech';
+            if (text.match(/nature|landscape|forest|mountain|ocean|sky/)) return 'nature';
+            return 'abstract';
+        }}
+        
+        function getRandomFallback(category) {{
+            const images = FALLBACK_IMAGES[category] || FALLBACK_IMAGES.abstract;
+            return images[Math.floor(Math.random() * images.length)];
+        }}
+        
         let fallbackImageIndex = 0;
         
         document.addEventListener('error', function(e) {{
             if (e.target.tagName === 'IMG' && !e.target.dataset.fallbackApplied) {{
                 console.log('🖼️ Fixing broken image:', e.target.src);
                 e.target.dataset.fallbackApplied = 'true';
-                e.target.src = FALLBACK_IMAGES[fallbackImageIndex % FALLBACK_IMAGES.length];
+                const category = detectImageCategory(e.target.src, e.target.alt);
+                e.target.src = getRandomFallback(category);
                 fallbackImageIndex++;
             }}
         }}, true);
@@ -3414,13 +3476,19 @@ window.App = App;
                     /placehold\\.co/i,
                     /placeholder\\.com/i,
                     /via\\.placeholder\\.com/i,
-                    /example\\.com.*\\.(jpg|png|gif)/i,
-                    /fake.*\\.(jpg|png|gif)/i
+                    /example\\.com.*\\.(jpg|png|gif|webp)/i,
+                    /fake.*\\.(jpg|png|gif|webp)/i,
+                    /lorem.*\\.(jpg|png|gif|webp)/i,
+                    /picsum\\.photos/i,
+                    /lorempixel/i,
+                    /dummyimage/i,
+                    /fakeimg/i
                 ];
                 
                 const isBroken = brokenPatterns.some(pattern => pattern.test(originalSrc));
                 if (isBroken) {{
-                    props = {{ ...props, src: FALLBACK_IMAGES[Math.abs(originalSrc.length) % FALLBACK_IMAGES.length] }};
+                    const category = detectImageCategory(originalSrc, props.alt);
+                    props = {{ ...props, src: getRandomFallback(category) }};
                     console.log('🖼️ Replaced broken image URL:', originalSrc);
                 }}
                 
@@ -3431,7 +3499,8 @@ window.App = App;
                     onError: (e) => {{
                         if (!e.target.dataset.fallbackApplied) {{
                             e.target.dataset.fallbackApplied = 'true';
-                            e.target.src = FALLBACK_IMAGES[fallbackImageIndex % FALLBACK_IMAGES.length];
+                            const category = detectImageCategory(e.target.src, e.target.alt);
+                            e.target.src = getRandomFallback(category);
                             fallbackImageIndex++;
                         }}
                         if (existingOnError) existingOnError(e);

@@ -7,10 +7,11 @@ inspired by Awwwards, CSS Design Awards, and other design showcases.
 
 import json
 import random
+import hashlib
+import time
 from typing import Dict, List, Any, Tuple, Optional
 from dataclasses import dataclass
 from datetime import datetime
-import random
 import re
 
 @dataclass
@@ -339,42 +340,195 @@ class AdvancedLayoutSystem:
                 design_inspiration="Windows 11 Design, iOS 15, Glassmorphism Trend",
                 visual_effects=["Glass Blur", "Transparency Layers", "Floating Elements"],
                 design_principles=["Material Transparency", "Depth Through Blur", "Layered Design"]
+            ),
+            
+            # 11. Asymmetric Creative (Inspired by Creative Agencies)
+            LayoutPattern(
+                name="asymmetric_creative",
+                type="Asymmetric Creative Layout",
+                grid_system="asymmetric_overlap",
+                navigation="hidden_hamburger",
+                hero_style="overlapping_hero",
+                content_flow="asymmetric_sections",
+                visual_hierarchy="visual_tension",
+                color_approach="bold_duo_tone",
+                typography_scale="expressive_type",
+                spacing_system="dynamic_overlap",
+                interactive_elements=["parallax_scroll", "reveal_animations", "cursor_effects"],
+                animation_style="expressive_motion",
+                responsive_strategy="creative_adapt",
+                css_classes=[
+                    "grid grid-cols-12 -space-x-16",
+                    "col-span-7 -rotate-2 hover:rotate-0 transition-transform",
+                    "col-span-6 translate-y-12 z-20",
+                    "bg-black text-white p-16 rounded-none",
+                    "mix-blend-difference"
+                ],
+                design_inspiration="Creative Agencies, Experimental Web Design",
+                visual_effects=["Overlapping Elements", "Visual Tension", "Bold Contrasts"],
+                design_principles=["Break the Grid", "Creative Freedom", "Visual Impact"]
+            ),
+            
+            # 12. Horizontal Scroll (Inspired by Portfolio Sites)
+            LayoutPattern(
+                name="horizontal_portfolio",
+                type="Horizontal Scroll Portfolio",
+                grid_system="horizontal_container",
+                navigation="fixed_side_nav",
+                hero_style="horizontal_intro",
+                content_flow="horizontal_panels",
+                visual_hierarchy="sequence_flow",
+                color_approach="project_palette",
+                typography_scale="headline_focus",
+                spacing_system="panel_rhythm",
+                interactive_elements=["scroll_snap", "drag_scroll", "panel_reveal"],
+                animation_style="horizontal_motion",
+                responsive_strategy="vertical_fallback",
+                css_classes=[
+                    "flex flex-nowrap overflow-x-auto snap-x snap-mandatory",
+                    "flex-shrink-0 w-screen h-screen snap-center",
+                    "flex items-center justify-center",
+                    "scroll-smooth scrollbar-hide",
+                    "bg-gradient-to-r from-gray-900 to-gray-800"
+                ],
+                design_inspiration="Portfolio Sites, Horizontal Experiences",
+                visual_effects=["Horizontal Flow", "Panel Snapping", "Sequence Animation"],
+                design_principles=["Storytelling Flow", "Project Showcase", "Immersive Navigation"]
+            ),
+            
+            # 13. Dark Luxury (Inspired by Fashion Brands)
+            LayoutPattern(
+                name="dark_luxury",
+                type="Dark Luxury Interface",
+                grid_system="centered_luxury",
+                navigation="elegant_header",
+                hero_style="cinematic_hero",
+                content_flow="luxury_sections",
+                visual_hierarchy="gold_accents",
+                color_approach="dark_gold_palette",
+                typography_scale="elegant_serif",
+                spacing_system="luxurious_padding",
+                interactive_elements=["subtle_hover", "gold_highlights", "fade_reveals"],
+                animation_style="subtle_elegance",
+                responsive_strategy="premium_adapt",
+                css_classes=[
+                    "bg-black text-white",
+                    "border-b border-amber-600/30",
+                    "text-amber-400 font-serif tracking-widest",
+                    "py-32 px-8 text-center",
+                    "hover:text-amber-300 transition-colors duration-500"
+                ],
+                design_inspiration="Luxury Fashion, Premium Brands, Rolex, Gucci",
+                visual_effects=["Gold Accents", "Elegant Transitions", "Cinematic Feel"],
+                design_principles=["Luxury Design", "Premium Experience", "Understated Elegance"]
+            ),
+            
+            # 14. Playful Colorful (Inspired by Gaming/Youth Brands)
+            LayoutPattern(
+                name="playful_colorful",
+                type="Playful Colorful Design",
+                grid_system="fun_grid",
+                navigation="bouncy_nav",
+                hero_style="colorful_splash",
+                content_flow="playful_cards",
+                visual_hierarchy="color_pop",
+                color_approach="rainbow_gradient",
+                typography_scale="fun_bold",
+                spacing_system="bouncy_rhythm",
+                interactive_elements=["bounce_hover", "wiggle_animations", "confetti_effects"],
+                animation_style="playful_bouncy",
+                responsive_strategy="fun_responsive",
+                css_classes=[
+                    "bg-gradient-to-br from-pink-400 via-purple-500 to-indigo-600",
+                    "rounded-3xl shadow-2xl p-8 hover:scale-105 transition-transform",
+                    "text-white font-extrabold text-4xl",
+                    "animate-bounce hover:animate-none",
+                    "border-4 border-yellow-300"
+                ],
+                design_inspiration="Gaming Sites, Youth Brands, Spotify, Discord",
+                visual_effects=["Color Gradients", "Bouncy Elements", "Playful Icons"],
+                design_principles=["Fun Design", "Energetic Feel", "Youth Appeal"]
+            ),
+            
+            # 15. Clean Corporate (Inspired by Enterprise Software)
+            LayoutPattern(
+                name="clean_corporate",
+                type="Clean Corporate Professional",
+                grid_system="structured_grid",
+                navigation="professional_header",
+                hero_style="clean_hero",
+                content_flow="section_blocks",
+                visual_hierarchy="clear_hierarchy",
+                color_approach="professional_blue",
+                typography_scale="business_type",
+                spacing_system="professional_spacing",
+                interactive_elements=["subtle_hover", "smooth_scroll", "form_validation"],
+                animation_style="minimal_professional",
+                responsive_strategy="business_responsive",
+                css_classes=[
+                    "bg-white text-gray-900",
+                    "border-b border-gray-200 shadow-sm",
+                    "py-24 px-8 max-w-7xl mx-auto",
+                    "text-blue-600 font-semibold",
+                    "hover:bg-blue-50 transition-colors rounded-lg"
+                ],
+                design_inspiration="Salesforce, Microsoft, Enterprise Software",
+                visual_effects=["Clean Lines", "Subtle Shadows", "Professional Polish"],
+                design_principles=["Trust", "Clarity", "Professionalism"]
             )
         ]
     
     def get_unique_layout(self, project_type: str = "web_app") -> LayoutPattern:
-        """Get a unique layout pattern, ensuring variety across projects."""
+        """Get a unique layout pattern, ensuring maximum variety across projects."""
+        
+        # 🎲 ENHANCED RANDOMIZATION: Use timestamp + random for true uniqueness
+        seed_value = int(time.time() * 1000) + random.randint(0, 999999)
+        random.seed(seed_value)
+        
         available_patterns = [p for p in self.layout_patterns if p.name not in self.used_patterns]
         
         # If all patterns used, reset and shuffle
         if not available_patterns:
             self.used_patterns.clear()
-            available_patterns = self.layout_patterns
+            available_patterns = self.layout_patterns.copy()
+            random.shuffle(available_patterns)  # Shuffle to get different order each reset
             
         # Select pattern based on project type preferences
-        if project_type.lower() in ["blog", "magazine", "content"]:
-            preferred = [p for p in available_patterns if "editorial" in p.name or "minimal" in p.name]
-        elif project_type.lower() in ["dashboard", "admin", "tool"]:
-            preferred = [p for p in available_patterns if "brutalist" in p.name or "grid" in p.name]
-        elif project_type.lower() in ["portfolio", "creative", "artist"]:
-            preferred = [p for p in available_patterns if "masonry" in p.name or "immersive" in p.name]
-        elif project_type.lower() in ["ecommerce", "business", "corporate"]:
-            preferred = [p for p in available_patterns if "glass" in p.name or "organic" in p.name]
+        project_type_lower = project_type.lower()
+        if any(kw in project_type_lower for kw in ["blog", "magazine", "content", "news"]):
+            preferred = [p for p in available_patterns if any(kw in p.name for kw in ["editorial", "minimal", "clean"])]
+        elif any(kw in project_type_lower for kw in ["dashboard", "admin", "tool", "saas"]):
+            preferred = [p for p in available_patterns if any(kw in p.name for kw in ["brutalist", "grid", "corporate", "minimal"])]
+        elif any(kw in project_type_lower for kw in ["portfolio", "creative", "artist", "agency"]):
+            preferred = [p for p in available_patterns if any(kw in p.name for kw in ["masonry", "immersive", "asymmetric", "horizontal"])]
+        elif any(kw in project_type_lower for kw in ["ecommerce", "shop", "store", "market"]):
+            preferred = [p for p in available_patterns if any(kw in p.name for kw in ["glass", "organic", "luxury", "clean"])]
+        elif any(kw in project_type_lower for kw in ["gaming", "fun", "kids", "youth"]):
+            preferred = [p for p in available_patterns if any(kw in p.name for kw in ["playful", "colorful", "bauhaus"])]
+        elif any(kw in project_type_lower for kw in ["luxury", "fashion", "premium"]):
+            preferred = [p for p in available_patterns if any(kw in p.name for kw in ["luxury", "glass", "editorial"])]
         else:
-            preferred = available_patterns
+            # Random selection for general apps - use full shuffled list
+            preferred = available_patterns.copy()
+            random.shuffle(preferred)
             
         # Fallback to any available if no preferred found
         if not preferred:
             preferred = available_patterns
             
-        selected_pattern = random.choice(preferred)
+        # Apply additional randomization before selection
+        random.shuffle(preferred)
+        selected_pattern = preferred[0]  # Take first after shuffle for true randomness
         self.used_patterns.add(selected_pattern.name)
         
-        # Apply dynamic CSS tokenization
+        # Apply dynamic CSS tokenization with unique variations
         selected_pattern = self._apply_dynamic_tokens(selected_pattern)
         
         print(f"🎨 Selected Layout Pattern: {selected_pattern.name} ({selected_pattern.type})")
-        print(f"   Inspiration: {selected_pattern.design_inspiration}")
+        print(f"   📐 Grid: {selected_pattern.grid_system}")
+        print(f"   🌈 Colors: {selected_pattern.color_approach}")
+        print(f"   ✨ Effects: {', '.join(selected_pattern.visual_effects[:2])}")
+        print(f"   🏆 Inspiration: {selected_pattern.design_inspiration}")
         
         return selected_pattern
     

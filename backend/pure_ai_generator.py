@@ -20,6 +20,9 @@ import json
 import os
 import asyncio
 import threading
+import re
+import random
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime
@@ -32,6 +35,345 @@ from google.generativeai.types import (
     HarmCategory,
 )
 from code_validator import CodeValidator, validate_generated_code, auto_fix_jsx_for_sandbox, validate_and_fix_for_sandbox
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# USER PREFERENCE EXTRACTION UTILITIES
+# ═══════════════════════════════════════════════════════════════════════════
+
+def extract_user_design_preferences(prompt: str, description: str = "", features: List[str] = None) -> Dict[str, Any]:
+    """
+    Extract explicit design preferences from user input.
+    Returns a dictionary with detected colors, themes, fonts, and layout preferences.
+    """
+    combined_text = f"{prompt} {description} {' '.join(features or [])}".lower()
+    
+    preferences = {
+        "colors": [],
+        "theme": "auto",  # light, dark, or auto
+        "font_style": "modern",  # modern, elegant, playful, professional
+        "layout_style": None,
+        "explicit_instructions": []
+    }
+    
+    # Color detection with Tailwind mappings
+    color_mappings = {
+        # Blues
+        ("blue", "navy", "azure", "cobalt"): {"primary": "blue-600", "accent": "blue-400", "bg": "blue-50"},
+        ("cyan", "teal", "turquoise", "aqua"): {"primary": "cyan-600", "accent": "teal-400", "bg": "cyan-50"},
+        # Greens
+        ("green", "emerald", "lime", "mint", "sage", "forest"): {"primary": "green-600", "accent": "emerald-400", "bg": "green-50"},
+        # Reds/Pinks
+        ("red", "crimson", "ruby", "scarlet"): {"primary": "red-600", "accent": "red-400", "bg": "red-50"},
+        ("pink", "rose", "magenta", "fuchsia"): {"primary": "pink-600", "accent": "rose-400", "bg": "pink-50"},
+        # Purples
+        ("purple", "violet", "indigo", "lavender"): {"primary": "purple-600", "accent": "violet-400", "bg": "purple-50"},
+        # Oranges/Yellows
+        ("orange", "amber", "tangerine"): {"primary": "orange-600", "accent": "amber-400", "bg": "orange-50"},
+        ("yellow", "gold", "golden", "sunshine"): {"primary": "yellow-500", "accent": "amber-300", "bg": "yellow-50"},
+        # Neutrals
+        ("black", "dark", "midnight", "charcoal"): {"primary": "gray-900", "accent": "gray-700", "bg": "gray-950"},
+        ("white", "light", "bright", "clean"): {"primary": "gray-900", "accent": "gray-600", "bg": "white"},
+        ("gray", "grey", "silver", "slate"): {"primary": "gray-700", "accent": "gray-500", "bg": "gray-100"},
+        # Special
+        ("neon", "glow", "electric"): {"primary": "cyan-400", "accent": "pink-500", "bg": "gray-950"},
+    }
+    
+    for color_words, tailwind_colors in color_mappings.items():
+        if any(word in combined_text for word in color_words):
+            preferences["colors"].append(tailwind_colors)
+    
+    # Theme detection
+    if any(word in combined_text for word in ["dark", "black", "night", "midnight", "dark mode", "dark theme"]):
+        preferences["theme"] = "dark"
+        preferences["explicit_instructions"].append("MUST use dark background (bg-black or bg-gray-950) with light text (text-white)")
+    elif any(word in combined_text for word in ["light", "white", "bright", "clean", "light mode", "light theme"]):
+        preferences["theme"] = "light"
+        preferences["explicit_instructions"].append("MUST use light background (bg-white or bg-gray-50) with dark text (text-gray-900)")
+    
+    # Font style detection  
+    if any(word in combined_text for word in ["elegant", "luxury", "sophisticated", "premium", "high-end"]):
+        preferences["font_style"] = "elegant"
+        preferences["explicit_instructions"].append("Use elegant serif fonts, generous whitespace, and refined typography")
+    elif any(word in combined_text for word in ["playful", "fun", "colorful", "vibrant", "energetic", "youthful"]):
+        preferences["font_style"] = "playful"
+        preferences["explicit_instructions"].append("Use bold, rounded fonts with vibrant colors and playful animations")
+    elif any(word in combined_text for word in ["professional", "corporate", "business", "enterprise", "formal"]):
+        preferences["font_style"] = "professional"
+        preferences["explicit_instructions"].append("Use clean sans-serif fonts, conservative colors, and professional polish")
+    elif any(word in combined_text for word in ["minimal", "minimalist", "simple", "clean"]):
+        preferences["font_style"] = "minimal"
+        preferences["explicit_instructions"].append("Use minimal design with lots of whitespace, subtle colors, and clean typography")
+    
+    # Layout style detection
+    if any(word in combined_text for word in ["grid", "card", "cards"]):
+        preferences["layout_style"] = "grid"
+    elif any(word in combined_text for word in ["list", "table", "rows"]):
+        preferences["layout_style"] = "list"
+    elif any(word in combined_text for word in ["magazine", "editorial", "blog"]):
+        preferences["layout_style"] = "editorial"
+    elif any(word in combined_text for word in ["dashboard", "admin", "panel"]):
+        preferences["layout_style"] = "dashboard"
+    
+    # Extract specific color mentions (e.g., "use #ff5500" or "primary color blue")
+    hex_colors = re.findall(r'#[0-9a-fA-F]{6}', combined_text)
+    if hex_colors:
+        preferences["explicit_instructions"].append(f"Use these exact hex colors: {', '.join(hex_colors)}")
+    
+    return preferences
+
+
+def build_user_preference_instructions(preferences: Dict[str, Any]) -> str:
+    """Build explicit instruction text from extracted preferences."""
+    instructions = []
+    
+    if preferences["colors"]:
+        color_set = preferences["colors"][0]  # Use first detected color scheme
+        instructions.append(f"""
+🎨 USER-SPECIFIED COLOR SCHEME (MANDATORY):
+- Primary color: {color_set['primary']}
+- Accent color: {color_set['accent']}
+- Background tint: {color_set['bg']}
+DO NOT substitute with other colors like purple/violet!
+""")
+    
+    if preferences["theme"] == "dark":
+        instructions.append("""
+🌙 DARK THEME REQUIRED:
+- Background: bg-black or bg-gray-950
+- Text: text-white, text-gray-100
+- Cards: bg-gray-900, bg-gray-800/50
+- Borders: border-gray-800, border-white/10
+⛔ NO light backgrounds anywhere!
+""")
+    elif preferences["theme"] == "light":
+        instructions.append("""
+☀️ LIGHT THEME REQUIRED:
+- Background: bg-white or bg-gray-50
+- Text: text-gray-900, text-gray-700
+- Cards: bg-white with subtle shadows
+- Borders: border-gray-200
+⛔ NO dark backgrounds!
+""")
+    
+    for instruction in preferences.get("explicit_instructions", []):
+        instructions.append(f"⚡ {instruction}")
+    
+    return "\n".join(instructions)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# DYNAMIC DESIGN SYSTEM GENERATOR
+# Creates truly unique designs for each project using AI
+# ═══════════════════════════════════════════════════════════════════════════
+
+def generate_dynamic_design_system(project_name: str, app_type: str, description: str, user_preferences: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Generate a completely unique design system dynamically for each project.
+    Uses randomization + AI context to create fresh, non-repetitive designs.
+    """
+    import random
+    import time
+    import hashlib
+    
+    # Seed with project name + timestamp for uniqueness
+    seed = int(hashlib.md5(f"{project_name}{time.time()}".encode()).hexdigest()[:8], 16)
+    random.seed(seed)
+    
+    # Dynamic color palette generation
+    color_families = {
+        'blue': ['sky', 'blue', 'indigo', 'cyan', 'teal'],
+        'green': ['emerald', 'green', 'lime', 'teal', 'cyan'],
+        'red': ['rose', 'red', 'pink', 'orange', 'amber'],
+        'purple': ['violet', 'purple', 'indigo', 'fuchsia', 'pink'],
+        'orange': ['amber', 'orange', 'yellow', 'red', 'rose'],
+        'neutral': ['slate', 'gray', 'zinc', 'stone', 'neutral'],
+        'warm': ['amber', 'orange', 'yellow', 'red', 'rose'],
+        'cool': ['sky', 'blue', 'cyan', 'teal', 'indigo'],
+    }
+    
+    # If user specified colors, use those; otherwise pick random family
+    if user_preferences.get('colors'):
+        primary_color = user_preferences['colors'][0].get('primary', 'blue-600')
+        accent_color = user_preferences['colors'][0].get('accent', 'cyan-400')
+    else:
+        # Random color family selection
+        family = random.choice(list(color_families.keys()))
+        colors = color_families[family]
+        primary = random.choice(colors)
+        accent = random.choice([c for c in colors if c != primary])
+        intensity = random.choice(['400', '500', '600', '700'])
+        accent_intensity = random.choice(['300', '400', '500'])
+        primary_color = f"{primary}-{intensity}"
+        accent_color = f"{accent}-{accent_intensity}"
+    
+    # Dynamic theme selection
+    if user_preferences.get('theme') == 'dark':
+        bg_colors = ['bg-black', 'bg-gray-950', 'bg-slate-950', 'bg-zinc-950']
+        text_colors = ['text-white', 'text-gray-100', 'text-slate-100']
+        card_colors = ['bg-gray-900', 'bg-slate-900', 'bg-zinc-900', 'bg-white/5', 'bg-gray-800/50']
+    elif user_preferences.get('theme') == 'light':
+        bg_colors = ['bg-white', 'bg-gray-50', 'bg-slate-50', 'bg-zinc-50']
+        text_colors = ['text-gray-900', 'text-slate-900', 'text-zinc-900']
+        card_colors = ['bg-white', 'bg-gray-50', 'bg-slate-100']
+    else:
+        # Random theme
+        is_dark = random.choice([True, False])
+        if is_dark:
+            bg_colors = ['bg-black', 'bg-gray-950', 'bg-slate-950']
+            text_colors = ['text-white', 'text-gray-100']
+            card_colors = ['bg-gray-900', 'bg-white/5']
+        else:
+            bg_colors = ['bg-white', 'bg-gray-50', 'bg-slate-50']
+            text_colors = ['text-gray-900', 'text-slate-800']
+            card_colors = ['bg-white', 'bg-gray-50']
+    
+    # Dynamic layout patterns
+    layout_patterns = [
+        {'name': 'centered-hero', 'hero': 'text-center py-24 px-4', 'grid': 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'},
+        {'name': 'split-screen', 'hero': 'grid lg:grid-cols-2 min-h-screen', 'grid': 'grid grid-cols-1 md:grid-cols-2 gap-8'},
+        {'name': 'full-width', 'hero': 'w-full min-h-[80vh] flex items-center', 'grid': 'grid grid-cols-1 lg:grid-cols-4 gap-4'},
+        {'name': 'asymmetric', 'hero': 'grid grid-cols-12 gap-4 py-20', 'grid': 'columns-1 md:columns-2 lg:columns-3 gap-6'},
+        {'name': 'stacked', 'hero': 'flex flex-col items-center py-32 space-y-8', 'grid': 'flex flex-col space-y-6'},
+        {'name': 'offset-grid', 'hero': 'py-20 px-8 relative overflow-hidden', 'grid': 'grid grid-cols-2 md:grid-cols-4 gap-4 auto-rows-[200px]'},
+        {'name': 'masonry', 'hero': 'text-center py-16', 'grid': 'columns-1 sm:columns-2 lg:columns-4 gap-4 space-y-4'},
+        {'name': 'sidebar-layout', 'hero': 'flex gap-8 py-12', 'grid': 'grid grid-cols-1 md:grid-cols-3 gap-6'},
+    ]
+    
+    # Dynamic border radius
+    radius_options = ['rounded-none', 'rounded', 'rounded-lg', 'rounded-xl', 'rounded-2xl', 'rounded-3xl']
+    
+    # Dynamic shadows
+    shadow_options = ['shadow-none', 'shadow-sm', 'shadow', 'shadow-md', 'shadow-lg']
+    
+    # Dynamic animations
+    animation_options = [
+        'hover:scale-105 transition-transform duration-300',
+        'hover:-translate-y-1 transition-transform duration-200',
+        'hover:shadow-lg transition-shadow duration-300',
+        'hover:opacity-90 transition-opacity duration-200',
+        'hover:brightness-110 transition-all duration-300',
+        'transform transition-all duration-300 hover:scale-102',
+    ]
+    
+    # Dynamic typography
+    heading_styles = [
+        'font-bold tracking-tight',
+        'font-extrabold tracking-tighter',
+        'font-semibold tracking-normal',
+        'font-black tracking-wide',
+        'font-medium tracking-wide uppercase',
+    ]
+    
+    # Dynamic spacing
+    spacing_options = ['p-4', 'p-6', 'p-8', 'px-6 py-8', 'px-8 py-10', 'p-4 md:p-8']
+    
+    # Build the design system
+    layout = random.choice(layout_patterns)
+    
+    design_system = {
+        'primary_color': primary_color,
+        'accent_color': accent_color,
+        'bg_main': random.choice(bg_colors),
+        'text_main': random.choice(text_colors),
+        'card_bg': random.choice(card_colors),
+        'border_radius': random.choice(radius_options),
+        'shadow': random.choice(shadow_options),
+        'animation': random.choice(animation_options),
+        'heading_style': random.choice(heading_styles),
+        'card_padding': random.choice(spacing_options),
+        'layout_name': layout['name'],
+        'hero_layout': layout['hero'],
+        'grid_layout': layout['grid'],
+        'is_dark_theme': 'bg-black' in bg_colors[0] or 'bg-gray-950' in bg_colors[0],
+    }
+    
+    return design_system
+
+
+def build_dynamic_design_prompt(design_system: Dict[str, Any], project_name: str, app_type: str, description: str) -> str:
+    """
+    Build AI prompt with the dynamically generated design system.
+    """
+    is_dark = design_system['is_dark_theme']
+    
+    # Build explicit CSS class examples
+    primary = design_system['primary_color']
+    accent = design_system['accent_color']
+    bg = design_system['bg_main']
+    text = design_system['text_main']
+    card = design_system['card_bg']
+    radius = design_system['border_radius']
+    shadow = design_system['shadow']
+    animation = design_system['animation']
+    
+    prompt = f"""
+🚨🚨🚨 MANDATORY DESIGN SYSTEM - FOLLOW EXACTLY 🚨🚨🚨
+═══════════════════════════════════════════════════════════════════════
+THIS PROJECT HAS A UNIQUE DESIGN SYSTEM. DO NOT USE DEFAULT STYLES!
+
+📦 PROJECT: {project_name}
+📝 TYPE: {app_type}
+
+🎨 EXACT COLOR CLASSES TO USE:
+- Primary Color: bg-{primary} text-{primary} border-{primary}
+- Accent Color: bg-{accent} text-{accent}
+- Background: {bg}
+- Text: {text}
+- Cards: {card}
+
+📐 LAYOUT: {design_system['layout_name']}
+- Hero: className="{design_system['hero_layout']}"  
+- Grid: className="{design_system['grid_layout']}"
+
+✨ STYLING CLASSES:
+- Border Radius: {radius}
+- Shadows: {shadow}
+- Animations: {animation}
+- Headings: {design_system['heading_style']}
+- Card Padding: {design_system['card_padding']}
+
+🎯 THEME: {'DARK' if is_dark else 'LIGHT'}
+
+📝 EXAMPLE COMPONENT WITH THIS DESIGN:
+```jsx
+<div className="min-h-screen {bg} {text}">
+  <nav className="{card} {shadow} px-6 py-4">
+    <h1 className="text-xl {design_system['heading_style']}">Logo</h1>
+    <button className="bg-{primary} text-white px-4 py-2 {radius} {animation}">
+      Get Started
+    </button>
+  </nav>
+  <main className="{design_system['hero_layout']}">
+    <h2 className="text-4xl {design_system['heading_style']}">Welcome</h2>
+    <div className="{design_system['grid_layout']}">
+      <div className="{card} {shadow} {design_system['card_padding']} {radius}">
+        Card content
+      </div>
+    </div>
+  </main>
+</div>
+```
+
+⛔ FORBIDDEN - DO NOT USE THESE:
+- bg-gradient-to-* from-purple-* (unless primary is purple)
+- bg-gradient-to-* from-violet-* (unless primary is violet)  
+- shadow-2xl shadow-purple-500/20 shadow-glow
+- bg-clip-text text-transparent bg-gradient-*
+- Any colors NOT listed in this design system
+
+✅ REQUIRED - YOU MUST:
+1. Use ONLY the colors listed above
+2. Apply {radius} to ALL buttons and cards
+3. Apply {shadow} for elevation
+4. Use {bg} as the main background
+5. Use {text} for all text content
+═══════════════════════════════════════════════════════════════════════
+"""
+    return prompt
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 
 # Import compliance framework for GDPR, SOC 2, NIST SP 800-53 requirements
 try:
@@ -986,8 +1328,10 @@ class PureAIGenerator:
 		try:
 			# Convert file path to relative path for S3 key
 			relative_path = str(file_path).replace("\\", "/")
+			
+			# Handle path extraction - preserve backend/ and frontend/ prefixes
 			if "generated_projects" in relative_path:
-				# Extract path after project name
+				# Extract path after project name, keeping backend/ and frontend/ structure
 				parts = relative_path.split("/")
 				try:
 					project_idx = parts.index("generated_projects") + 2  # Skip "generated_projects/{project_slug}/"
@@ -996,7 +1340,28 @@ class PureAIGenerator:
 					# If parsing fails, use the filename
 					relative_path = file_path.name
 			else:
-				relative_path = file_path.name
+				# Check if path already has correct structure
+				path_str = str(file_path)
+				if "backend/" in path_str or "frontend/" in path_str:
+					# Extract backend/... or frontend/... portion
+					for prefix in ["backend/", "frontend/"]:
+						if prefix in path_str:
+							idx = path_str.find(prefix)
+							relative_path = path_str[idx:].replace("\\", "/")
+							break
+				else:
+					relative_path = file_path.name
+			
+			# Ensure backend files have backend/ prefix
+			if not relative_path.startswith(("backend/", "frontend/", "project_metadata")):
+				# Try to infer from file path parts
+				path_parts = str(file_path).replace("\\", "/").split("/")
+				if "backend" in path_parts:
+					backend_idx = path_parts.index("backend")
+					relative_path = "/".join(path_parts[backend_idx:])
+				elif "frontend" in path_parts:
+					frontend_idx = path_parts.index("frontend")
+					relative_path = "/".join(path_parts[frontend_idx:])
 			
 			# Upload DIRECTLY to S3 (no local intermediate)
 			file_info = {
@@ -1613,42 +1978,41 @@ export const cardVariants = {
 			print(f"\n🔍 VALIDATION SUMMARY:")
 			print(f"📊 Validation was disabled - files generated without AI validation")
 		
-		# Generate Awwwards design summary
+		# Generate Dynamic design summary (not static Awwwards)
 		design_summary = {
-			"design_system": "Awwwards 2025 Inspired",
+			"design_system": "Dynamic AI-Generated Design",
 			"features_implemented": [
-				"Vibrant gradient backgrounds",
-				"Glass morphism effects", 
-				"Micro-interactions and hover effects",
-				"Modern typography (Inter font)",
-				"Animated components",
-				"Award-winning color palettes",
+				"Unique color palette per project",
+				"Dynamic layout selection",
+				"Randomized animations and effects",
+				"User preference integration",
+				"Modern typography variations",
+				"Responsive adaptive layouts",
 				"Interactive UI elements",
 				"Mobile-responsive design"
 			],
 			"ui_patterns": [
-				"Hero section with gradient mesh background",
-				"Cards with glass morphism and hover animations", 
-				"Floating navigation with backdrop blur",
-				"Interactive buttons with shimmer effects",
-				"Text reveal animations",
-				"Parallax scroll effects"
+				"Unique hero section layout",
+				"Dynamic card arrangements",
+				"Variable navigation styles",
+				"Custom button effects",
+				"Contextual animations",
+				"Adaptive spacing systems"
 			],
 			"technical_stack": [
 				"React 18 with hooks",
-				"TailwindCSS with custom animations",
-				"Framer Motion for advanced interactions",
-				"Modern CSS with backdrop-filter",
+				"TailwindCSS with dynamic classes",
+				"Framer Motion for interactions",
+				"Modern CSS features",
 				"Responsive grid layouts",
 				"Accessible components"
 			]
 		}
 		
-		print(f"\n🏆 AWWWARDS DESIGN SYSTEM APPLIED:")
-		print(f"🎨 Design Philosophy: Award-winning modern UI")
-		print(f"🌈 Color System: Vibrant gradients and mesh backgrounds")  
-		print(f"✨ Animations: Micro-interactions and smooth transitions")
-		print(f"🔮 Effects: Glass morphism, glow shadows, floating elements")
+		print(f"\n🎨 DYNAMIC DESIGN SYSTEM GENERATED:")
+		print(f"✅ Each project gets UNIQUE colors, layouts, and styles!")
+		print(f"🎯 Design varies based on project name + timestamp")
+		print(f"🚀 No more repetitive templates!")
 		
 		# Save comprehensive project report
 		project_report = {
@@ -4005,8 +4369,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from passlib.context import CryptContext
 from jose import JWTError, jwt
-from google.oauth2 import id_token
-from google.auth.transport import requests as google_requests
+# NOTE: Google OAuth is optional - only import if needed
+# from google.oauth2 import id_token  # Optional for Google Sign-In
+# from google.auth.transport import requests as google_requests  # Optional
 import httpx
 from datetime import datetime, timedelta
 import os
@@ -4713,6 +5078,20 @@ export const FloatingTabs = ({ tabs, activeTab, onTabChange, className = '' }) =
 		app_type = plan.get('app_type', 'Web App')
 		description = plan.get('description', 'A modern web application')
 		
+		# 🎨 EXTRACT USER DESIGN PREFERENCES - Critical for following user instructions
+		user_preferences = extract_user_design_preferences(
+			prompt=description, 
+			description=plan.get('description', ''),
+			features=features_str
+		)
+		user_preference_instructions = build_user_preference_instructions(user_preferences)
+		
+		if user_preferences["colors"] or user_preferences["theme"] != "auto":
+			print(f"🎨 DETECTED USER DESIGN PREFERENCES:")
+			print(f"   Colors: {user_preferences['colors']}")
+			print(f"   Theme: {user_preferences['theme']}")
+			print(f"   Font Style: {user_preferences['font_style']}")
+		
 		# Extract user-provided product data and custom data
 		user_product_data = plan.get('_user_product_data')
 		user_custom_data = plan.get('_user_custom_data', {})
@@ -4984,33 +5363,56 @@ The user has requested LLM integration. You MUST include:
 
 """
 		
-		# Import layout design system
+		# ═══════════════════════════════════════════════════════════════════════
+		# DYNAMIC DESIGN SYSTEM - Generate unique design for EACH project
+		# ═══════════════════════════════════════════════════════════════════════
+		
+		# Generate a truly unique design system for this project
+		dynamic_design = generate_dynamic_design_system(
+			project_name=project_name,
+			app_type=app_type,
+			description=description,
+			user_preferences=user_preferences
+		)
+		
+		# Build design prompt from dynamic system
+		dynamic_design_prompt = build_dynamic_design_prompt(
+			design_system=dynamic_design,
+			project_name=project_name,
+			app_type=app_type,
+			description=description
+		)
+		
+		print(f"🎨 DYNAMIC DESIGN GENERATED:")
+		print(f"   🎨 Primary: {dynamic_design['primary_color']}")
+		print(f"   ✨ Accent: {dynamic_design['accent_color']}")
+		print(f"   🖼️ Layout: {dynamic_design['layout_name']}")
+		print(f"   🌗 Theme: {'Dark' if dynamic_design['is_dark_theme'] else 'Light'}")
+		print(f"   📐 Radius: {dynamic_design['border_radius']}")
+		
+		# Still import layout system for additional patterns (optional fallback)
+		layout_pattern = None
+		custom_css = ""
+		react_components = {}
+		trending_layouts = ["Dynamic Grid", "Adaptive Cards", "Flexible Flow"]
+		
 		try:
 			from layout_design_scraper import get_diverse_layout_for_project
 			from design_trend_scraper import get_latest_design_trends
 			
-			# Get unique layout pattern for this project
+			# Get layout pattern as additional inspiration (not primary)
 			layout_pattern, custom_css, react_components = get_diverse_layout_for_project(app_type.lower())
 			
 			# Get fresh design trends
 			design_trends = get_latest_design_trends()
-			trending_layouts = [t.layout_type for t in design_trends[:3]] if design_trends else ["Modern Grid", "Glass Cards", "Organic Flow"]
-			
-			print(f"🎨 UNIQUE LAYOUT SELECTED: {layout_pattern.name} - {layout_pattern.type}")
-			print(f"   📐 Grid: {layout_pattern.grid_system}")
-			print(f"   🌈 Colors: {layout_pattern.color_approach}")
-			print(f"   ✨ Effects: {', '.join(layout_pattern.visual_effects[:3])}")
-			print(f"   🏆 Inspiration: {layout_pattern.design_inspiration}")
+			trending_layouts = [t.layout_type for t in design_trends[:3]] if design_trends else trending_layouts
 			
 		except ImportError as e:
-			print(f"⚠️ Layout system import failed: {e}, using fallback design system")
+			print(f"⚠️ Layout system import failed: {e}, using dynamic design only")
 			layout_pattern = None
 			custom_css = ""
 			react_components = {}
 			trending_layouts = ["CSS Grid", "Flexbox Cards", "Modern Layout"]
-		
-		# Get Awwwards design system (fallback)
-		design_system = PureAIGenerator._get_awwwards_design_system()
 		
 		# Extract design preferences from features
 		design_features = []
@@ -5023,228 +5425,53 @@ The user has requested LLM integration. You MUST include:
 			else:
 				functional_features.append(str(feature))
 		
-		# Build design instructions - USER PREFERENCES FIRST
-		design_instructions = f"""
-🚨🚨🚨 CRITICAL: USER DESIGN PREFERENCES OVERRIDE EVERYTHING 🚨🚨🚨
-════════════════════════════════════════════════════════════════════════
-
-⛔ FORBIDDEN UNLESS USER EXPLICITLY REQUESTS:
-- Purple/violet gradients (bg-gradient-to-* from-purple-* to-violet-*)
-- Massive shadows (shadow-2xl, shadow-purple-500/20, shadow-glow)
-- Gradient text effects (bg-clip-text text-transparent bg-gradient-*)
-- Over-the-top animations and floating elements
-- Pink/magenta color schemes
-- Glass morphism effects (unless user asks for it)
-- Mesh gradients and radial gradients
-- Neon glow effects
-
-✅ DEFAULT CLEAN PROFESSIONAL STYLE (Use unless user specifies otherwise):
-- Clean solid backgrounds (bg-white, bg-gray-50, bg-black, bg-gray-900)
-- Simple readable typography (text-gray-900, text-white, text-gray-600)
-- Subtle shadows only (shadow-sm, shadow-md)
-- Minimal animations (hover:scale-102, transition-colors)
-- Professional color accents (blue-600, green-600, etc.)
-- Clear visual hierarchy with proper spacing
-- NO gradient text unless explicitly requested
-- NO purple/pink unless explicitly requested
-
-🎯 TYPOGRAPHY RULES:
-- Font: Inter or system-ui (clean, professional)
-- Headings: font-semibold or font-bold, NOT font-black or excessive weights
-- Body: font-normal, text-base or text-sm, proper line-height
-- NO all-caps unless it's a short label
-- NO excessive letter-spacing
-- Readable contrast ratios always
-
-🎨 COLOR APPLICATION RULES:
-- Use user-specified colors EXACTLY as described
-- If user says "black background" → use bg-black or bg-gray-950
-- If user says "white text" → use text-white
-- If user says "dark theme" → dark backgrounds, light text
-- If user says "light theme" → light backgrounds, dark text
-- DO NOT add random purple/pink accents
-- DO NOT add gradient backgrounds unless requested
-
-🚨 UNIQUE LAYOUT ASSIGNMENT:"""
-
-		# Add unique layout pattern instructions
-		if layout_pattern:
+		# ═══════════════════════════════════════════════════════════════════════
+		# BUILD DESIGN INSTRUCTIONS FROM DYNAMIC SYSTEM
+		# ═══════════════════════════════════════════════════════════════════════
+		
+		# Start with the dynamically generated design system
+		design_instructions = dynamic_design_prompt
+		
+		# Add user preference instructions if any
+		if user_preference_instructions:
 			design_instructions += f"""
-🎯 YOUR ASSIGNED LAYOUT: {layout_pattern.type} ({layout_pattern.name})
-📐 Grid System: {layout_pattern.grid_system}
-🎨 Color Approach: {layout_pattern.color_approach} 
-✨ Visual Effects: {', '.join(layout_pattern.visual_effects)}
-🎭 Navigation: {layout_pattern.navigation}
-📱 Responsive: {layout_pattern.responsive_strategy}
-🎬 Animation Style: {layout_pattern.animation_style}
-🏆 Inspiration: {layout_pattern.design_inspiration}
 
-MANDATORY CSS CLASSES TO USE:
-{chr(10).join(f'- {css_class}' for css_class in layout_pattern.css_classes)}
-
-LAYOUT-SPECIFIC REQUIREMENTS:
-- Hero Style: {layout_pattern.hero_style}
-- Content Flow: {layout_pattern.content_flow}  
-- Visual Hierarchy: {layout_pattern.visual_hierarchy}
-- Typography Scale: {layout_pattern.typography_scale}
-- Spacing System: {layout_pattern.spacing_system}
-- Interactive Elements: {', '.join(layout_pattern.interactive_elements)}
-
-🌟 TRENDING LAYOUTS (Reference for inspiration):
-- {trending_layouts[0]}
-- {trending_layouts[1]}  
-- {trending_layouts[2]}
-
-🚨 CRITICAL: This layout pattern MUST be your primary design approach. DO NOT use generic layouts!
+🎯 USER-SPECIFIED PREFERENCES (OVERRIDE DEFAULTS):
+{user_preference_instructions}
 """
 		
-		# Add custom CSS if available
+		# Add functional features context
+		if functional_features:
+			design_instructions += f"""
+
+⚙️ REQUIRED FEATURES TO BUILD:
+{chr(10).join(f'- {f}' for f in functional_features[:10])}
+"""
+
+		# Add layout pattern as additional context (not primary)
+		if layout_pattern:
+			design_instructions += f"""
+
+📐 ADDITIONAL LAYOUT INSPIRATION:
+- Pattern: {layout_pattern.name}
+- Grid: {layout_pattern.grid_system}
+- Animation: {layout_pattern.animation_style}
+- Hero Style: {layout_pattern.hero_style}
+"""
+		
+		# Add custom CSS if available  
 		if custom_css.strip():
 			design_instructions += f"""
 
-💎 CUSTOM CSS FOR YOUR LAYOUT (Add this to index.css):
+💎 CUSTOM CSS (Add to index.css):
 ```css
 {custom_css}
 ```
-
-"""
-		
-		design_instructions += '"""'
-		
-		# Also check description for design preferences
-		description_lower = description.lower() if description else ''
-		all_user_text = ' '.join([description_lower] + [str(df).lower() for df in design_features + functional_features])
-		
-		if design_features or any(keyword in description_lower for keyword in ['design', 'color', 'theme', 'style', 'dark', 'light', 'modern', 'minimalist', 'elegant', 'bold']):
-			design_instructions += f"\n\n🎯 USER'S EXACT REQUIREMENTS (MANDATORY - DO NOT IGNORE!):\n"
-			design_instructions += f"📝 User Description: \"{description}\"\n"
-			if design_features:
-				design_instructions += f"🎨 Design Requests: {', '.join(design_features)}\n"
-			if functional_features:
-				design_instructions += f"⚙️ Features: {', '.join(functional_features)}\n"
-			
-			design_instructions += "\n⚠️ IMPORTANT: The design MUST reflect what the user described above!\n"
-			design_instructions += "- If they want dark theme → use dark backgrounds and light text\n"
-			design_instructions += "- If they mention a specific industry → use appropriate imagery and colors\n"
-			design_instructions += "- If they want minimalist → use clean layouts with lots of whitespace\n"
-			design_instructions += "- If they want bold → use strong colors and impactful typography\n"
-			
-			# Enhanced color/theme detection and handling (now including description)
-			user_text_combined = all_user_text
-			
-			# Color scheme detection with more patterns
-			if any(color in user_text_combined for color in ['blue', 'navy', 'cyan', 'teal', 'ocean', 'sky', 'azure']):
-				design_instructions += "\n🎨 DETECTED BLUE/OCEAN THEME: Use bg-gradient-to-br from-blue-600 via-cyan-500 to-teal-400, blue-500 accents, blue-100 backgrounds\n"
-			elif any(color in user_text_combined for color in ['red', 'crimson', 'rose', 'pink', 'cherry', 'ruby']):
-				design_instructions += "\n🎨 DETECTED RED/PINK THEME: Use bg-gradient-to-br from-red-500 via-pink-500 to-rose-400, red-500 accents, red-50 backgrounds\n"
-			elif any(color in user_text_combined for color in ['green', 'emerald', 'lime', 'mint', 'forest', 'sage', 'nature', 'eco']):
-				design_instructions += "\n🎨 DETECTED GREEN/NATURE THEME: Use bg-gradient-to-br from-green-500 via-emerald-500 to-teal-400, green-500 accents, green-50 backgrounds\n"
-			elif any(color in user_text_combined for color in ['purple', 'violet', 'indigo', 'lavender', 'royal', 'luxur']):
-				design_instructions += "\n🎨 DETECTED PURPLE/LUXURY THEME: Use bg-gradient-to-br from-purple-600 via-violet-500 to-indigo-400, purple-500 accents, purple-50 backgrounds\n"
-			elif any(color in user_text_combined for color in ['orange', 'amber', 'yellow', 'gold', 'sunset', 'warm', 'energetic']):
-				design_instructions += "\n🎨 DETECTED WARM/ENERGETIC THEME: Use bg-gradient-to-br from-amber-400 via-orange-500 to-red-600, orange-500 accents, amber-50 backgrounds\n"
-			elif any(theme in user_text_combined for theme in ['dark', 'black', 'midnight', 'night', 'sleek', 'professional']):
-				design_instructions += """
-
-🚨🚨🚨 MANDATORY DARK THEME - FOLLOW EXACTLY 🚨🚨🚨
-════════════════════════════════════════════════════════════════════════
-User requested DARK/BLACK theme. You MUST use:
-
-✅ REQUIRED COLORS:
-- Main background: bg-black or bg-gray-950 (NOT bg-gray-900, too light)
-- Secondary backgrounds: bg-gray-900, bg-gray-900/50
-- Text: text-white for primary, text-gray-300 for secondary
-- Borders: border-gray-800 or border-white/10
-- Cards: bg-gray-900 or bg-white/5 with border-gray-800
-
-⛔ ABSOLUTELY FORBIDDEN:
-- Purple gradients (NO from-purple-* to-violet-*)
-- Pink/magenta colors
-- Gradient text effects
-- Colorful mesh backgrounds
-- Light backgrounds anywhere
-- Gray-700 or lighter backgrounds
-
-✅ ALLOWED ACCENTS (pick ONE, keep minimal):
-- Blue: text-blue-400, bg-blue-600 for buttons
-- Green: text-green-400, bg-green-600 for success
-- White: text-white, bg-white for primary buttons on dark
-
-✅ EXAMPLE DARK THEME STRUCTURE:
-```jsx
-<div className="min-h-screen bg-black text-white">
-  <nav className="bg-gray-950 border-b border-gray-800">
-    <span className="text-white font-semibold">Logo</span>
-    <button className="bg-white text-black px-4 py-2 rounded-lg">Sign In</button>
-  </nav>
-  <main className="bg-black">
-    <h1 className="text-4xl font-bold text-white">Heading</h1>
-    <p className="text-gray-300">Description text</p>
-    <button className="bg-white text-black px-6 py-3 rounded-lg font-medium">Get Started</button>
-  </main>
-</div>
-```
-════════════════════════════════════════════════════════════════════════
-"""
-			elif any(theme in user_text_combined for theme in ['light', 'white', 'minimal', 'clean', 'simple', 'bright']):
-				design_instructions += """
-
-🚨🚨🚨 MANDATORY LIGHT/MINIMAL THEME - FOLLOW EXACTLY 🚨🚨🚨
-════════════════════════════════════════════════════════════════════════
-User requested LIGHT/CLEAN theme. You MUST use:
-
-✅ REQUIRED COLORS:
-- Main background: bg-white or bg-gray-50
-- Text: text-gray-900 for primary, text-gray-600 for secondary
-- Borders: border-gray-200
-- Cards: bg-white with shadow-sm and border-gray-200
-
-⛔ ABSOLUTELY FORBIDDEN:
-- Purple gradients
-- Dark backgrounds
-- Gradient text effects
-- Neon colors
-- Heavy shadows (shadow-2xl, shadow-glow)
-
-✅ ALLOWED ACCENTS:
-- Blue: text-blue-600, bg-blue-600 for primary actions
-- Gray: bg-gray-100 for secondary elements
-════════════════════════════════════════════════════════════════════════
-"""
-			
-			# Industry-specific design guidance
-			if any(industry in user_text_combined for industry in ['medical', 'health', 'doctor', 'hospital', 'clinic']):
-				design_instructions += "\n🏥 MEDICAL INDUSTRY: Use calming blues/greens, professional feel, trust-inspiring design, clear navigation\n"
-			elif any(industry in user_text_combined for industry in ['finance', 'bank', 'money', 'investment', 'trading']):
-				design_instructions += "\n💰 FINANCE INDUSTRY: Use navy/gold colors, conservative typography, data visualizations, professional trust signals\n"
-			elif any(industry in user_text_combined for industry in ['food', 'restaurant', 'cafe', 'cook', 'recipe', 'meal']):
-				design_instructions += "\n🍕 FOOD/RESTAURANT INDUSTRY: Use warm appetizing colors (oranges, reds), beautiful food imagery, menu-style layouts\n"
-			elif any(industry in user_text_combined for industry in ['tech', 'software', 'startup', 'saas', 'app']):
-				design_instructions += "\n💻 TECH/STARTUP: Use modern gradients, glassmorphism, futuristic feel, clean data displays\n"
-			elif any(industry in user_text_combined for industry in ['fashion', 'clothing', 'style', 'boutique', 'luxury']):
-				design_instructions += "\n👗 FASHION/LUXURY: Use elegant typography, lots of whitespace, high-quality imagery, sophisticated color palette\n"
-			elif any(industry in user_text_combined for industry in ['fitness', 'gym', 'sport', 'workout', 'exercise']):
-				design_instructions += "\n💪 FITNESS/SPORTS: Use energetic colors (orange, red), bold typography, action imagery, motivational feel\n"
-			elif any(industry in user_text_combined for industry in ['education', 'school', 'learn', 'course', 'student']):
-				design_instructions += "\n📚 EDUCATION: Use friendly colors, clear hierarchy, accessible design, encouraging feel\n"
-			elif any(industry in user_text_combined for industry in ['travel', 'hotel', 'vacation', 'tour', 'flight']):
-				design_instructions += "\n✈️ TRAVEL/HOSPITALITY: Use inspiring imagery, dreamy colors, adventure feel, easy booking flows\n"
-		else:
-			# Default enhancement for projects without specific design mentions
-			design_instructions += f"\n\n🎯 PROJECT CONTEXT (ADAPT DESIGN ACCORDINGLY):\n"
-			design_instructions += f"📝 Description: \"{description}\"\n"
-			design_instructions += f"⚙️ Features: {', '.join(features_str)}\n"
-			design_instructions += """
-💡 NO SPECIFIC DESIGN REQUESTED - USE CLEAN PROFESSIONAL DEFAULTS:
-- Background: bg-white or bg-gray-50 (light, clean)
-- Text: text-gray-900 (dark, readable)
-- Accents: blue-600 for primary actions
-- Shadows: shadow-sm or shadow-md only
-- NO purple gradients, NO gradient text, NO heavy effects
-- Keep it simple, professional, and functional
 """
 		
 		return f"""🚨 CRITICAL ERROR PREVENTION - MUST FOLLOW:
+
+{user_preference_instructions if user_preference_instructions else ""}
 
 {product_data_section}
 {custom_data_section}

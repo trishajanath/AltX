@@ -19,5 +19,6 @@ bcrypt>=4.0.0,<5.0.0
 # CORS and middleware
 python-multipart>=0.0.6,<1.0.0
 
-# HTTP client for external API calls (optional)
+# HTTP client for external API calls
 httpx>=0.25.0,<1.0.0
+requests>=2.31.0,<3.0.0
