@@ -3174,7 +3174,8 @@ def generate_sandbox_html(files_content: dict, project_name: str, backend_url: s
     
     # UI components that are provided globally by the sandbox - skip loading their separate files
     SANDBOX_PROVIDED_COMPONENTS = {
-        'Button', 'Input', 'Card', 'Loading', 'AnimatedText', 'Navigation'
+        'Button', 'Input', 'Card', 'Loading', 'AnimatedText', 'Navigation',
+        'Spotlight', 'SpotlightCard', 'Toast', 'ToastProvider'
     }
     
     for file_path, content in files_content.items():
@@ -3300,6 +3301,11 @@ def generate_sandbox_html(files_content: dict, project_name: str, backend_url: s
     
     # PRECOMPILE JSX TO JS ON SERVER - No browser transforms needed!
     jsx_code = f"{components_code}\n\n{app_content}"
+    
+    # CRITICAL: Deduplicate cross-file declarations BEFORE precompilation
+    # This prevents "already declared" errors when multiple files define the same context/hook
+    jsx_code = deduplicate_cross_file_declarations(jsx_code)
+    
     print("🔄 Precompiling JSX to JavaScript using esbuild...")
     precompiled_code = precompile_jsx(jsx_code)
     
@@ -4536,7 +4542,144 @@ window.App = App;
         }};
         window.AnimatedText = AnimatedText;
         
-        console.log('✅ UI Components loaded: Button, Input, Card, Loading, AnimatedText');
+        // Spotlight Component - visual highlight/focus effect
+        const Spotlight = (props = {{}}) => {{
+            const children = props.children;
+            const className = props.className ?? '';
+            const size = props.size ?? 400;
+            const fill = props.fill ?? 'white';
+            const restProps = {{ ...props }};
+            delete restProps.children;
+            delete restProps.className;
+            delete restProps.size;
+            delete restProps.fill;
+            
+            // Spotlight creates a radial gradient overlay effect
+            return React.createElement('div', {{
+                className: `relative ${{className}}`,
+                style: {{
+                    background: `radial-gradient(circle at center, ${{fill}}20 0%, transparent 70%)`,
+                    width: size,
+                    height: size,
+                    borderRadius: '50%',
+                    pointerEvents: 'none',
+                    ...restProps.style
+                }},
+                ...restProps
+            }}, children);
+        }};
+        window.Spotlight = Spotlight;
+        
+        // SpotlightCard - a card with spotlight hover effect
+        const SpotlightCard = (props = {{}}) => {{
+            const children = props.children;
+            const className = props.className ?? '';
+            const restProps = {{ ...props }};
+            delete restProps.children;
+            delete restProps.className;
+            
+            return React.createElement('div', {{
+                className: `relative overflow-hidden rounded-xl bg-gray-900/50 border border-gray-800 p-6 group ${{className}}`,
+                ...restProps
+            }}, 
+                React.createElement('div', {{
+                    className: 'absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500',
+                    style: {{
+                        background: 'radial-gradient(600px circle at var(--mouse-x, 50%) var(--mouse-y, 50%), rgba(255,255,255,0.06), transparent 40%)'
+                    }}
+                }}),
+                children
+            );
+        }};
+        window.SpotlightCard = SpotlightCard;
+        
+        // Toast Context and Provider - for toast notifications
+        const ToastContext = React.createContext(null);
+        const useToast = () => React.useContext(ToastContext);
+        
+        const ToastProvider = (props) => {{
+            const [toasts, setToasts] = React.useState([]);
+            
+            const addToast = (message, type, duration) => {{
+                type = type || 'info';
+                duration = duration || 3000;
+                const id = Date.now();
+                setToasts(function(prev) {{ return [...prev, {{ id: id, message: message, type: type }}]; }});
+                setTimeout(function() {{ removeToast(id); }}, duration);
+            }};
+            
+            const removeToast = (id) => {{
+                setToasts(function(prev) {{ return prev.filter(function(t) {{ return t.id !== id; }}); }});
+            }};
+            
+            const toast = {{
+                success: function(msg) {{ addToast(msg, 'success'); }},
+                error: function(msg) {{ addToast(msg, 'error'); }},
+                warning: function(msg) {{ addToast(msg, 'warning'); }},
+                info: function(msg) {{ addToast(msg, 'info'); }}
+            }};
+            
+            const getTypeClass = (type) => {{
+                if (type === 'success') return 'bg-green-500 text-white';
+                if (type === 'error') return 'bg-red-500 text-white';
+                if (type === 'warning') return 'bg-yellow-500 text-black';
+                return 'bg-gray-800 text-white';
+            }};
+            
+            return React.createElement(ToastContext.Provider, {{ value: toast }},
+                props.children,
+                React.createElement('div', {{
+                    className: 'fixed bottom-4 right-4 z-50 flex flex-col gap-2',
+                    style: {{ pointerEvents: 'none' }}
+                }},
+                    toasts.map(function(t) {{
+                        return React.createElement('div', {{
+                            key: t.id,
+                            className: 'px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 min-w-[280px] transform transition-all duration-300 ' + getTypeClass(t.type),
+                            style: {{ pointerEvents: 'auto' }}
+                        }},
+                            React.createElement('span', {{ className: 'flex-1' }}, t.message),
+                            React.createElement('button', {{
+                                onClick: function() {{ removeToast(t.id); }},
+                                className: 'opacity-70 hover:opacity-100'
+                            }}, '✕')
+                        );
+                    }})
+                )
+            );
+        }};
+        window.ToastContext = ToastContext;
+        window.useToast = useToast;
+        window.ToastProvider = ToastProvider;
+        
+        // Toast component - simple wrapper for displaying a single toast
+        const Toast = (props) => {{
+            props = props || {{}};
+            const message = props.message || props.children || '';
+            const type = props.type || 'info';
+            const onClose = props.onClose;
+            const className = props.className || '';
+            
+            const getTypeClass = (type) => {{
+                if (type === 'success') return 'bg-green-500 text-white';
+                if (type === 'error') return 'bg-red-500 text-white';
+                if (type === 'warning') return 'bg-yellow-500 text-black';
+                return 'bg-gray-800 text-white';
+            }};
+            
+            return React.createElement('div', {{
+                className: 'px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 min-w-[280px] ' + getTypeClass(type) + ' ' + className
+            }},
+                React.createElement('span', {{ className: 'flex-1' }}, message),
+                onClose ? React.createElement('button', {{
+                    onClick: onClose,
+                    className: 'opacity-70 hover:opacity-100'
+                }}, '✕') : null
+            );
+        }};
+        window.Toast = Toast;
+        
+        console.log('✅ UI Components loaded: Button, Input, Card, Loading, AnimatedText, Spotlight, Toast');
         
         // Console logger for debugging - hidden by default with toggle button
         const originalConsoleLog = console.log;
@@ -6062,6 +6205,109 @@ window.App = App;
 </body>
 </html>
     """
+
+def deduplicate_cross_file_declarations(code: str) -> str:
+    """
+    Remove duplicate declarations of contexts, hooks, and providers that may exist
+    across multiple component files when bundled together for the sandbox.
+    
+    This handles cases like:
+    - ToastContext declared in both Toast.jsx and App.jsx
+    - useToast hook declared in multiple files
+    - ToastProvider declared in multiple files
+    - Other common context/hook patterns
+    """
+    import re
+    
+    # Track seen declarations to detect duplicates
+    seen_declarations = set()
+    
+    # Patterns to deduplicate (these commonly cause "already declared" errors)
+    # Format: (pattern_to_find_declaration, name_group_index)
+    declaration_patterns = [
+        # Context declarations: const XContext = createContext/React.createContext
+        (r'const\s+(\w+Context)\s*=\s*(?:React\.)?createContext\s*\([^)]*\)\s*;?', 1),
+        # Hook declarations: const useX = () => {...} or const useX = () => React.useContext
+        (r'const\s+(use[A-Z]\w*)\s*=\s*\([^)]*\)\s*=>\s*[{(]?', 1),
+        # Alternative hook pattern: const useX = () => { ... }
+        (r'const\s+(use[A-Z]\w*)\s*=\s*\(\)\s*=>\s*\{', 1),
+        # Provider declarations: const XProvider = ({ children }) => {...}
+        (r'const\s+(\w+Provider)\s*=\s*\(\{\s*children\s*(?:,\s*\w+)*\s*\}\)\s*=>\s*\{', 1),
+    ]
+    
+    lines = code.split('\n')
+    result_lines = []
+    i = 0
+    
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+        
+        # Skip empty lines and comments
+        if not stripped or stripped.startswith('//') or stripped.startswith('/*') or stripped.startswith('*'):
+            result_lines.append(line)
+            i += 1
+            continue
+        
+        # Check against each pattern
+        found_duplicate = False
+        for pattern, name_group in declaration_patterns:
+            match = re.search(pattern, stripped)
+            if match:
+                decl_name = match.group(name_group)
+                
+                if decl_name in seen_declarations:
+                    # This is a duplicate! Skip this declaration block
+                    print(f"🔧 Removing duplicate declaration: {decl_name}")
+                    found_duplicate = True
+                    
+                    # Need to find where this declaration ends
+                    # Count braces/parens to find the end of the block
+                    brace_count = 0
+                    paren_count = 0
+                    started = False
+                    
+                    while i < len(lines):
+                        current_line = lines[i]
+                        for char in current_line:
+                            if char == '{':
+                                started = True
+                                brace_count += 1
+                            elif char == '}':
+                                brace_count -= 1
+                            elif char == '(':
+                                started = True
+                                paren_count += 1
+                            elif char == ')':
+                                paren_count -= 1
+                        
+                        i += 1
+                        
+                        # Check if declaration is complete
+                        if started and brace_count <= 0 and paren_count <= 0:
+                            # Check if this line ends with semicolon
+                            if current_line.rstrip().endswith(';'):
+                                break
+                            # Or if braces are balanced and we've processed content
+                            if brace_count == 0 and paren_count == 0:
+                                break
+                        
+                        # Safety: if we've gone more than 100 lines, stop
+                        if i > len(lines) - 1:
+                            break
+                    
+                    # Add a comment indicating the duplicate was removed
+                    result_lines.append(f'// [Deduplicated] {decl_name} - already declared above')
+                    break
+                else:
+                    # First time seeing this declaration
+                    seen_declarations.add(decl_name)
+        
+        if not found_duplicate:
+            result_lines.append(line)
+            i += 1
+    
+    return '\n'.join(result_lines)
 
 def fix_jsx_content_for_sandbox(content: str, component_name: str, project_name: str) -> str:
     """Fix JSX content specifically for sandbox browser compilation"""

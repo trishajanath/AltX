@@ -1160,6 +1160,7 @@ def auto_fix_jsx_for_sandbox(code: str, filename: str = "component.jsx") -> str:
     TEMPLATE_COMPONENTS = {
         # UI Components (from sandbox)
         'Button', 'Input', 'Card', 'Loading', 'AnimatedText', 'Navigation',
+        'Spotlight', 'SpotlightCard', 'Toast', 'ToastProvider',
         
         # Icons (from sandbox - all Lucide icons)
         'Star', 'User', 'ShoppingCart', 'X', 'Plus', 'Minus', 'Search',
