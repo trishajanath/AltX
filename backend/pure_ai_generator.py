@@ -5002,7 +5002,749 @@ export const FloatingTabs = ({ tabs, activeTab, onTabChange, className = '' }) =
       </motion.button>
     ))}
   </div>
-);'''
+);''',
+
+			"frontend/src/components/ui/Modal.jsx": '''import React, { useEffect } from 'react';
+
+export const Modal = ({ isOpen, onClose, children, title, size = 'md' }) => {
+  const sizes = {
+    sm: 'max-w-sm',
+    md: 'max-w-md',
+    lg: 'max-w-lg',
+    xl: 'max-w-xl',
+    full: 'max-w-4xl'
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+    return () => { document.body.style.overflow = 'unset'; };
+  }, [isOpen]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div 
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300" />
+      <div 
+        className={`relative ${sizes[size]} w-full bg-white rounded-2xl shadow-2xl transform transition-all duration-300 scale-100 opacity-100`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {title && (
+          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+            <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
+            <button 
+              onClick={onClose}
+              className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        )}
+        <div className="p-6">{children}</div>
+      </div>
+    </div>
+  );
+};''',
+
+			"frontend/src/components/ui/Toast.jsx": '''import React, { useState, useEffect, createContext, useContext } from 'react';
+
+const ToastContext = createContext(null);
+
+export const useToast = () => {
+  const context = useContext(ToastContext);
+  if (!context) throw new Error('useToast must be used within ToastProvider');
+  return context;
+};
+
+export const ToastProvider = ({ children }) => {
+  const [toasts, setToasts] = useState([]);
+
+  const addToast = (message, type = 'info', duration = 3000) => {
+    const id = Date.now();
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => removeToast(id), duration);
+  };
+
+  const removeToast = (id) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  };
+
+  const toast = {
+    success: (msg) => addToast(msg, 'success'),
+    error: (msg) => addToast(msg, 'error'),
+    warning: (msg) => addToast(msg, 'warning'),
+    info: (msg) => addToast(msg, 'info')
+  };
+
+  return (
+    <ToastContext.Provider value={toast}>
+      {children}
+      <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
+        {toasts.map(t => (
+          <div
+            key={t.id}
+            className={`px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 min-w-[280px] transform transition-all duration-300 ${
+              t.type === 'success' ? 'bg-green-500 text-white' :
+              t.type === 'error' ? 'bg-red-500 text-white' :
+              t.type === 'warning' ? 'bg-yellow-500 text-black' :
+              'bg-gray-800 text-white'
+            }`}
+          >
+            <span className="flex-1">{t.message}</span>
+            <button onClick={() => removeToast(t.id)} className="opacity-70 hover:opacity-100">✕</button>
+          </div>
+        ))}
+      </div>
+    </ToastContext.Provider>
+  );
+};''',
+
+			"frontend/src/components/ui/Dropdown.jsx": '''import React, { useState, useRef, useEffect } from 'react';
+
+export const Dropdown = ({ trigger, children, align = 'left' }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  return (
+    <div className="relative" ref={dropdownRef}>
+      <div onClick={() => setIsOpen(!isOpen)} className="cursor-pointer">
+        {trigger}
+      </div>
+      {isOpen && (
+        <div className={`absolute mt-2 w-48 bg-white rounded-xl shadow-lg border border-gray-100 py-2 z-50 transform transition-all duration-200 ${
+          align === 'right' ? 'right-0' : 'left-0'
+        }`}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+};
+
+export const DropdownItem = ({ onClick, children, icon, destructive = false }) => (
+  <button
+    onClick={onClick}
+    className={`w-full px-4 py-2 text-left flex items-center gap-3 hover:bg-gray-50 transition-colors ${
+      destructive ? 'text-red-600 hover:bg-red-50' : 'text-gray-700'
+    }`}
+  >
+    {icon && <span className="w-5 h-5">{icon}</span>}
+    {children}
+  </button>
+);''',
+
+			"frontend/src/components/ui/Switch.jsx": '''import React from 'react';
+
+export const Switch = ({ checked, onChange, label, disabled = false }) => {
+  return (
+    <label className={`inline-flex items-center gap-3 cursor-pointer ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}>
+      <div className="relative">
+        <input
+          type="checkbox"
+          className="sr-only"
+          checked={checked}
+          onChange={(e) => !disabled && onChange(e.target.checked)}
+        />
+        <div className={`w-12 h-6 rounded-full transition-colors duration-200 ${
+          checked ? 'bg-blue-600' : 'bg-gray-300'
+        }`} />
+        <div className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-md transform transition-transform duration-200 ${
+          checked ? 'translate-x-6' : 'translate-x-0'
+        }`} />
+      </div>
+      {label && <span className="text-gray-700 font-medium">{label}</span>}
+    </label>
+  );
+};''',
+
+			"frontend/src/components/ui/Tooltip.jsx": '''import React, { useState } from 'react';
+
+export const Tooltip = ({ children, content, position = 'top' }) => {
+  const [isVisible, setIsVisible] = useState(false);
+
+  const positions = {
+    top: 'bottom-full left-1/2 -translate-x-1/2 mb-2',
+    bottom: 'top-full left-1/2 -translate-x-1/2 mt-2',
+    left: 'right-full top-1/2 -translate-y-1/2 mr-2',
+    right: 'left-full top-1/2 -translate-y-1/2 ml-2'
+  };
+
+  return (
+    <div 
+      className="relative inline-block"
+      onMouseEnter={() => setIsVisible(true)}
+      onMouseLeave={() => setIsVisible(false)}
+    >
+      {children}
+      {isVisible && (
+        <div className={`absolute ${positions[position]} px-3 py-1.5 bg-gray-900 text-white text-sm rounded-lg whitespace-nowrap z-50 pointer-events-none`}>
+          {content}
+          <div className={`absolute w-2 h-2 bg-gray-900 transform rotate-45 ${
+            position === 'top' ? 'top-full left-1/2 -translate-x-1/2 -mt-1' :
+            position === 'bottom' ? 'bottom-full left-1/2 -translate-x-1/2 -mb-1' :
+            position === 'left' ? 'left-full top-1/2 -translate-y-1/2 -ml-1' :
+            'right-full top-1/2 -translate-y-1/2 -mr-1'
+          }`} />
+        </div>
+      )}
+    </div>
+  );
+};''',
+
+			"frontend/src/components/ui/Accordion.jsx": '''import React, { useState } from 'react';
+
+export const Accordion = ({ items, allowMultiple = false }) => {
+  const [openItems, setOpenItems] = useState([]);
+
+  const toggleItem = (index) => {
+    if (allowMultiple) {
+      setOpenItems(prev => 
+        prev.includes(index) 
+          ? prev.filter(i => i !== index)
+          : [...prev, index]
+      );
+    } else {
+      setOpenItems(prev => prev.includes(index) ? [] : [index]);
+    }
+  };
+
+  return (
+    <div className="divide-y divide-gray-200 rounded-xl border border-gray-200 overflow-hidden">
+      {items.map((item, index) => (
+        <div key={index}>
+          <button
+            onClick={() => toggleItem(index)}
+            className="w-full px-6 py-4 flex items-center justify-between text-left bg-white hover:bg-gray-50 transition-colors"
+          >
+            <span className="font-medium text-gray-900">{item.title}</span>
+            <svg
+              className={`w-5 h-5 text-gray-500 transform transition-transform duration-200 ${
+                openItems.includes(index) ? 'rotate-180' : ''
+              }`}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          <div className={`overflow-hidden transition-all duration-300 ${
+            openItems.includes(index) ? 'max-h-96' : 'max-h-0'
+          }`}>
+            <div className="px-6 py-4 bg-gray-50 text-gray-600">
+              {item.content}
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};''',
+
+			"frontend/src/components/ui/Tabs.jsx": '''import React, { useState } from 'react';
+
+export const Tabs = ({ tabs, defaultTab = 0 }) => {
+  const [activeTab, setActiveTab] = useState(defaultTab);
+
+  return (
+    <div>
+      <div className="flex border-b border-gray-200">
+        {tabs.map((tab, index) => (
+          <button
+            key={index}
+            onClick={() => setActiveTab(index)}
+            className={`px-6 py-3 font-medium text-sm transition-all duration-200 relative ${
+              activeTab === index
+                ? 'text-blue-600'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            {tab.label}
+            {activeTab === index && (
+              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />
+            )}
+          </button>
+        ))}
+      </div>
+      <div className="py-4">
+        {tabs[activeTab]?.content}
+      </div>
+    </div>
+  );
+};''',
+
+			"frontend/src/components/ui/Badge.jsx": '''import React from 'react';
+
+export const Badge = ({ children, variant = 'default', size = 'md', dot = false }) => {
+  const variants = {
+    default: 'bg-gray-100 text-gray-800',
+    primary: 'bg-blue-100 text-blue-800',
+    success: 'bg-green-100 text-green-800',
+    warning: 'bg-yellow-100 text-yellow-800',
+    danger: 'bg-red-100 text-red-800',
+    purple: 'bg-purple-100 text-purple-800'
+  };
+
+  const sizes = {
+    sm: 'px-2 py-0.5 text-xs',
+    md: 'px-2.5 py-0.5 text-sm',
+    lg: 'px-3 py-1 text-base'
+  };
+
+  return (
+    <span className={`inline-flex items-center gap-1.5 font-medium rounded-full ${variants[variant]} ${sizes[size]}`}>
+      {dot && <span className={`w-1.5 h-1.5 rounded-full ${
+        variant === 'success' ? 'bg-green-500' :
+        variant === 'danger' ? 'bg-red-500' :
+        variant === 'warning' ? 'bg-yellow-500' :
+        'bg-current'
+      }`} />}
+      {children}
+    </span>
+  );
+};''',
+
+			"frontend/src/components/ui/Avatar.jsx": '''import React from 'react';
+
+export const Avatar = ({ src, alt, name, size = 'md', status }) => {
+  const sizes = {
+    sm: 'w-8 h-8 text-xs',
+    md: 'w-10 h-10 text-sm',
+    lg: 'w-12 h-12 text-base',
+    xl: 'w-16 h-16 text-lg'
+  };
+
+  const statusColors = {
+    online: 'bg-green-500',
+    offline: 'bg-gray-400',
+    busy: 'bg-red-500',
+    away: 'bg-yellow-500'
+  };
+
+  const getInitials = (name) => {
+    return name?.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || '?';
+  };
+
+  return (
+    <div className="relative inline-block">
+      {src ? (
+        <img 
+          src={src} 
+          alt={alt || name} 
+          className={`${sizes[size]} rounded-full object-cover ring-2 ring-white`}
+        />
+      ) : (
+        <div className={`${sizes[size]} rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-semibold ring-2 ring-white`}>
+          {getInitials(name)}
+        </div>
+      )}
+      {status && (
+        <span className={`absolute bottom-0 right-0 w-3 h-3 ${statusColors[status]} rounded-full ring-2 ring-white`} />
+      )}
+    </div>
+  );
+};
+
+export const AvatarGroup = ({ avatars, max = 4 }) => {
+  const visible = avatars.slice(0, max);
+  const remaining = avatars.length - max;
+
+  return (
+    <div className="flex -space-x-3">
+      {visible.map((avatar, index) => (
+        <Avatar key={index} {...avatar} />
+      ))}
+      {remaining > 0 && (
+        <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-sm font-medium text-gray-600 ring-2 ring-white">
+          +{remaining}
+        </div>
+      )}
+    </div>
+  );
+};''',
+
+			"frontend/src/components/ui/Progress.jsx": '''import React from 'react';
+
+export const Progress = ({ value, max = 100, size = 'md', color = 'blue', showLabel = false }) => {
+  const percentage = Math.min(Math.max((value / max) * 100, 0), 100);
+
+  const sizes = {
+    sm: 'h-1',
+    md: 'h-2',
+    lg: 'h-3'
+  };
+
+  const colors = {
+    blue: 'bg-blue-600',
+    green: 'bg-green-600',
+    red: 'bg-red-600',
+    purple: 'bg-purple-600',
+    gradient: 'bg-gradient-to-r from-blue-500 to-purple-600'
+  };
+
+  return (
+    <div className="w-full">
+      {showLabel && (
+        <div className="flex justify-between text-sm text-gray-600 mb-1">
+          <span>Progress</span>
+          <span>{Math.round(percentage)}%</span>
+        </div>
+      )}
+      <div className={`w-full ${sizes[size]} bg-gray-200 rounded-full overflow-hidden`}>
+        <div
+          className={`${sizes[size]} ${colors[color]} rounded-full transition-all duration-500 ease-out`}
+          style={{ width: `${percentage}%` }}
+        />
+      </div>
+    </div>
+  );
+};
+
+export const CircularProgress = ({ value, max = 100, size = 80, strokeWidth = 8, color = 'blue' }) => {
+  const percentage = Math.min(Math.max((value / max) * 100, 0), 100);
+  const radius = (size - strokeWidth) / 2;
+  const circumference = radius * 2 * Math.PI;
+  const offset = circumference - (percentage / 100) * circumference;
+
+  return (
+    <div className="relative inline-flex items-center justify-center">
+      <svg width={size} height={size} className="transform -rotate-90">
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke="#e5e7eb"
+          strokeWidth={strokeWidth}
+        />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke={color === 'gradient' ? 'url(#gradient)' : color}
+          strokeWidth={strokeWidth}
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={offset}
+          className="transition-all duration-500 ease-out"
+        />
+        {color === 'gradient' && (
+          <defs>
+            <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="#3b82f6" />
+              <stop offset="100%" stopColor="#8b5cf6" />
+            </linearGradient>
+          </defs>
+        )}
+      </svg>
+      <span className="absolute text-lg font-semibold text-gray-700">
+        {Math.round(percentage)}%
+      </span>
+    </div>
+  );
+};''',
+
+			"frontend/src/components/ui/Slider.jsx": '''import React, { useState, useRef, useCallback } from 'react';
+
+export const Slider = ({ min = 0, max = 100, value, onChange, step = 1, label }) => {
+  const percentage = ((value - min) / (max - min)) * 100;
+
+  return (
+    <div className="w-full">
+      {label && (
+        <div className="flex justify-between text-sm text-gray-600 mb-2">
+          <span>{label}</span>
+          <span className="font-medium">{value}</span>
+        </div>
+      )}
+      <div className="relative h-6 flex items-center">
+        <div className="absolute w-full h-2 bg-gray-200 rounded-full">
+          <div 
+            className="absolute h-full bg-blue-600 rounded-full"
+            style={{ width: `${percentage}%` }}
+          />
+        </div>
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          onChange={(e) => onChange(Number(e.target.value))}
+          className="absolute w-full h-2 opacity-0 cursor-pointer z-10"
+        />
+        <div 
+          className="absolute w-5 h-5 bg-white border-2 border-blue-600 rounded-full shadow-md transform -translate-x-1/2 transition-transform hover:scale-110"
+          style={{ left: `${percentage}%` }}
+        />
+      </div>
+    </div>
+  );
+};''',
+
+			"frontend/src/components/ui/Skeleton.jsx": '''import React from 'react';
+
+export const Skeleton = ({ variant = 'text', width, height, className = '' }) => {
+  const baseClasses = 'animate-pulse bg-gray-200 rounded';
+
+  if (variant === 'circular') {
+    return (
+      <div 
+        className={`${baseClasses} rounded-full ${className}`}
+        style={{ width: width || 40, height: height || 40 }}
+      />
+    );
+  }
+
+  if (variant === 'rectangular') {
+    return (
+      <div 
+        className={`${baseClasses} ${className}`}
+        style={{ width: width || '100%', height: height || 100 }}
+      />
+    );
+  }
+
+  return (
+    <div 
+      className={`${baseClasses} h-4 ${className}`}
+      style={{ width: width || '100%' }}
+    />
+  );
+};
+
+export const CardSkeleton = () => (
+  <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+    <Skeleton variant="rectangular" height={160} className="mb-4 rounded-lg" />
+    <Skeleton width="60%" className="mb-2" />
+    <Skeleton width="40%" className="mb-4" />
+    <div className="flex gap-2">
+      <Skeleton variant="circular" width={32} height={32} />
+      <div className="flex-1">
+        <Skeleton width="50%" className="mb-1" />
+        <Skeleton width="30%" />
+      </div>
+    </div>
+  </div>
+);''',
+
+			"frontend/src/components/ui/Drawer.jsx": '''import React, { useEffect } from 'react';
+
+export const Drawer = ({ isOpen, onClose, children, position = 'right', title }) => {
+  const positions = {
+    left: 'left-0 top-0 h-full',
+    right: 'right-0 top-0 h-full',
+    top: 'top-0 left-0 w-full',
+    bottom: 'bottom-0 left-0 w-full'
+  };
+
+  const transforms = {
+    left: isOpen ? 'translate-x-0' : '-translate-x-full',
+    right: isOpen ? 'translate-x-0' : 'translate-x-full',
+    top: isOpen ? 'translate-y-0' : '-translate-y-full',
+    bottom: isOpen ? 'translate-y-0' : 'translate-y-full'
+  };
+
+  const sizes = {
+    left: 'w-80 max-w-[85vw]',
+    right: 'w-80 max-w-[85vw]',
+    top: 'h-auto max-h-[70vh]',
+    bottom: 'h-auto max-h-[70vh]'
+  };
+
+  useEffect(() => {
+    if (isOpen) document.body.style.overflow = 'hidden';
+    else document.body.style.overflow = 'unset';
+    return () => { document.body.style.overflow = 'unset'; };
+  }, [isOpen]);
+
+  return (
+    <>
+      {isOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-40 transition-opacity duration-300"
+          onClick={onClose}
+        />
+      )}
+      <div className={`fixed ${positions[position]} ${sizes[position]} bg-white shadow-xl z-50 transform transition-transform duration-300 ease-in-out ${transforms[position]}`}>
+        {title && (
+          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+            <h3 className="text-lg font-semibold">{title}</h3>
+            <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        )}
+        <div className="p-6 overflow-y-auto h-full">{children}</div>
+      </div>
+    </>
+  );
+};''',
+
+			"frontend/src/components/ui/Carousel.jsx": '''import React, { useState, useEffect, useCallback } from 'react';
+
+export const Carousel = ({ items, autoPlay = false, interval = 3000, showDots = true, showArrows = true }) => {
+  const [currentIndex, setCurrentIndex] = useState(0);
+
+  const goToNext = useCallback(() => {
+    setCurrentIndex(prev => (prev + 1) % items.length);
+  }, [items.length]);
+
+  const goToPrev = () => {
+    setCurrentIndex(prev => (prev - 1 + items.length) % items.length);
+  };
+
+  useEffect(() => {
+    if (!autoPlay) return;
+    const timer = setInterval(goToNext, interval);
+    return () => clearInterval(timer);
+  }, [autoPlay, interval, goToNext]);
+
+  return (
+    <div className="relative overflow-hidden rounded-xl">
+      <div 
+        className="flex transition-transform duration-500 ease-out"
+        style={{ transform: `translateX(-${currentIndex * 100}%)` }}
+      >
+        {items.map((item, index) => (
+          <div key={index} className="w-full flex-shrink-0">
+            {item}
+          </div>
+        ))}
+      </div>
+      
+      {showArrows && items.length > 1 && (
+        <>
+          <button
+            onClick={goToPrev}
+            className="absolute left-4 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/90 hover:bg-white rounded-full shadow-lg flex items-center justify-center transition-all"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
+          <button
+            onClick={goToNext}
+            className="absolute right-4 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/90 hover:bg-white rounded-full shadow-lg flex items-center justify-center transition-all"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+          </button>
+        </>
+      )}
+
+      {showDots && items.length > 1 && (
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2">
+          {items.map((_, index) => (
+            <button
+              key={index}
+              onClick={() => setCurrentIndex(index)}
+              className={`w-2 h-2 rounded-full transition-all duration-300 ${
+                index === currentIndex ? 'w-6 bg-white' : 'bg-white/50 hover:bg-white/70'
+              }`}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};''',
+
+			"frontend/src/components/ui/Counter.jsx": '''import React, { useState, useEffect, useRef } from 'react';
+
+export const Counter = ({ end, start = 0, duration = 2000, prefix = '', suffix = '', decimals = 0 }) => {
+  const [count, setCount] = useState(start);
+  const countRef = useRef(null);
+  const [isVisible, setIsVisible] = useState(false);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) setIsVisible(true);
+      },
+      { threshold: 0.1 }
+    );
+
+    if (countRef.current) observer.observe(countRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!isVisible) return;
+
+    let startTime = null;
+    const animate = (timestamp) => {
+      if (!startTime) startTime = timestamp;
+      const progress = Math.min((timestamp - startTime) / duration, 1);
+      const easeOut = 1 - Math.pow(1 - progress, 3);
+      setCount(start + (end - start) * easeOut);
+      if (progress < 1) requestAnimationFrame(animate);
+    };
+    requestAnimationFrame(animate);
+  }, [isVisible, start, end, duration]);
+
+  return (
+    <span ref={countRef} className="tabular-nums">
+      {prefix}{count.toFixed(decimals)}{suffix}
+    </span>
+  );
+};''',
+
+			"frontend/src/components/ui/Spotlight.jsx": '''import React, { useState, useRef } from 'react';
+
+export const SpotlightCard = ({ children, className = '' }) => {
+  const divRef = useRef(null);
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [opacity, setOpacity] = useState(0);
+
+  const handleMouseMove = (e) => {
+    if (!divRef.current) return;
+    const rect = divRef.current.getBoundingClientRect();
+    setPosition({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+  };
+
+  return (
+    <div
+      ref={divRef}
+      onMouseMove={handleMouseMove}
+      onMouseEnter={() => setOpacity(1)}
+      onMouseLeave={() => setOpacity(0)}
+      className={`relative overflow-hidden rounded-xl border border-gray-200 bg-white p-6 ${className}`}
+    >
+      <div
+        className="pointer-events-none absolute -inset-px opacity-0 transition-opacity duration-300"
+        style={{
+          opacity,
+          background: `radial-gradient(600px circle at ${position.x}px ${position.y}px, rgba(59, 130, 246, 0.1), transparent 40%)`
+        }}
+      />
+      {children}
+    </div>
+  );
+};'''
 		}
 
 	@staticmethod
@@ -5597,9 +6339,96 @@ The following are ALREADY AVAILABLE GLOBALLY - DO NOT IMPORT OR REDEFINE:
 ✅ REACT (Global): React, useState, useEffect, useCallback, useMemo, useRef, useContext, useReducer
 ✅ ROUTER (Global): Router, Routes, Route, Link, NavLink, Navigate, useNavigate, useLocation, useParams
 ✅ ANIMATION (Global): motion, AnimatePresence, useInView, useScroll
-✅ UI COMPONENTS (Global): Button, Input, Card, Loading, AnimatedText, Navigation
+✅ UI COMPONENTS (Global): Button, Input, Card, Loading, AnimatedText, Navigation, Modal, Toast, Dropdown, Switch, Tooltip, Accordion, Tabs, Badge, Avatar, Progress, Slider, Skeleton, Drawer, Carousel, Counter, SpotlightCard
 ✅ ICONS (Global): User, Search, Menu, X, Plus, Minus, Heart, Star, ShoppingCart, Trash2, Edit, Save, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Home, Settings, Bell, Mail, Phone, MapPin, etc.
 ✅ UTILITIES (Global): cn (className utility)
+
+🎯🎯🎯 REACTBITS INTERACTIVE COMPONENTS - USE THESE FOR AMAZING UX! 🎯🎯🎯
+════════════════════════════════════════════════════════════════════════════
+Your generated apps MUST be highly interactive and user-friendly! Use these components:
+
+1. **MODAL** - For login, signup, confirmations, product details:
+```jsx
+const [showModal, setShowModal] = useState(false);
+<Modal isOpen={{showModal}} onClose={{() => setShowModal(false)}} title="Login">
+  <form>...</form>
+</Modal>
+```
+
+2. **TOAST NOTIFICATIONS** - For feedback on actions:
+```jsx
+const toast = useToast();
+<button onClick={{() => {{ addToCart(item); toast.success('Added to cart!'); }}}}>Add to Cart</button>
+```
+
+3. **DROPDOWN MENUS** - For user menus, filters, options:
+```jsx
+<Dropdown trigger={{<button>Options</button>}}>
+  <DropdownItem onClick={{handleEdit}}>Edit</DropdownItem>
+  <DropdownItem onClick={{handleDelete}} destructive>Delete</DropdownItem>
+</Dropdown>
+```
+
+4. **TABS** - For organizing content sections:
+```jsx
+<Tabs tabs={{[
+  {{ label: 'Overview', content: <OverviewSection /> }},
+  {{ label: 'Reviews', content: <ReviewsSection /> }},
+  {{ label: 'Specs', content: <SpecsSection /> }}
+]}} />
+```
+
+5. **ACCORDION** - For FAQs, collapsible sections:
+```jsx
+<Accordion items={{[
+  {{ title: 'How does shipping work?', content: 'We ship within 2-3 business days...' }},
+  {{ title: 'Return policy', content: 'Returns accepted within 30 days...' }}
+]}} />
+```
+
+6. **PROGRESS BARS** - For loading, completion status:
+```jsx
+<Progress value={{75}} max={{100}} showLabel />
+<CircularProgress value={{60}} size={{80}} color="gradient" />
+```
+
+7. **CAROUSEL** - For image galleries, featured products:
+```jsx
+<Carousel items={{products.map(p => <ProductCard product={{p}} />)}} autoPlay interval={{5000}} />
+```
+
+8. **COUNTER ANIMATION** - For statistics, numbers:
+```jsx
+<Counter end={{1234}} prefix="$" duration={{2000}} />
+```
+
+9. **SPOTLIGHT CARDS** - For premium hover effects:
+```jsx
+<SpotlightCard className="p-6">
+  <h3>Premium Feature</h3>
+</SpotlightCard>
+```
+
+10. **DRAWER** - For shopping cart, filters sidebar:
+```jsx
+<Drawer isOpen={{isCartOpen}} onClose={{() => setIsCartOpen(false)}} title="Shopping Cart" position="right">
+  {{cart.map(item => <CartItem key={{item.id}} item={{item}} />)}}
+</Drawer>
+```
+
+🚀 INTERACTIVITY REQUIREMENTS - EVERY PROJECT MUST HAVE:
+═══════════════════════════════════════════════════════════════════════
+□ Smooth hover effects on all clickable elements (hover:scale-105, hover:shadow-lg)
+□ Loading states with Skeleton loaders while data fetches
+□ Toast notifications for user actions (add to cart, form submit, errors)
+□ Modal dialogs for forms (login, signup, product quick view)
+□ Animated counters for statistics and metrics
+□ Drawer/sidebar for cart or filters on e-commerce apps
+□ Accordion for FAQ sections
+□ Tabs for organizing complex content
+□ Progress indicators for multi-step forms
+□ Smooth page transitions between routes
+═══════════════════════════════════════════════════════════════════════
 
 🎨🎨🎨 CRITICAL: BUTTON VISIBILITY & WORKING FUNCTIONALITY 🎨🎨🎨
 ════════════════════════════════════════════════════════════════

@@ -134,7 +134,8 @@ class ModernProjectGenerator:
                 "react-dom": "^18.2.0",
                 "react-router-dom": "^6.15.0",
                 "lucide-react": "^0.263.1",
-                "@headlessui/react": "^1.7.17"
+                "@headlessui/react": "^1.7.17",
+                "framer-motion": "^10.16.0"
             },
             "devDependencies": {
                 "@types/react": "^18.2.15",

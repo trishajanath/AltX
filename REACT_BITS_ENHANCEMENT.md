@@ -203,6 +203,112 @@ export default function Hero() {
 ✅ **Performance Optimized** - Efficient animations and rendering  
 ✅ **Accessibility Ready** - ARIA labels and keyboard navigation  
 
+## 🎨 **NEW Interactive Components (ReactBits.dev Inspired)**
+
+### **Modal Dialogs**
+```jsx
+<Modal isOpen={showModal} onClose={() => setShowModal(false)} title="Login">
+  <form>...</form>
+</Modal>
+```
+
+### **Toast Notifications**
+```jsx
+const toast = useToast();
+<button onClick={() => { addToCart(item); toast.success('Added to cart!'); }}>
+  Add to Cart
+</button>
+```
+
+### **Dropdown Menus**
+```jsx
+<Dropdown trigger={<button>Options</button>}>
+  <DropdownItem onClick={handleEdit}>Edit</DropdownItem>
+  <DropdownItem onClick={handleDelete} destructive>Delete</DropdownItem>
+</Dropdown>
+```
+
+### **Tabs Component**
+```jsx
+<Tabs tabs={[
+  { label: 'Overview', content: <OverviewSection /> },
+  { label: 'Reviews', content: <ReviewsSection /> },
+]} />
+```
+
+### **Accordion for FAQs**
+```jsx
+<Accordion items={[
+  { title: 'How does shipping work?', content: 'We ship within 2-3 days...' },
+  { title: 'Return policy', content: 'Returns accepted within 30 days...' }
+]} />
+```
+
+### **Progress Bars**
+```jsx
+<Progress value={75} max={100} showLabel />
+<CircularProgress value={60} size={80} color="gradient" />
+```
+
+### **Carousel/Slider**
+```jsx
+<Carousel items={products.map(p => <ProductCard product={p} />)} autoPlay interval={5000} />
+```
+
+### **Animated Counter**
+```jsx
+<Counter end={1234} prefix="$" duration={2000} />
+```
+
+### **Spotlight Cards (Premium Hover)**
+```jsx
+<SpotlightCard className="p-6">
+  <h3>Premium Feature</h3>
+</SpotlightCard>
+```
+
+### **Drawer/Sidebar**
+```jsx
+<Drawer isOpen={isCartOpen} onClose={() => setIsCartOpen(false)} title="Shopping Cart" position="right">
+  {cart.map(item => <CartItem key={item.id} item={item} />)}
+</Drawer>
+```
+
+### **Switch Toggle**
+```jsx
+<Switch checked={darkMode} onChange={setDarkMode} label="Dark Mode" />
+```
+
+### **Tooltip**
+```jsx
+<Tooltip content="Click to add to cart" position="top">
+  <button>Add</button>
+</Tooltip>
+```
+
+### **Badge**
+```jsx
+<Badge variant="success" dot>Active</Badge>
+<Badge variant="danger">Out of Stock</Badge>
+```
+
+### **Avatar & Avatar Group**
+```jsx
+<Avatar src={user.avatar} name={user.name} status="online" />
+<AvatarGroup avatars={team} max={4} />
+```
+
+### **Skeleton Loaders**
+```jsx
+<Skeleton variant="text" width="60%" />
+<CardSkeleton />
+```
+
+### **Slider Input**
+```jsx
+<Slider min={0} max={100} value={price} onChange={setPrice} label="Price Range" />
+```
+
 ## 🔧 **Technical Details**
 
 ### **File Structure**
@@ -217,7 +323,23 @@ generated_projects/
 │   │   │       ├── AnimatedText.jsx
 │   │   │       ├── Input.jsx
 │   │   │       ├── Navigation.jsx
-│   │   │       └── Loading.jsx
+│   │   │       ├── Loading.jsx
+│   │   │       ├── Modal.jsx
+│   │   │       ├── Toast.jsx
+│   │   │       ├── Dropdown.jsx
+│   │   │       ├── Switch.jsx
+│   │   │       ├── Tooltip.jsx
+│   │   │       ├── Accordion.jsx
+│   │   │       ├── Tabs.jsx
+│   │   │       ├── Badge.jsx
+│   │   │       ├── Avatar.jsx
+│   │   │       ├── Progress.jsx
+│   │   │       ├── Slider.jsx
+│   │   │       ├── Skeleton.jsx
+│   │   │       ├── Drawer.jsx
+│   │   │       ├── Carousel.jsx
+│   │   │       ├── Counter.jsx
+│   │   │       └── Spotlight.jsx
 │   │   ├── App.jsx           # Enhanced with animations
 │   │   └── index.css         # Custom Tailwind utilities
 │   ├── tailwind.config.js    # Extended with animations

@@ -792,19 +792,28 @@ async def login(request: LoginRequest):
     Login with email and password.
     """
     try:
+        print(f"🔐 Login attempt for email: {request.email}")
+        
         # Get user by email
         user_model = UserModel()
         user = user_model.get_user_by_email(request.email)
         
         if not user:
-            raise HTTPException(status_code=401, detail="Invalid email or password")
+            print(f"❌ User not found for email: {request.email}")
+            raise HTTPException(status_code=401, detail="Invalid email or password - user not found")
+        
+        print(f"✅ User found: {user.get('username', 'unknown')}")
         
         # Verify password
         if not verify_password(request.password, user["hashed_password"]):
-            raise HTTPException(status_code=401, detail="Invalid email or password")
+            print(f"❌ Password verification failed for: {request.email}")
+            raise HTTPException(status_code=401, detail="Invalid email or password - incorrect password")
+        
+        print(f"✅ Password verified for: {request.email}")
         
         # Check if user is active
         if not user.get("is_active", False):
+            print(f"❌ Account is deactivated: {request.email}")
             raise HTTPException(status_code=403, detail="Account is deactivated")
         
         # Create access token
@@ -18154,6 +18163,68 @@ COMPONENT ARCHITECTURE:
 - Modals: Login, Signup, Cart, Payment
 - Forms: Proper validation and submission
 - Layouts: Responsive design with mobile support
+
+🎯 REACTBITS INTERACTIVE COMPONENTS - CREATE AMAZING UX! 🎯
+═══════════════════════════════════════════════════════════════════════
+Every generated project MUST be highly interactive using these patterns:
+
+1. **MODAL DIALOGS** - For login, signup, product details, confirmations:
+   - LoginModal, SignupModal, ProductQuickView, ConfirmDialog
+   - Smooth backdrop blur and entry animations
+   - Close on backdrop click or escape key
+
+2. **TOAST NOTIFICATIONS** - Provide feedback for every action:
+   - Success: "Added to cart!", "Order placed!", "Profile updated!"
+   - Error: "Please check your credentials", "Failed to load"
+   - Use toast.success(), toast.error() patterns
+
+3. **DRAWER/SIDEBAR** - For cart and filters:
+   - Shopping cart slides in from right
+   - Filter sidebar for product listings
+   - Smooth slide-in animation
+
+4. **SKELETON LOADERS** - While data loads:
+   - Show skeleton placeholders during API calls
+   - CardSkeleton for product grids
+   - Text skeletons for content
+
+5. **ANIMATED COUNTERS** - For statistics:
+   - <Counter end={{1234}} prefix="$" /> for prices
+   - Animate on scroll into view
+
+6. **HOVER EFFECTS** - On all interactive elements:
+   - hover:scale-105 transition-transform duration-200
+   - hover:shadow-lg for cards
+   - hover:-translate-y-1 for buttons
+
+7. **TABS AND ACCORDIONS** - For organizing content:
+   - Product details with tabs (Overview, Reviews, Specs)
+   - FAQ sections with accordion
+
+8. **PROGRESS INDICATORS** - For multi-step processes:
+   - Checkout progress bar
+   - Form completion status
+   - Upload progress
+
+9. **CAROUSEL/SLIDER** - For showcasing:
+   - Product image gallery
+   - Featured products slider
+   - Testimonials carousel
+
+10. **SPOTLIGHT CARDS** - Premium hover effects:
+    - Gradient spotlight follows cursor
+    - Used for pricing cards, features
+
+INTERACTIVITY CHECKLIST - EVERY PROJECT MUST HAVE:
+□ Loading skeletons while data fetches
+□ Toast notifications for user actions
+□ Modal dialogs for forms and confirmations
+□ Smooth hover effects on buttons and cards
+□ Animated page transitions
+□ Responsive mobile menu with drawer
+□ Search with instant filtering
+□ Form validation with real-time feedback
+═══════════════════════════════════════════════════════════════════════
 
 FILES TO GENERATE WITH COMPLETE IMPLEMENTATIONS:
 1. package.json - React 18, TailwindCSS, React Router, Lucide icons

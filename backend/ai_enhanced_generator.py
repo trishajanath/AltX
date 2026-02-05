@@ -598,6 +598,7 @@ google-generativeai==0.3.0
                 "react-router-dom": "^6.15.0",
                 "lucide-react": "^0.263.1",
                 "@headlessui/react": "^1.7.17",
+                "framer-motion": "^10.16.0",  # For smooth animations
                 "date-fns": "^2.30.0",  # For date handling
                 "react-hook-form": "^7.45.0",  # For advanced forms
                 "react-query": "^3.39.3"  # For data fetching
