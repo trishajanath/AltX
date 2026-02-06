@@ -62,11 +62,7 @@ export const AuthProvider = ({ children }) => {
     
     console.log('🔐 Login called with:', { user: userData.email || userData.username, rememberMe });
     
-    // Update state FIRST
-    setUser(userData);
-    setToken(accessToken);
-    
-    // Then persist to storage
+    // Persist to storage FIRST (synchronous) - so ProtectedRoute can read immediately
     if (rememberMe) {
       // Store in localStorage for persistent login
       console.log('💾 Storing in localStorage (persistent)');
@@ -78,6 +74,10 @@ export const AuthProvider = ({ children }) => {
       sessionStorage.setItem('access_token', accessToken);
       sessionStorage.setItem('user', JSON.stringify(userData));
     }
+    
+    // Then update React state (async - will trigger re-renders)
+    setUser(userData);
+    setToken(accessToken);
     
     console.log('✅ Login complete, user state updated, isAuth will be:', !!(userData && accessToken));
   };

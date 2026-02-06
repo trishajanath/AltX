@@ -7,6 +7,7 @@ import PageWrapper from './PageWrapper';
 const SignupPage = () => {
     const navigate = useNavigate();
     const { login } = useAuth();
+    
     // Store user info if redirected from Google OAuth
     useEffect(() => {
         const params = new URLSearchParams(window.location.search);
@@ -209,7 +210,7 @@ const SignupPage = () => {
                                 if (projectResult.success) {
                                     console.log('✅ Demo project created successfully');
                                     // Redirect to the project editor
-                                    navigate(`/project/${projectData.slug}`);
+                                    navigate(`/project/${projectData.slug}`, { replace: true });
                                     return;
                                 }
                             }
@@ -225,7 +226,7 @@ const SignupPage = () => {
                 }
                 
                 // Redirect to voice chat after successful signup
-                navigate('/voice-chat');
+                navigate('/voice-chat', { replace: true });
             } else {
                 // Handle signup error
                 const errorMessage = data.detail || 'Signup failed. Please try again.';

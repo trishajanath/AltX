@@ -32,12 +32,12 @@ const OAuthCallback = () => {
 
         console.log('✅ Decoded user data:', userData);
 
-        // Save to auth context (default to sessionStorage)
+        // Save to auth context (writes to storage first, then updates state)
         login(userData, token, false);
 
         console.log('🚀 Redirecting to /voice-chat');
         
-        // Navigate without query params
+        // Navigate directly - storage is written synchronously by login()
         navigate("/voice-chat", { replace: true });
       } catch (error) {
         console.error('❌ Failed to process OAuth callback:', error);

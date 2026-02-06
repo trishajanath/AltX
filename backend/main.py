@@ -17131,12 +17131,13 @@ async def google_callback(request: Request):
         except Exception as db_error:
             print(f"❌ Database error: {str(db_error)}")
             frontend_url = os.getenv("FRONTEND_URL", "https://xverta.com")
-            return RedirectResponse(url=f"{frontend_url}/voice-chat?error=database_error", status_code=302)
+            # Redirect to login page with error - NOT to a protected route
+            return RedirectResponse(url=f"{frontend_url}/login?error=database_error&message=MongoDB_connection_failed", status_code=302)
 
     except Exception as e:
         print(f"❌ OAuth callback error: {str(e)}")
         frontend_url = os.getenv("FRONTEND_URL", "https://xverta.com")
-        return RedirectResponse(url=f"{frontend_url}/home?error=callback_failed&message={str(e)}", status_code=302)
+        return RedirectResponse(url=f"{frontend_url}/login?error=oauth_failed&message={str(e)[:50]}", status_code=302)
 @app.get("/auth/google/login")
 async def google_login():
     """

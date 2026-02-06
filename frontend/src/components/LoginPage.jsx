@@ -1,11 +1,12 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { apiUrl, authUrl } from '../config/api';
 import PageWrapper from './PageWrapper';
 
 const LoginPage = () => {
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
     const { login } = useAuth();
     const [formData, setFormData] = useState({
         email: '',
@@ -14,6 +15,22 @@ const LoginPage = () => {
     });
     const [isLoggingIn, setIsLoggingIn] = useState(false);
     const [error, setError] = useState('');
+
+    // Check for OAuth errors in URL params
+    useEffect(() => {
+        const errorParam = searchParams.get('error');
+        const messageParam = searchParams.get('message');
+        
+        if (errorParam) {
+            if (errorParam === 'database_error') {
+                setError('Database connection failed. Please try again in a few moments or contact support.');
+            } else if (errorParam === 'oauth_failed') {
+                setError(`Login failed: ${messageParam || 'Unknown error'}`);
+            } else {
+                setError(`Login error: ${errorParam}`);
+            }
+        }
+    }, [searchParams]);
 
     const handleChange = (e) => {
         const { name, value, type, checked } = e.target;
@@ -101,7 +118,7 @@ const LoginPage = () => {
                                 if (projectResult.success) {
                                     console.log('✅ Demo project created successfully');
                                     // Redirect to the project editor
-                                    navigate(`/project/${projectData.slug}`);
+                                    navigate(`/project/${projectData.slug}`, { replace: true });
                                     return;
                                 }
                             }
@@ -117,7 +134,7 @@ const LoginPage = () => {
                 }
                 
                 // Redirect to voice chat after successful login
-                navigate('/voice-chat');
+                navigate('/voice-chat', { replace: true });
             } else {
                 // Handle login error
                 const errorMessage = data.detail || 'Invalid email or password. Please try again.';
