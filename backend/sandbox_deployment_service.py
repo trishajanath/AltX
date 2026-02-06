@@ -288,6 +288,42 @@ class SandboxDeploymentService:
         
         return list(needed_packages)
     
+    def _inject_health_endpoint(self, build_dir: str):
+        """
+        Ensure the generated main.py has a /health endpoint.
+        If the file doesn't define one, append it. This is critical
+        because the sandbox health checker polls /health to determine readiness.
+        """
+        main_py_path = Path(build_dir) / "main.py"
+        if not main_py_path.exists():
+            return
+        
+        content = main_py_path.read_text(encoding='utf-8', errors='replace')
+        
+        # Check if /health is already defined
+        if '/health' in content or '@app.get("/health")' in content or "@app.get('/health')" in content:
+            return
+        
+        # Find the FastAPI app variable name (usually 'app')
+        import re
+        app_var = 'app'
+        app_match = re.search(r'(\w+)\s*=\s*FastAPI\s*\(', content)
+        if app_match:
+            app_var = app_match.group(1)
+        
+        health_code = f'''
+
+# === Health check endpoint (auto-injected for sandbox) ===
+@{app_var}.get("/health")
+async def _sandbox_health_check():
+    return {{"status": "ok", "sandbox": True}}
+'''
+        
+        # Append after the last line
+        content = content.rstrip() + health_code
+        main_py_path.write_text(content)
+        logger.info("💉 Injected /health endpoint into main.py")
+    
     def _generate_missing_modules(self, build_dir: str, project_files: Dict[str, str]):
         """
         Auto-generate missing Python modules that are imported by project files.
@@ -744,6 +780,9 @@ google-auth>=2.23.0
                     hybrid_content = sandbox_content + "\n\n# === User routes ===\n" + main_content
                     main_py_path.write_text(hybrid_content)
         
+        # Inject /health endpoint if missing from main.py
+        self._inject_health_endpoint(build_dir)
+        
         # Auto-generate missing modules that are imported by project files
         self._generate_missing_modules(build_dir, project_files)
         
@@ -804,15 +843,41 @@ google-auth>=2.23.0
                 try:
                     response = await client.get(health_url)
                     if response.status_code == 200:
-                        data = response.json()
-                        if data.get("status") == "ok":
-                            container.status = SandboxStatus.HEALTHY
-                            health_time = time.time() - health_start
-                            logger.info(
-                                f"✅ Container {container.container_name} healthy "
-                                f"in {health_time:.2f}s ({attempt + 1} checks)"
-                            )
-                            return
+                        container.status = SandboxStatus.HEALTHY
+                        health_time = time.time() - health_start
+                        logger.info(
+                            f"✅ Container {container.container_name} healthy "
+                            f"in {health_time:.2f}s ({attempt + 1} checks)"
+                        )
+                        return
+                    elif response.status_code == 404:
+                        # /health not found — try root as fallback
+                        try:
+                            root_resp = await client.get(f"{container.base_url}/")
+                            if root_resp.status_code in (200, 307, 308):
+                                container.status = SandboxStatus.HEALTHY
+                                health_time = time.time() - health_start
+                                logger.info(
+                                    f"✅ Container {container.container_name} healthy (root fallback) "
+                                    f"in {health_time:.2f}s ({attempt + 1} checks)"
+                                )
+                                return
+                        except Exception:
+                            pass
+                        # Also try /docs (FastAPI default)
+                        try:
+                            docs_resp = await client.get(f"{container.base_url}/docs")
+                            if docs_resp.status_code == 200:
+                                container.status = SandboxStatus.HEALTHY
+                                health_time = time.time() - health_start
+                                logger.info(
+                                    f"✅ Container {container.container_name} healthy (docs fallback) "
+                                    f"in {health_time:.2f}s ({attempt + 1} checks)"
+                                )
+                                return
+                        except Exception:
+                            pass
+                        last_error = f"/health returned 404 (no health endpoint)"
                 except (httpx.RequestError, httpx.TimeoutException) as e:
                     last_error = str(e)
                 

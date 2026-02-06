@@ -2387,7 +2387,7 @@ class ConnectionManager:
         """Send message to all connections for a specific project"""
         if project_name in self.project_connections:
             disconnected = []
-            for connection_id in self.project_connections[project_name]:
+            for connection_id in list(self.project_connections[project_name]):
                 websocket = self.active_connections.get(connection_id)
                 if websocket:
                     try:
@@ -3190,11 +3190,61 @@ def generate_sandbox_html(files_content: dict, project_name: str, backend_url: s
         'Spotlight', 'SpotlightCard', 'Toast', 'ToastProvider', 'ToastContext'
     }
     
-    for file_path, content in files_content.items():
-        # Include all JSX files in components folder (including subfolders like ui/)
-        if "components/" in file_path and file_path.endswith(".jsx"):
+    # Sort files to ensure contexts/hooks are defined BEFORE components/pages that use them
+    # Priority: context/store files first, then hooks, then lib/utils, then components, then pages
+    def _file_sort_priority(item):
+        path = item[0]
+        if any(f in path for f in ["contexts/", "context/", "store/", "providers/"]):
+            return 0  # Context definitions first
+        elif "hooks/" in path:
+            return 1  # Hooks second (they use contexts)
+        elif any(f in path for f in ["lib/", "utils/", "helpers/", "services/", "api/", "config/", "data/"]):
+            return 2  # Utilities third
+        elif "components/" in path:
+            return 3  # Components fourth
+        elif any(f in path for f in ["layouts/", "features/", "modules/"]):
+            return 4  # Layout/feature components
+        elif "pages/" in path:
+            return 5  # Pages last (they use everything)
+        else:
+            return 3  # Default: same as components
+    
+    sorted_files = sorted(files_content.items(), key=_file_sort_priority)
+    
+    # Track imported names across all files to avoid duplicate var declarations
+    seen_import_names = set()
+    # Track names declared by bundled files (const/let/function) to prevent var conflicts
+    # Pre-seed with sandbox-provided globals that are declared in the template
+    declared_names = {
+        'React', 'ReactDOM', 'useState', 'useEffect', 'useCallback', 'useMemo', 'useRef',
+        'useContext', 'useReducer', 'useLayoutEffect', 'useId', 'useTransition',
+        'useDeferredValue', 'useSyncExternalStore', 'createContext', 'forwardRef',
+        'memo', 'lazy', 'Suspense', 'Fragment', 'createElement',
+        'Button', 'Input', 'Card', 'Loading', 'AnimatedText', 'Toast',
+        'ToastContext', 'useToast', 'ToastProvider', 'SpotlightCard', 'Spotlight',
+        'Router', 'Routes', 'Route', 'Link', 'NavLink', 'Navigate',
+        'useNavigate', 'useParams', 'useLocation',
+        'motion', 'AnimatePresence', 'cn', 'clsx', 'axios',
+    }
+    
+    for file_path, content in sorted_files:
+        # Include all JSX/JS files from relevant source folders
+        # This covers components/, contexts/, context/, hooks/, pages/, lib/, utils/, services/, store/, etc.
+        is_jsx_or_js = file_path.endswith(".jsx") or file_path.endswith(".js")
+        is_source_file = any(folder in file_path for folder in [
+            "components/", "contexts/", "context/", "hooks/", 
+            "pages/", "lib/", "utils/", "services/", "store/",
+            "providers/", "layouts/", "features/", "modules/",
+            "helpers/", "api/", "data/", "config/"
+        ])
+        # Also include files directly under src/ (not App.jsx or main.jsx which are handled separately)
+        is_src_direct = (file_path.startswith("src/") and is_jsx_or_js 
+                        and file_path.count("/") == 1  # Only direct children of src/
+                        and file_path not in ("src/App.jsx", "src/main.jsx", "src/main.js"))
+        
+        if is_jsx_or_js and (is_source_file or is_src_direct):
             # Extract component name from filename
-            component_name = file_path.split("/")[-1].replace(".jsx", "")
+            component_name = file_path.split("/")[-1].replace(".jsx", "").replace(".js", "")
             
             # SKIP UI components that are provided globally by the sandbox
             if component_name in SANDBOX_PROVIDED_COMPONENTS:
@@ -3204,40 +3254,142 @@ def generate_sandbox_html(files_content: dict, project_name: str, backend_url: s
             # Clean up the component content for browser compilation
             cleaned_content = content
             
+            # IMPORTANT: Collect exported AND imported names BEFORE fix_jsx_content_for_sandbox strips them
+            # auto_fix_jsx_for_sandbox removes ALL relative imports, so we must extract names first
+            import re
+            exports_from_const = re.findall(r'export\s+const\s+(\w+)\s*=', cleaned_content)
+            exports_from_function = re.findall(r'export\s+function\s+(\w+)\s*\(', cleaned_content)
+            exports_from_named = re.findall(r'export\s*\{\s*([^}]+)\s*\}', cleaned_content)
+            export_default_match = re.search(r'export\s+default\s+(\w+)', cleaned_content)
+            
+            # Parse named exports: export { A, B, C }
+            named_exports = []
+            for group in exports_from_named:
+                for name in group.split(','):
+                    name = name.strip().split(' as ')[0].strip()  # Handle "X as Y"
+                    if name:
+                        named_exports.append(name)
+            
+            all_exports = set(exports_from_const + exports_from_function + named_exports)
+            
+            # Collect imported names from ALL import statements BEFORE they get stripped
+            # This includes relative imports that auto_fix_jsx_for_sandbox will remove
+            pre_strip_import_names = []
+            for imp_line in cleaned_content.split('\n'):
+                imp_stripped = imp_line.strip()
+                if not imp_stripped.startswith('import '):
+                    continue
+                # Skip react/framer-motion/lucide - these are sandbox globals
+                if any(lib in imp_stripped for lib in ["'react'", '"react"', "'framer-motion'", '"framer-motion"', "'lucide-react'", '"lucide-react"', "'.css'", '".css"']):
+                    continue
+                # Named imports: import { A, B, C } from '...'
+                named_imp = re.search(r'import\s*\{([^}]+)\}', imp_stripped)
+                if named_imp:
+                    for name in named_imp.group(1).split(','):
+                        name = name.strip()
+                        if ' as ' in name:
+                            name = name.split(' as ')[-1].strip()
+                        if name and name.isidentifier():
+                            pre_strip_import_names.append(name)
+                else:
+                    # Default import: import X from '...'
+                    default_imp = re.match(r'import\s+(\w+)\s+from', imp_stripped)
+                    if default_imp:
+                        name = default_imp.group(1)
+                        if name not in ('React',):
+                            pre_strip_import_names.append(name)
+                    else:
+                        # Namespace import: import * as X from '...'
+                        ns_imp = re.match(r'import\s+\*\s+as\s+(\w+)\s+from', imp_stripped)
+                        if ns_imp:
+                            name = ns_imp.group(1)
+                            if name not in ('React',):
+                                pre_strip_import_names.append(name)
+            
             # Validate and fix component content
             cleaned_content = fix_jsx_content_for_sandbox(cleaned_content, component_name, project_name)
             
-            # Remove ALL import statements since we're bundling everything in browser scope
+            # Replace import statements with window lookups instead of just deleting them
+            # This prevents ReferenceError for imported names (they become undefined instead)
             content_lines = cleaned_content.split('\n')
             filtered_lines = []
+            import_fallbacks = []
             for line in content_lines:
-                # Remove all import statements
-                if not line.strip().startswith('import '):
+                stripped_line = line.strip()
+                if stripped_line.startswith('import '):
+                    # Extract imported names and create window fallbacks
+                    # Named imports: import { A, B, C } from '...'
+                    named_match = re.search(r'import\s*\{([^}]+)\}', stripped_line)
+                    if named_match:
+                        for name in named_match.group(1).split(','):
+                            name = name.strip()
+                            if ' as ' in name:
+                                name = name.split(' as ')[-1].strip()
+                            # Skip if already declared by a bundled file or already seen
+                            if name and name.isidentifier() and name not in seen_import_names and name not in declared_names:
+                                import_fallbacks.append(f'var {name} = window.{name};')
+                                seen_import_names.add(name)
+                    # Default import: import X from '...'
+                    else:
+                        default_match = re.match(r'import\s+(\w+)\s+from', stripped_line)
+                        if default_match:
+                            name = default_match.group(1)
+                            if name not in ('React',) and name not in seen_import_names and name not in declared_names:
+                                import_fallbacks.append(f'var {name} = window.{name};')
+                                seen_import_names.add(name)
+                        else:
+                            # Namespace import: import * as X from '...'
+                            ns_match = re.match(r'import\s+\*\s+as\s+(\w+)\s+from', stripped_line)
+                            if ns_match:
+                                name = ns_match.group(1)
+                                if name not in ('React',) and name not in seen_import_names and name not in declared_names:
+                                    import_fallbacks.append(f'var {name} = window.{name} || {{}};')
+                                    seen_import_names.add(name)
+                else:
                     filtered_lines.append(line)
             
-            cleaned_content = '\n'.join(filtered_lines)
+            # Also add fallbacks for imports that were stripped by auto_fix_jsx_for_sandbox
+            # These were collected from the ORIGINAL content before processing
+            for name in pre_strip_import_names:
+                if name not in seen_import_names and name not in declared_names:
+                    import_fallbacks.append(f'var {name} = window.{name};')
+                    seen_import_names.add(name)
             
-            # Ensure the component is properly exported for global scope
-            # Handle multiple exports like: export const Button, export const Input, etc.
-            import re
+            if import_fallbacks:
+                print(f"   📎 {component_name}: import fallbacks: {[f.split('=')[0].strip().replace('var ', '') for f in import_fallbacks]}")
             
-            # Find all "export const ComponentName" declarations
-            export_pattern = r'export\s+const\s+(\w+)\s*='
-            exports_found = re.findall(export_pattern, cleaned_content)
-            
-            if exports_found:
-                # Remove all "export" keywords
-                cleaned_content = re.sub(r'export\s+const\s+', 'const ', cleaned_content)
-                # Add window assignments for each exported component
-                for exported_name in exports_found:
-                    cleaned_content += f'\nwindow.{exported_name} = {exported_name};'
-            elif 'export default' in cleaned_content:
-                cleaned_content = cleaned_content.replace('export default', f'window.{component_name} = ')
-            elif f'export {{ {component_name} }}' in cleaned_content:
-                cleaned_content += f'\nwindow.{component_name} = {component_name};'
+            # Add fallback declarations for imported names at the top
+            if import_fallbacks:
+                cleaned_content = '\n'.join(import_fallbacks) + '\n' + '\n'.join(filtered_lines)
             else:
-                # If no export found, assume the component is the main function/class
-                cleaned_content += f'\nwindow.{component_name} = {component_name};'
+                cleaned_content = '\n'.join(filtered_lines)
+            
+            # Ensure all exports are available as window globals
+            # fix_jsx_content_for_sandbox already stripped 'export' keywords,
+            # so just add window.X = X for each exported symbol
+            if all_exports:
+                for exported_name in all_exports:
+                    if f'window.{exported_name}' not in cleaned_content:
+                        cleaned_content += f'\nwindow.{exported_name} = typeof {exported_name} !== "undefined" ? {exported_name} : undefined;'
+            elif export_default_match:
+                default_name = export_default_match.group(1)
+                if default_name not in ('function', 'class'):
+                    if f'window.{component_name}' not in cleaned_content:
+                        cleaned_content += f'\nwindow.{component_name} = {default_name};'
+                else:
+                    if f'window.{component_name}' not in cleaned_content:
+                        cleaned_content += f'\nwindow.{component_name} = {component_name};'
+            else:
+                # No explicit exports found — add window assignment for the component name
+                if f'window.{component_name}' not in cleaned_content:
+                    cleaned_content += f'\nwindow.{component_name} = typeof {component_name} !== "undefined" ? {component_name} : undefined;'
+            
+            # Track names declared in this file so later files don't create conflicting var's
+            declared_names.update(all_exports)
+            declared_names.add(component_name)
+            # Also track any const/let/function declarations at top level in this file
+            for decl_match in re.finditer(r'^(?:const|let|var|function)\s+(\w+)', cleaned_content, re.MULTILINE):
+                declared_names.add(decl_match.group(1))
             
             # Check code size limit to prevent memory issues
             component_size = len(cleaned_content)
@@ -3251,11 +3403,76 @@ def generate_sandbox_html(files_content: dict, project_name: str, backend_url: s
     # Clean the App.jsx content
     app_content = app_jsx
     
-    # Remove ALL import statements FIRST since we're loading React globally
-    app_content = '\n'.join([
-        line for line in app_content.split('\n') 
-        if not line.strip().startswith('import ')
-    ])
+    # Replace import statements with window lookups instead of just removing them
+    app_lines = app_content.split('\n')
+    filtered_app_lines = []
+    app_import_fallbacks = []
+    for line in app_lines:
+        stripped_line = line.strip()
+        if stripped_line.startswith('import '):
+            # Extract named imports and create window fallbacks
+            named_match = re.search(r'import\s*\{([^}]+)\}', stripped_line)
+            if named_match:
+                for name in named_match.group(1).split(','):
+                    name = name.strip()
+                    if ' as ' in name:
+                        name = name.split(' as ')[-1].strip()
+                    if name and name.isidentifier() and name not in seen_import_names and name not in declared_names:
+                        app_import_fallbacks.append(f'var {name} = window.{name};')
+                        seen_import_names.add(name)
+            else:
+                default_match = re.match(r'import\s+(\w+)\s+from', stripped_line)
+                if default_match:
+                    name = default_match.group(1)
+                    if name not in ('React',) and name not in seen_import_names and name not in declared_names:
+                        app_import_fallbacks.append(f'var {name} = window.{name};')
+                        seen_import_names.add(name)
+                else:
+                    # Namespace import: import * as X from '...'
+                    ns_match = re.match(r'import\s+\*\s+as\s+(\w+)\s+from', stripped_line)
+                    if ns_match:
+                        name = ns_match.group(1)
+                        if name not in ('React',) and name not in seen_import_names and name not in declared_names:
+                            app_import_fallbacks.append(f'var {name} = window.{name} || {{}};')
+                            seen_import_names.add(name)
+        else:
+            filtered_app_lines.append(line)
+    
+    if app_import_fallbacks:
+        app_content = '\n'.join(app_import_fallbacks) + '\n' + '\n'.join(filtered_app_lines)
+    else:
+        app_content = '\n'.join(filtered_app_lines)
+    
+    # CRITICAL: Make React contexts null-safe in App.jsx
+    # createContext(null) → createContext({}) prevents null destructuring crashes
+    app_content = re.sub(
+        r'((?:React\.)?createContext)\s*\(\s*null\s*\)',
+        r'\1({})',
+        app_content
+    )
+    # Make hook destructuring null-safe: const { x } = useHook() → const { x } = useHook() || {}
+    app_content = re.sub(
+        r'(const\s+\{[^}]+\}\s*=\s+use[A-Z]\w*\(\s*\))\s*;',
+        r'\1 || {};',
+        app_content
+    )
+    app_content = re.sub(
+        r'(const\s+\{[^}]+\}\s*=\s+(?:React\.)?useContext\([^)]*\))\s*;',
+        r'\1 || {};',
+        app_content
+    )
+    
+    # Replace import.meta.env and process.env in App.jsx
+    app_content = re.sub(r'import\.meta\.env\.(\w+)', r"(window.import_meta_env?.\1 || '')", app_content)
+    app_content = re.sub(r'import\.meta\.env', r'(window.import_meta_env || {})', app_content)
+    app_content = re.sub(r'process\.env\.(\w+)', r"(window.process?.env?.\1 || '')", app_content)
+    
+    # Make array method calls null-safe in App.jsx
+    app_content = re.sub(
+        r'(?<![.\w])([a-z_]\w*)\.(reduce|map|filter|forEach|find|findIndex|some|every|flat|flatMap)\s*\(',
+        r'(\1 || []).\2(',
+        app_content
+    )
     
     # Handle export patterns (robust)
     import re
@@ -3317,6 +3534,43 @@ def generate_sandbox_html(files_content: dict, project_name: str, backend_url: s
     # CRITICAL: Deduplicate cross-file declarations BEFORE precompilation
     # This prevents "already declared" errors when multiple files define the same context/hook
     jsx_code = deduplicate_cross_file_declarations(jsx_code)
+    
+    # CRITICAL: Final null-safety pass on bundled code
+    # Ensures ALL createContext(null) → createContext({}) and hook destructuring is null-safe
+    # This catches patterns that survive per-file processing (e.g. context files, pages, etc.)
+    import re as re_mod
+    jsx_code = re_mod.sub(
+        r'((?:React\.)?createContext)\s*\(\s*null\s*\)',
+        r'\1({})',
+        jsx_code
+    )
+    # const { x, y } = useHook() → const { x, y } = useHook() || {}
+    jsx_code = re_mod.sub(
+        r'(const\s+\{[^}]+\}\s*=\s+use[A-Z]\w*\(\s*\))\s*;',
+        r'\1 || {};',
+        jsx_code
+    )
+    # const { x } = React.useContext(Ctx) → const { x } = React.useContext(Ctx) || {}
+    jsx_code = re_mod.sub(
+        r'(const\s+\{[^}]+\}\s*=\s+(?:React\.)?useContext\([^)]*\))\s*;',
+        r'\1 || {};',
+        jsx_code
+    )
+    
+    # Replace import.meta.env and process.env in final bundle
+    jsx_code = re_mod.sub(r'import\.meta\.env\.(\w+)', r"(window.import_meta_env?.\1 || '')", jsx_code)
+    jsx_code = re_mod.sub(r'import\.meta\.env', r'(window.import_meta_env || {})', jsx_code)
+    jsx_code = re_mod.sub(r'process\.env\.(\w+)', r"(window.process?.env?.\1 || '')", jsx_code)
+    
+    # CRITICAL: Make array method calls null-safe in the final bundle
+    # Transforms: items.reduce( → (items || []).reduce(
+    # This prevents "Cannot read properties of undefined (reading 'reduce')" errors
+    # when destructured context values (items, products, etc.) are undefined
+    jsx_code = re_mod.sub(
+        r'(?<![.\w])([a-z_]\w*)\.(reduce|map|filter|forEach|find|findIndex|some|every|flat|flatMap)\s*\(',
+        r'(\1 || []).\2(',
+        jsx_code
+    )
     
     print("🔄 Precompiling JSX to JavaScript using esbuild...")
     precompiled_code = precompile_jsx(jsx_code)
@@ -4129,6 +4383,43 @@ window.App = App;
         window.useTransition = useTransition;
         window.useDeferredValue = useDeferredValue;
         window.useSyncExternalStore = useSyncExternalStore;
+        // SAFETY: Patch createContext to prevent null default values
+        // This prevents "Cannot destructure property of null" AND 
+        // "Cannot read properties of undefined (reading 'reduce')" errors
+        // when components call useContext() outside their Provider
+        function _createSafeContextDefault() {{
+            // Creates a Proxy that returns safe values for ANY property access
+            // So const {{ items }} = useMyContext() won't crash even without a Provider
+            const _emptyArr = [];
+            const handler = {{
+                get(target, prop) {{
+                    if (typeof prop === 'symbol') return target[prop];
+                    if (prop === 'then' || prop === '$$typeof' || prop === '_currentValue' || prop === '_currentValue2') return undefined;
+                    // Array methods - return bound to empty array so .reduce()/.map() etc work
+                    if (typeof _emptyArr[prop] === 'function') {{
+                        return _emptyArr[prop].bind(_emptyArr);
+                    }}
+                    if (prop === 'length') return 0;
+                    if (prop === 'toString' || prop === 'toLocaleString') return () => '';
+                    if (prop === 'valueOf') return () => 0;
+                    if (prop === 'toJSON') return () => null;
+                    // For nested property access, return another safe proxy
+                    return _createSafeContextDefault();
+                }},
+                has(target, prop) {{ return false; }},
+                set(target, prop, value) {{ target[prop] = value; return true; }},
+                ownKeys() {{ return []; }},
+                getOwnPropertyDescriptor() {{ return undefined; }}
+            }};
+            return new Proxy({{}}, handler);
+        }}
+        const _originalCreateContext = React.createContext.bind(React);
+        React.createContext = function(defaultValue) {{
+            if (defaultValue === null || defaultValue === undefined) {{
+                return _originalCreateContext(_createSafeContextDefault());
+            }}
+            return _originalCreateContext(defaultValue);
+        }};
         window.createContext = React.createContext;
         window.forwardRef = React.forwardRef;
         window.memo = React.memo;
@@ -4136,6 +4427,46 @@ window.App = App;
         window.Suspense = React.Suspense;
         window.Fragment = React.Fragment;
         window.createElement = React.createElement;
+        
+        // Axios shim - many generated projects use axios for API calls
+        // This provides a fetch-based polyfill so axios imports don't crash
+        const axios = {{
+            get: async (url, config) => {{
+                const res = await fetch(url, {{ headers: config?.headers }});
+                return {{ data: await res.json(), status: res.status, statusText: res.statusText, headers: {{}}, config: config || {{}}, request: {{}} }};
+            }},
+            post: async (url, data, config) => {{
+                const res = await fetch(url, {{ method: 'POST', headers: {{ 'Content-Type': 'application/json', ...(config?.headers || {{}}) }}, body: JSON.stringify(data) }});
+                return {{ data: await res.json(), status: res.status, statusText: res.statusText, headers: {{}}, config: config || {{}}, request: {{}} }};
+            }},
+            put: async (url, data, config) => {{
+                const res = await fetch(url, {{ method: 'PUT', headers: {{ 'Content-Type': 'application/json', ...(config?.headers || {{}}) }}, body: JSON.stringify(data) }});
+                return {{ data: await res.json(), status: res.status, statusText: res.statusText, headers: {{}}, config: config || {{}}, request: {{}} }};
+            }},
+            delete: async (url, config) => {{
+                const res = await fetch(url, {{ method: 'DELETE', headers: config?.headers }});
+                return {{ data: await res.json(), status: res.status, statusText: res.statusText, headers: {{}}, config: config || {{}}, request: {{}} }};
+            }},
+            patch: async (url, data, config) => {{
+                const res = await fetch(url, {{ method: 'PATCH', headers: {{ 'Content-Type': 'application/json', ...(config?.headers || {{}}) }}, body: JSON.stringify(data) }});
+                return {{ data: await res.json(), status: res.status, statusText: res.statusText, headers: {{}}, config: config || {{}}, request: {{}} }};
+            }},
+            create: function(defaults) {{
+                const instance = {{ ...axios }};
+                instance.defaults = defaults || {{}};
+                return instance;
+            }},
+            defaults: {{ baseURL: '', headers: {{}} }},
+            interceptors: {{ request: {{ use: () => {{}}, eject: () => {{}} }}, response: {{ use: () => {{}}, eject: () => {{}} }} }}
+        }};
+        window.axios = axios;
+        
+        // Process.env shim for generated code that uses environment variables
+        window.process = window.process || {{ env: {{ NODE_ENV: 'production', REACT_APP_API_URL: window.SANDBOX_API_URL || '', VITE_API_URL: window.SANDBOX_API_URL || '' }} }};
+        // import.meta.env shim (used by Vite projects)
+        if (!window.import_meta_env) {{
+            window.import_meta_env = {{ VITE_API_URL: window.SANDBOX_API_URL || '', MODE: 'production', DEV: false, PROD: true }};
+        }}
         
         // Helper function to filter invalid props from DOM elements
         // Using an array instead of Set to avoid potential conflicts with React internals
@@ -6406,6 +6737,31 @@ def fix_jsx_content_for_sandbox(content: str, component_name: str, project_name:
     # This removes duplicate declarations of sandbox-provided components (Button, Card, etc.)
     content = auto_fix_jsx_for_sandbox(content, f"{component_name}.jsx")
     
+    # CRITICAL: Make React contexts null-safe
+    # Replace createContext(null) with createContext({}) so destructuring never crashes
+    # e.g. const CartContext = React.createContext(null) → createContext({})
+    content = re.sub(
+        r'((?:React\.)?createContext)\s*\(\s*null\s*\)',
+        r'\1({})',
+        content
+    )
+    
+    # Make context hook destructuring null-safe
+    # e.g. const { user, cart } = useCart() → const { user, cart } = useCart() || {}
+    # This prevents "Cannot destructure property 'X' of 'useHook(...)' as it is null"
+    content = re.sub(
+        r'(const\s+\{[^}]+\}\s*=\s+use[A-Z]\w*\(\s*\))\s*;',
+        r'\1 || {};',
+        content
+    )
+    
+    # Also handle: const { x } = React.useContext(SomeContext);
+    content = re.sub(
+        r'(const\s+\{[^}]+\}\s*=\s+(?:React\.)?useContext\([^)]*\))\s*;',
+        r'\1 || {};',
+        content
+    )
+    
     # CRITICAL: Remove ALL React imports - React is provided globally
     content = re.sub(r"import\s+React\s*,?\s*\{[^}]*\}\s*from\s*['\"]react['\"];?\s*\n?", '', content)
     content = re.sub(r"import\s+React\s+from\s*['\"]react['\"];?\s*\n?", '', content)
@@ -6432,6 +6788,13 @@ def fix_jsx_content_for_sandbox(content: str, component_name: str, project_name:
     content = re.sub(r"import\s*\{[^}]*\}\s*from\s*['\"]tailwind-merge['\"];?\s*\n?", '', content)
     content = re.sub(r"import\s*\{[^}]*cn[^}]*\}\s*from\s*['\"]\.+/lib/utils['\"];?\s*\n?", '', content)
     content = re.sub(r"import\s*\{[^}]*\}\s*from\s*['\"]\.+/lib/utils\.js['\"];?\s*\n?", '', content)
+    
+    # Replace import.meta.env references with window shim (import.meta is invalid outside ES modules)
+    content = re.sub(r'import\.meta\.env\.(\w+)', r"(window.import_meta_env?.\1 || '')", content)
+    content = re.sub(r'import\.meta\.env', r'(window.import_meta_env || {})', content)
+    
+    # Replace process.env references with window shim
+    content = re.sub(r'process\.env\.(\w+)', r"(window.process?.env?.\1 || '')", content)
     
     # Remove window.twMerge assignments
     content = re.sub(r"window\.twMerge\s*=\s*[^;]+;?\s*\n?", '', content)
@@ -6529,6 +6892,15 @@ def fix_jsx_content_for_sandbox(content: str, component_name: str, project_name:
         # This handles the malformed export structure
         content = re.sub(r'export const (\w+) = \(\{[^}]*\}\) => \{\s*\n\s*return \(\s*\n\s*\);?\s*\n\s*\};?', 
                         r'export const \1 = ({ tasks, onToggleTask, onDeleteTask }) => {\n  return (\n    <div className="space-y-2">\n      <h2 className="text-lg font-semibold">Task List</h2>\n      <p>Tasks will be displayed here</p>\n    </div>\n  );\n};', content)
+    
+    # CRITICAL: Make array method calls null-safe
+    # Transforms: items.reduce( → (items || []).reduce(
+    # Prevents "Cannot read properties of undefined (reading 'reduce')" errors
+    content = re.sub(
+        r'(?<![.\w])([a-z_]\w*)\.(reduce|map|filter|forEach|find|findIndex|some|every|flat|flatMap)\s*\(',
+        r'(\1 || []).\2(',
+        content
+    )
     
     # CRITICAL: Remove ALL export statements for sandbox mode
     # Browser scripts cannot use ES module exports
