@@ -52,7 +52,13 @@ RUN pip install --no-cache-dir \
     passlib[bcrypt]>=1.7.4 \
     bcrypt>=4.0.0 \
     python-multipart>=0.0.6 \
-    httpx>=0.25.0
+    httpx>=0.25.0 \
+    requests>=2.31.0 \
+    google-auth>=2.23.0 \
+    google-auth-oauthlib>=1.1.0 \
+    python-dotenv>=1.0.0 \
+    stripe>=7.0.0 \
+    boto3>=1.28.0
 
 # Create data directory for SQLite
 RUN mkdir -p /app/data

@@ -230,6 +230,234 @@ class SandboxDeploymentService:
         """Release a port back to the pool."""
         self._used_ports.discard(port)
     
+    def _scan_imports_for_packages(self, project_files: Dict[str, str]) -> List[str]:
+        """
+        Scan project Python files for import statements and return 
+        additional pip packages that may be needed.
+        """
+        import re
+        
+        # Map of import names to pip package names
+        import_to_package = {
+            "google.oauth2": "google-auth>=2.23.0",
+            "google.auth": "google-auth>=2.23.0",
+            "google_auth_oauthlib": "google-auth-oauthlib>=1.1.0",
+            "requests": "requests>=2.31.0",
+            "stripe": "stripe>=7.0.0",
+            "boto3": "boto3>=1.28.0",
+            "botocore": "boto3>=1.28.0",
+            "redis": "redis>=5.0.0",
+            "celery": "celery>=5.3.0",
+            "PIL": "Pillow>=10.0.0",
+            "cv2": "opencv-python-headless>=4.8.0",
+            "numpy": "numpy>=1.24.0",
+            "pandas": "pandas>=2.0.0",
+            "jwt": "PyJWT>=2.8.0",
+            "yaml": "PyYAML>=6.0",
+            "dotenv": "python-dotenv>=1.0.0",
+            "pymongo": "pymongo>=4.5.0",
+            "motor": "motor>=3.3.0",
+            "sendgrid": "sendgrid>=6.10.0",
+            "twilio": "twilio>=8.10.0",
+            "openai": "openai>=1.0.0",
+            "anthropic": "anthropic>=0.18.0",
+            "jinja2": "Jinja2>=3.1.0",
+            "markdown": "Markdown>=3.5.0",
+            "cryptography": "cryptography>=41.0.0",
+            "websockets": "websockets>=12.0",
+            "apscheduler": "APScheduler>=3.10.0",
+        }
+        
+        needed_packages = set()
+        
+        for filename, content in project_files.items():
+            if not filename.endswith('.py'):
+                continue
+            
+            # Find all imports
+            for line in content.split('\n'):
+                line = line.strip()
+                # Match: import X, from X import Y, from X.Y import Z
+                import_match = re.match(r'(?:from\s+(\S+)\s+import|import\s+(\S+))', line)
+                if import_match:
+                    module = import_match.group(1) or import_match.group(2)
+                    # Check against known mappings
+                    for import_prefix, package in import_to_package.items():
+                        if module == import_prefix or module.startswith(import_prefix + '.'):
+                            needed_packages.add(package)
+        
+        return list(needed_packages)
+    
+    def _generate_missing_modules(self, build_dir: str, project_files: Dict[str, str]):
+        """
+        Auto-generate missing Python modules that are imported by project files.
+        
+        AI-generated projects often have import references to modules like 'database',
+        'models', 'schemas', 'config' etc. that may not exist as separate files.
+        This method scans for local imports and creates stub modules if missing.
+        """
+        import re
+        
+        # Collect all local module imports from project Python files
+        all_files_in_build = set()
+        for f in Path(build_dir).rglob("*.py"):
+            all_files_in_build.add(f.stem)  # e.g. "database", "models"
+        
+        # Also check project_files dict
+        for filename in project_files:
+            if filename.endswith('.py'):
+                stem = Path(filename).stem
+                all_files_in_build.add(stem)
+        
+        # Standard library / third-party modules to ignore
+        stdlib_and_packages = {
+            'os', 'sys', 'json', 'datetime', 'typing', 'pathlib', 're', 'time',
+            'uuid', 'hashlib', 'base64', 'secrets', 'logging', 'asyncio',
+            'contextlib', 'functools', 'collections', 'enum', 'dataclasses',
+            'abc', 'io', 'math', 'random', 'string', 'copy', 'itertools',
+            'fastapi', 'sqlalchemy', 'pydantic', 'jose', 'passlib', 'uvicorn',
+            'starlette', 'httpx', 'requests', 'stripe', 'boto3', 'google',
+            'motor', 'pymongo', 'redis', 'celery', 'PIL', 'numpy', 'pandas',
+            'dotenv', 'jwt', 'yaml', 'jinja2', 'markdown', 'cryptography',
+            'websockets', 'apscheduler', 'email_validator', 'bcrypt',
+            'click', 'aiosqlite', 'anthropic', 'openai', 'sendgrid', 'twilio',
+        }
+        
+        # Scan all Python files for local imports
+        missing_modules = set()
+        for py_file in Path(build_dir).rglob("*.py"):
+            try:
+                content = py_file.read_text(encoding='utf-8', errors='replace')
+                for line in content.split('\n'):
+                    line = line.strip()
+                    # Match: from X import Y  or  import X
+                    match = re.match(r'(?:from\s+(\w+)\s+import|import\s+(\w+))', line)
+                    if match:
+                        module = match.group(1) or match.group(2)
+                        if (module not in stdlib_and_packages and 
+                            module not in all_files_in_build and
+                            not (Path(build_dir) / f"{module}.py").exists()):
+                            missing_modules.add(module)
+            except Exception:
+                continue
+        
+        # Generate stub modules for common patterns
+        module_templates = {
+            'database': '''"""Database configuration - auto-generated stub."""
+import os
+from sqlalchemy import create_engine
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data/sandbox.db")
+connect_args = {"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
+
+engine = create_engine(DATABASE_URL, connect_args=connect_args)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+def get_db():
+    """Get database session."""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+def init_db():
+    """Create all tables."""
+    Base.metadata.create_all(bind=engine)
+''',
+            'config': '''"""Configuration - auto-generated stub."""
+import os
+
+class Settings:
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./data/sandbox.db")
+    JWT_SECRET: str = os.getenv("JWT_SECRET", "sandbox-secret-key")
+    JWT_ALGORITHM: str = "HS256"
+    JWT_EXPIRATION_HOURS: int = 24
+    SANDBOX: bool = True
+    SECRET_KEY: str = os.getenv("SECRET_KEY", "sandbox-secret-key")
+
+settings = Settings()
+SECRET_KEY = settings.SECRET_KEY
+ALGORITHM = settings.JWT_ALGORITHM
+''',
+            'schemas': '''"""Pydantic schemas - auto-generated stub."""
+from pydantic import BaseModel, EmailStr, Field
+from typing import Optional, List, Any
+from datetime import datetime
+
+class UserBase(BaseModel):
+    email: str
+    username: Optional[str] = None
+
+class UserCreate(UserBase):
+    password: str
+
+class UserResponse(UserBase):
+    id: int
+    is_active: bool = True
+    created_at: Optional[datetime] = None
+    class Config:
+        from_attributes = True
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+class TokenData(BaseModel):
+    email: Optional[str] = None
+''',
+            'auth': '''"""Authentication utilities - auto-generated stub."""
+import os
+from datetime import datetime, timedelta
+from typing import Optional
+from jose import JWTError, jwt
+from passlib.context import CryptContext
+
+SECRET_KEY = os.getenv("JWT_SECRET", "sandbox-secret-key")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 1440
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+def get_password_hash(password: str) -> str:
+    return pwd_context.hash(password)
+
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+    to_encode = data.copy()
+    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+''',
+            'deps': '''"""Dependencies - auto-generated stub."""
+from database import get_db
+''',
+            'utils': '''"""Utility functions - auto-generated stub."""
+import os
+import hashlib
+import secrets
+from datetime import datetime
+
+def generate_id() -> str:
+    return secrets.token_hex(16)
+''',
+        }
+        
+        for module in missing_modules:
+            module_path = Path(build_dir) / f"{module}.py"
+            if module in module_templates:
+                module_path.write_text(module_templates[module])
+                logger.info(f"📝 Auto-generated missing module: {module}.py")
+            else:
+                # Generic empty module stub so import doesn't fail
+                module_path.write_text(f'"""Auto-generated stub for {module} module."""\n')
+                logger.info(f"📝 Auto-generated stub module: {module}.py")
+    
     def _generate_container_name(self, session_id: str) -> str:
         """Generate a unique container name."""
         short_id = session_id[:8] if len(session_id) > 8 else session_id
@@ -476,7 +704,24 @@ sqlalchemy>=2.0.0
 python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4
 python-multipart>=0.0.6
+requests>=2.31.0
+google-auth>=2.23.0
 """)
+        
+        # Scan project files for imports and auto-add missing packages
+        extra_packages = self._scan_imports_for_packages(project_files)
+        if extra_packages:
+            existing_reqs = req_file.read_text()
+            extra_lines = "\n# Auto-detected from project imports\n"
+            for pkg in extra_packages:
+                # Don't add if already in requirements
+                pkg_base = pkg.split(">=")[0].split("[")[0].replace("-", "").replace("_", "").lower()
+                existing_normalized = existing_reqs.replace("-", "").replace("_", "").lower()
+                if pkg_base not in existing_normalized:
+                    extra_lines += f"{pkg}\n"
+            if extra_lines.strip() != "# Auto-detected from project imports":
+                req_file.write_text(existing_reqs.rstrip() + "\n" + extra_lines)
+                logger.info(f"📦 Auto-added packages from imports: {extra_packages}")
         
         # Write project-specific files (can override defaults)
         for filename, content in project_files.items():
@@ -499,9 +744,12 @@ python-multipart>=0.0.6
                     hybrid_content = sandbox_content + "\n\n# === User routes ===\n" + main_content
                     main_py_path.write_text(hybrid_content)
         
+        # Auto-generate missing modules that are imported by project files
+        self._generate_missing_modules(build_dir, project_files)
+        
         # Create .dockerignore for faster builds
         dockerignore = Path(build_dir) / ".dockerignore"
-        dockerignore.write_text("__pycache__\n*.pyc\n.git\n.env\nvenv\n*.md\n*.txt\n!requirements.txt\n")
+        dockerignore.write_text("__pycache__\n*.pyc\n.git\n.env\nvenv\n*.md\n*.txt\n!requirements.txt\n!sandbox_requirements.txt\n")
     
     async def _run_container(self, container: SandboxContainer):
         """Run the container and wait for health."""

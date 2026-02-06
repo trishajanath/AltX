@@ -245,13 +245,16 @@ class OrphanDetector:
     - Manual interventions
     """
     
-    def __init__(self, config: CleanupConfig, known_sessions: Set[str]):
+    def __init__(self, config: CleanupConfig, known_sessions: Set[str], known_container_names: Set[str] = None):
         self.config = config
         self.known_sessions = known_sessions
+        self.known_container_names = known_container_names or set()
     
     async def find_orphans(self) -> List[Dict[str, Any]]:
         """
         Find Docker containers matching sandbox pattern that aren't tracked.
+        Uses a grace period to avoid killing newly created containers that
+        haven't been registered yet (prevents race condition).
         """
         try:
             # List all containers with sandbox prefix
@@ -274,6 +277,10 @@ class OrphanDetector:
             
             orphans = []
             
+            # Grace period: don't consider containers created in the last 5 minutes as orphans
+            # This prevents race conditions where a container is created but not yet registered
+            grace_period_seconds = max(self.config.grace_period_seconds, 300)  # At least 5 minutes
+            
             for line in result.stdout.strip().split('\n'):
                 if not line:
                     continue
@@ -284,19 +291,50 @@ class OrphanDetector:
                 
                 container_name, status, created_at, image = parts
                 
-                # Extract session ID from container name
-                # Format: sandbox-{short_session_id}-{timestamp}
-                session_id = self._extract_session_id(container_name)
+                # Check if this container is tracked by name (most reliable check — do FIRST)
+                if container_name in self.known_container_names:
+                    logger.debug(f"Container {container_name} is tracked (by name), skipping")
+                    continue
                 
-                # Check if this container is tracked
-                if session_id and session_id not in self.known_sessions:
-                    orphans.append({
-                        "container_name": container_name,
-                        "session_id": session_id,
-                        "status": status,
-                        "created_at": created_at,
-                        "image": image
-                    })
+                # Also check by session ID extraction as fallback
+                session_id = self._extract_session_id(container_name)
+                if session_id and any(session_id in s for s in self.known_sessions):
+                    logger.debug(f"Container {container_name} is tracked (by session), skipping")
+                    continue
+                
+                # Grace period: don't consider containers created recently as orphans
+                # This prevents race conditions where a container is created but not yet registered
+                try:
+                    # Docker CreatedAt format: "2024-01-15 10:30:45 +0000 UTC"
+                    # Use regex to extract just the YYYY-MM-DD HH:MM:SS part reliably
+                    import re as date_re
+                    from datetime import datetime as dt
+                    date_match = date_re.match(r'(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})', created_at.strip())
+                    if date_match:
+                        container_created = dt.strptime(date_match.group(1), "%Y-%m-%d %H:%M:%S")
+                        age_seconds = (dt.utcnow() - container_created).total_seconds()
+                        if age_seconds < grace_period_seconds:
+                            logger.debug(
+                                f"⏳ Skipping container {container_name} - created {age_seconds:.0f}s ago "
+                                f"(grace period: {grace_period_seconds}s)"
+                            )
+                            continue
+                    else:
+                        # Can't parse date — skip to be safe (don't kill unknown containers)
+                        logger.debug(f"Could not parse created_at '{created_at}' for {container_name}, skipping")
+                        continue
+                except Exception as parse_err:
+                    logger.debug(f"Could not parse created_at for {container_name}: {parse_err}")
+                    # If we can't parse the date, skip this container to be safe
+                    continue
+                
+                orphans.append({
+                    "container_name": container_name,
+                    "session_id": session_id or "unknown",
+                    "status": status,
+                    "created_at": created_at,
+                    "image": image
+                })
             
             if orphans:
                 logger.info(f"🔍 Found {len(orphans)} orphaned containers")
@@ -474,6 +512,11 @@ class TTLManager:
         """Get all tracked session IDs."""
         async with self._lock:
             return set(self._containers.keys())
+    
+    async def get_all_container_names(self) -> Set[str]:
+        """Get all tracked container names (for orphan detection)."""
+        async with self._lock:
+            return {c.container_name for c in self._containers.values()}
     
     async def get_status(self, session_id: str) -> Optional[Dict[str, Any]]:
         """Get TTL status for a container."""
@@ -780,11 +823,12 @@ class SandboxCleanupManager:
                 if not self._running:
                     break
                 
-                # Get known session IDs
+                # Get known session IDs and container names
                 known_sessions = await self.ttl_manager.get_all_session_ids()
+                known_container_names = await self.ttl_manager.get_all_container_names()
                 
                 # Find and cleanup orphans
-                detector = OrphanDetector(self.config, known_sessions)
+                detector = OrphanDetector(self.config, known_sessions, known_container_names)
                 results = await detector.cleanup_orphans()
                 
                 self._stats["orphan_cleanups"] += results["cleaned"]
@@ -905,7 +949,8 @@ async def cleanup_orphan_containers():
     """Clean up orphaned containers."""
     manager = get_cleanup_manager()
     known_sessions = await manager.ttl_manager.get_all_session_ids()
-    detector = OrphanDetector(manager.config, known_sessions)
+    known_container_names = await manager.ttl_manager.get_all_container_names()
+    detector = OrphanDetector(manager.config, known_sessions, known_container_names)
     return await detector.cleanup_orphans()
 
 
@@ -959,18 +1004,34 @@ async def integrate_with_deployment_service(
     original_create = deployment_service.create_sandbox
     
     async def create_with_tracking(session_id: str, project_files: dict, ttl_minutes: int = None):
-        container = await original_create(session_id, project_files, ttl_minutes)
-        
-        # Register with cleanup manager
-        await cleanup_manager.register_container(
+        # Pre-register the container name BEFORE build starts
+        # This prevents the orphan detector from killing it during build
+        expected_name = deployment_service._generate_container_name(session_id)
+        pre_registered = await cleanup_manager.register_container(
             session_id=session_id,
-            container_name=container.container_name,
-            image_name=container.image_name,
-            port=container.port,
+            container_name=expected_name,
+            image_name=f"pending-{session_id[:16]}",
+            port=0,
             ttl_minutes=ttl_minutes or cleanup_manager.config.default_ttl_minutes
         )
         
-        return container
+        try:
+            container = await original_create(session_id, project_files, ttl_minutes)
+            
+            # Update registration with actual container details
+            await cleanup_manager.register_container(
+                session_id=session_id,
+                container_name=container.container_name,
+                image_name=container.image_name,
+                port=container.port,
+                ttl_minutes=ttl_minutes or cleanup_manager.config.default_ttl_minutes
+            )
+            
+            return container
+        except Exception as e:
+            # If build fails, unregister the pre-registration
+            await cleanup_manager.ttl_manager.unregister(session_id)
+            raise
     
     deployment_service.create_sandbox = create_with_tracking
     

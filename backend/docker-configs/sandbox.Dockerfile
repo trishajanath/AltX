@@ -25,17 +25,17 @@ COPY . .
 
 # Install dependencies if not using base image (checks if uvicorn exists)
 # Also install curl for healthcheck if not present
+# ALWAYS install from sandbox_requirements.txt to catch missing packages (like requests, google-auth)
 # Uses requirements.txt if exists, otherwise installs minimal deps inline
-RUN python -c "import uvicorn" 2>/dev/null || \
-    (apt-get update && apt-get install -y --no-install-recommends curl && \
-     rm -rf /var/lib/apt/lists/* && \
-     if [ -f sandbox_requirements.txt ]; then \
-       pip install --no-cache-dir -r sandbox_requirements.txt; \
-     elif [ -f requirements.txt ]; then \
-       pip install --no-cache-dir -r requirements.txt; \
-     else \
-       pip install --no-cache-dir fastapi uvicorn[standard] pydantic sqlalchemy python-jose[cryptography] passlib[bcrypt] python-multipart; \
-     fi)
+RUN if [ -f sandbox_requirements.txt ]; then \
+      pip install --no-cache-dir -r sandbox_requirements.txt 2>/dev/null || true; \
+    fi && \
+    if [ -f requirements.txt ]; then \
+      pip install --no-cache-dir -r requirements.txt 2>/dev/null || true; \
+    fi && \
+    python -c "import uvicorn" 2>/dev/null || \
+    pip install --no-cache-dir fastapi uvicorn[standard] pydantic sqlalchemy python-jose[cryptography] passlib[bcrypt] python-multipart requests google-auth google-auth-oauthlib && \
+    (apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/* || true)
 
 # Create data directory if not exists
 RUN mkdir -p /app/data

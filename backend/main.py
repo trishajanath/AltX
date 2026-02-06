@@ -3027,6 +3027,15 @@ async def get_sandbox_preview(
                     backend_files[rel] = f.get('content', '')
 
             if backend_files and PREVIEW_ORCHESTRATOR_AVAILABLE:
+                # Validate and fix Python files before Docker deployment
+                for bf_name in list(backend_files.keys()):
+                    if bf_name.endswith('.py'):
+                        try:
+                            compile(backend_files[bf_name], bf_name, 'exec')
+                        except SyntaxError as e:
+                            print(f"🔧 Fixing Python syntax error in backend/{bf_name}: {e}")
+                            backend_files[bf_name] = fix_python_content(backend_files[bf_name], bf_name, "sandbox-project")
+                
                 try:
                     from preview_orchestrator import get_orchestrator, PreviewRequest
 
@@ -3172,10 +3181,13 @@ def generate_sandbox_html(files_content: dict, project_name: str, backend_url: s
     total_code_size = 0
     MAX_CODE_SIZE = 100000  # 100KB max code size limit
     
-    # UI components that are provided globally by the sandbox - skip loading their separate files
+    # UI components that are ACTUALLY defined globally in the sandbox HTML template
+    # ONLY list components that have a real window.X = X; definition in the template
+    # Do NOT list components here unless they are truly provided - otherwise
+    # their .jsx files get skipped and you get "X is not defined" errors
     SANDBOX_PROVIDED_COMPONENTS = {
-        'Button', 'Input', 'Card', 'Loading', 'AnimatedText', 'Navigation',
-        'Spotlight', 'SpotlightCard', 'Toast', 'ToastProvider'
+        'Button', 'Input', 'Card', 'Loading', 'AnimatedText',
+        'Spotlight', 'SpotlightCard', 'Toast', 'ToastProvider', 'ToastContext'
     }
     
     for file_path, content in files_content.items():
@@ -6222,18 +6234,45 @@ def deduplicate_cross_file_declarations(code: str) -> str:
     # Track seen declarations to detect duplicates
     seen_declarations = set()
     
+    # Pre-seed with declarations that ACTUALLY exist in the sandbox template HTML
+    # These have real window.X = X; definitions in the template's <script> block
+    sandbox_provided_declarations = {
+        # UI Components (defined in template)
+        'ToastContext', 'useToast', 'ToastProvider', 'Toast',
+        'SpotlightCard', 'Spotlight', 'Loading', 'AnimatedText',
+        'Button', 'Input', 'Card',
+        # Router globals (defined in template via createSimpleRouter)
+        'Router', 'BrowserRouter', 'HashRouter', 'MemoryRouter',
+        'Routes', 'Route', 'Link', 'NavLink', 'Navigate',
+        'useNavigate', 'useParams', 'useLocation',
+    }
+    seen_declarations.update(sandbox_provided_declarations)
+    
     # Patterns to deduplicate (these commonly cause "already declared" errors)
-    # Format: (pattern_to_find_declaration, name_group_index)
-    declaration_patterns = [
-        # Context declarations: const XContext = createContext/React.createContext
-        (r'const\s+(\w+Context)\s*=\s*(?:React\.)?createContext\s*\([^)]*\)\s*;?', 1),
-        # Hook declarations: const useX = () => {...} or const useX = () => React.useContext
-        (r'const\s+(use[A-Z]\w*)\s*=\s*\([^)]*\)\s*=>\s*[{(]?', 1),
-        # Alternative hook pattern: const useX = () => { ... }
-        (r'const\s+(use[A-Z]\w*)\s*=\s*\(\)\s*=>\s*\{', 1),
-        # Provider declarations: const XProvider = ({ children }) => {...}
-        (r'const\s+(\w+Provider)\s*=\s*\(\{\s*children\s*(?:,\s*\w+)*\s*\}\)\s*=>\s*\{', 1),
+    # Two kinds of deduplication:
+    # 1. Context/hook/provider patterns: detect user-defined duplicates across bundled files
+    # 2. Sandbox-provided globals: remove re-declarations of names the sandbox template provides
+    
+    # Patterns for user-defined contexts, hooks, providers (track first occurrence, remove later ones)
+    user_dedup_patterns = [
+        # Context declarations: [export] const XContext = createContext/React.createContext
+        (r'(?:export\s+)?const\s+(\w+Context)\s*=\s*(?:React\.)?createContext\s*\([^)]*\)\s*;?', 1),
+        # Hook declarations: [export] const useX = () => {...} or const useX = () => React.useContext
+        (r'(?:export\s+)?const\s+(use[A-Z]\w*)\s*=\s*\([^)]*\)\s*=>\s*[{(]?', 1),
+        # Alternative hook pattern: [export] const useX = () => { ... }
+        (r'(?:export\s+)?const\s+(use[A-Z]\w*)\s*=\s*\(\)\s*=>\s*\{', 1),
+        # Provider declarations: [export] const XProvider = ({ children }) => {...}
+        (r'(?:export\s+)?const\s+(\w+Provider)\s*=\s*\(\{\s*children\s*(?:,\s*\w+)*\s*\}\)\s*=>\s*\{', 1),
     ]
+    
+    # Pattern for sandbox-provided globals: ONLY matches names in sandbox_provided_declarations
+    # This catches re-declarations of Router, NavLink, Button, etc. without catching user variables
+    sandbox_global_patterns = [
+        (r'(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=', 1),
+        (r'(?:export\s+)?function\s+(\w+)\s*\(', 1),
+    ]
+    
+    declaration_patterns = user_dedup_patterns
     
     lines = code.split('\n')
     result_lines = []
@@ -6251,6 +6290,8 @@ def deduplicate_cross_file_declarations(code: str) -> str:
         
         # Check against each pattern
         found_duplicate = False
+        
+        # First: check user dedup patterns (contexts, hooks, providers)
         for pattern, name_group in declaration_patterns:
             match = re.search(pattern, stripped)
             if match:
@@ -6302,6 +6343,53 @@ def deduplicate_cross_file_declarations(code: str) -> str:
                 else:
                     # First time seeing this declaration
                     seen_declarations.add(decl_name)
+        
+        # Second: check sandbox-provided globals (NavLink, Button, etc.)
+        # These only match names that are ALREADY in sandbox_provided_declarations — 
+        # they never add new names to seen_declarations to avoid over-deduplication
+        if not found_duplicate:
+            for pattern, name_group in sandbox_global_patterns:
+                match = re.search(pattern, stripped)
+                if match:
+                    decl_name = match.group(name_group)
+                    
+                    # Only remove if it's a known sandbox-provided global
+                    if decl_name in sandbox_provided_declarations:
+                        print(f"🔧 Removing duplicate declaration: {decl_name}")
+                        found_duplicate = True
+                        
+                        # Skip the declaration block
+                        brace_count = 0
+                        paren_count = 0
+                        started = False
+                        
+                        while i < len(lines):
+                            current_line = lines[i]
+                            for char in current_line:
+                                if char == '{':
+                                    started = True
+                                    brace_count += 1
+                                elif char == '}':
+                                    brace_count -= 1
+                                elif char == '(':
+                                    started = True
+                                    paren_count += 1
+                                elif char == ')':
+                                    paren_count -= 1
+                            
+                            i += 1
+                            
+                            if started and brace_count <= 0 and paren_count <= 0:
+                                if current_line.rstrip().endswith(';'):
+                                    break
+                                if brace_count == 0 and paren_count == 0:
+                                    break
+                            
+                            if i > len(lines) - 1:
+                                break
+                        
+                        result_lines.append(f'// [Deduplicated] {decl_name} - provided by sandbox')
+                        break
         
         if not found_duplicate:
             result_lines.append(line)
@@ -9765,22 +9853,22 @@ async def run_project(request: dict = Body(...)):
         project_exists_in_s3 = False
         s3_data = None  # Initialize to avoid undefined variable
         
-        if not project_exists_locally:
-            # Try to find in S3
-            cached_user = _project_user_cache.get(project_slug)
-            if cached_user:
-                s3_data = get_project_from_s3(project_slug=project_slug, user_id=cached_user)
+        # ALWAYS check S3 - even if local dir exists it may be empty/incomplete
+        # The local dir might exist without backend files, but S3 has the full project
+        cached_user = _project_user_cache.get(project_slug)
+        if cached_user:
+            s3_data = get_project_from_s3(project_slug=project_slug, user_id=cached_user)
+            if s3_data and s3_data.get('files'):
+                project_exists_in_s3 = True
+                print(f"✅ Found project {project_slug} in S3 (cached, {len(s3_data.get('files', []))} files)")
+        
+        if not project_exists_in_s3:
+            found_user = find_project_user_id(project_slug)
+            if found_user:
+                s3_data = get_project_from_s3(project_slug=project_slug, user_id=found_user)
                 if s3_data and s3_data.get('files'):
                     project_exists_in_s3 = True
-                    print(f"✅ Found project {project_slug} in S3 (cached)")
-            
-            if not project_exists_in_s3:
-                found_user = find_project_user_id(project_slug)
-                if found_user:
-                    s3_data = get_project_from_s3(project_slug=project_slug, user_id=found_user)
-                    if s3_data and s3_data.get('files'):
-                        project_exists_in_s3 = True
-                        print(f"✅ Found project {project_slug} in S3 (searched)")
+                    print(f"✅ Found project {project_slug} in S3 (searched, {len(s3_data.get('files', []))} files)")
         
         if not project_exists_locally and not project_exists_in_s3:
             return {"success": False, "error": "Project not found"}
@@ -9793,6 +9881,36 @@ async def run_project(request: dict = Body(...)):
         project_files = {}
         backend_files = {}
         
+        # =====================================================================
+        # READ FROM LOCAL FILESYSTEM (if project exists locally)
+        # =====================================================================
+        if project_exists_locally:
+            # Read frontend files from local disk
+            if frontend_path.exists():
+                for file in frontend_path.rglob('*'):
+                    if file.is_file() and not any(skip in str(file) for skip in ['node_modules', '.git', '__pycache__', '.next']):
+                        try:
+                            relative_path = str(file.relative_to(frontend_path)).replace('\\', '/')
+                            project_files[relative_path] = file.read_text(encoding='utf-8', errors='replace')
+                        except Exception as e:
+                            print(f"⚠️ Could not read frontend file {file}: {e}")
+            
+            # Read backend files from local disk
+            backend_path = project_path / "backend"
+            if backend_path.exists():
+                for file in backend_path.rglob('*'):
+                    if file.is_file() and not any(skip in str(file) for skip in ['node_modules', '.git', '__pycache__', '.venv', 'venv', '.env']):
+                        try:
+                            relative_path = str(file.relative_to(backend_path)).replace('\\', '/')
+                            backend_files[relative_path] = file.read_text(encoding='utf-8', errors='replace')
+                        except Exception as e:
+                            print(f"⚠️ Could not read backend file {file}: {e}")
+                
+                print(f"📂 Loaded {len(backend_files)} backend files from local disk")
+        
+        # =====================================================================
+        # READ FROM S3 (override/supplement with S3 data if available)
+        # =====================================================================
         if project_exists_in_s3 and s3_data:
             s3_files = s3_data.get('files', [])
             for f in s3_files:
@@ -9828,6 +9946,16 @@ async def run_project(request: dict = Body(...)):
         print(f"   - deploy_backend: {deploy_backend}")
         print(f"   - backend_files count: {len(backend_files) if backend_files else 0}")
         print(f"   - PREVIEW_ORCHESTRATOR_AVAILABLE: {PREVIEW_ORCHESTRATOR_AVAILABLE}")
+        
+        # Validate and fix Python files in backend before Docker deployment
+        if backend_files:
+            for bf_name in list(backend_files.keys()):
+                if bf_name.endswith('.py'):
+                    try:
+                        compile(backend_files[bf_name], bf_name, 'exec')
+                    except SyntaxError as e:
+                        print(f"🔧 Fixing Python syntax error in backend/{bf_name}: {e}")
+                        backend_files[bf_name] = fix_python_content(backend_files[bf_name], bf_name, project_slug)
         
         if deploy_backend and backend_files and PREVIEW_ORCHESTRATOR_AVAILABLE:
             try:
@@ -18860,6 +18988,173 @@ async def validate_and_fix_code_content(filename: str, content: str, project_nam
     elif filename.endswith('.js') or filename.endswith('.ts'):
         # Fix JavaScript/TypeScript issues
         content = fix_js_content(content, filename)
+    elif filename.endswith('.py'):
+        # Validate and fix Python indentation issues
+        content = fix_python_content(content, filename, project_name)
+    
+    return content
+
+def fix_python_content(content: str, filename: str, project_name: str) -> str:
+    """Validate and fix common Python issues, especially indentation errors"""
+    import re
+    
+    # First, try to compile to check for syntax errors
+    try:
+        compile(content, filename, 'exec')
+        return content  # No errors, return as-is
+    except SyntaxError as e:
+        print(f"🔧 Fixing Python syntax error in {filename}: {e}")
+    
+    # Clean up common AI generation artifacts FIRST
+    # Remove markdown code fences that AI sometimes includes
+    content = re.sub(r'^```python\s*\n', '', content)
+    content = re.sub(r'^```\s*\n', '', content)
+    content = re.sub(r'\n```\s*$', '', content)
+    
+    # Fix mixed tabs and spaces throughout
+    content = content.replace('\t', '    ')
+    
+    lines = content.split('\n')
+    
+    # =====================================================================
+    # FIX 1: Properly reconstruct the 'if __name__' block at the end
+    # AI often generates this block with wrong indentation
+    # =====================================================================
+    name_guard_idx = None
+    for i in range(len(lines) - 1, max(len(lines) - 30, -1), -1):
+        if lines[i].strip().startswith('if __name__'):
+            name_guard_idx = i
+            break
+    
+    if name_guard_idx is not None:
+        # Collect all lines from the guard to the end
+        before_guard = lines[:name_guard_idx]
+        guard_line = lines[name_guard_idx].strip()  # e.g., 'if __name__ == "__main__":'
+        body_lines = lines[name_guard_idx + 1:]
+        
+        # Rebuild the guard block with correct indentation
+        # Guard at column 0, body at column 4
+        fixed_block = [guard_line]  # if __name__ == "__main__":
+        for bl in body_lines:
+            stripped = bl.strip()
+            if stripped:  # Non-empty line -> indent at 4
+                fixed_block.append('    ' + stripped)
+            else:
+                fixed_block.append('')  # Preserve blank lines
+        
+        lines = before_guard + fixed_block
+    
+    # =====================================================================
+    # FIX 2: Fix lines with wrong indentation (not multiples of 4)
+    # =====================================================================
+    fixed_lines = []
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped or stripped.startswith('#'):
+            fixed_lines.append(line)
+            continue
+        
+        current_indent = len(line) - len(line.lstrip())
+        if current_indent % 4 != 0:
+            current_indent = round(current_indent / 4) * 4
+            line = ' ' * current_indent + stripped
+        
+        fixed_lines.append(line)
+    
+    content = '\n'.join(fixed_lines)
+    
+    # =====================================================================
+    # FIX 3: Handle orphaned indented lines at the end of the file
+    # Lines after a module-level block that are unexpectedly indented
+    # =====================================================================
+    lines = content.split('\n')
+    # Find the last non-empty line
+    last_code_lines = []
+    for i in range(len(lines) - 1, max(len(lines) - 20, -1), -1):
+        stripped = lines[i].strip()
+        if stripped:
+            indent = len(lines[i]) - len(lines[i].lstrip())
+            last_code_lines.append((i, indent, stripped))
+    
+    # Check if there are trailing lines that seem orphaned (indented but
+    # no parent block). Walk backwards from end looking for module-level code.
+    if last_code_lines:
+        # If the very last code lines are indented but the line before them
+        # is at module level (and not a block opener), they're orphaned
+        for idx, indent, stripped in last_code_lines:
+            if indent > 0:
+                # Look for the nearest preceding non-empty line
+                for j in range(idx - 1, max(idx - 5, -1), -1):
+                    prev_stripped = lines[j].strip()
+                    if prev_stripped:
+                        prev_indent = len(lines[j]) - len(lines[j].lstrip())
+                        # If previous line is at module level and NOT a block opener
+                        if prev_indent == 0 and not prev_stripped.endswith(':'):
+                            lines[idx] = stripped  # Move to module level
+                        break
+    
+    content = '\n'.join(lines)
+    
+    # =====================================================================
+    # FIX 4: Last resort - if still broken, try autopep8-style line-by-line fix
+    # Rebuild indentation by tracking block depth
+    # =====================================================================
+    try:
+        compile(content, filename, 'exec')
+        print(f"✅ Fixed Python syntax in {filename}")
+        return content
+    except SyntaxError as e:
+        print(f"🔧 Pass 1 didn't fully fix {filename}: {e}, trying deeper fix...")
+    
+    # Deeper fix: rebuild indentation by tracking block structure
+    lines = content.split('\n')
+    fixed_lines = []
+    expected_indent = 0
+    
+    block_openers = ['def ', 'async def ', 'class ', 'if ', 'elif ', 'else:',
+                     'for ', 'while ', 'try:', 'except:', 'except ', 'finally:',
+                     'with ', 'async with ', 'async for ', 'match ', 'case ']
+    dedent_keywords = ['elif ', 'else:', 'except:', 'except ', 'finally:', 'case ']
+    
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped or stripped.startswith('#'):
+            fixed_lines.append(line)
+            continue
+        
+        current_indent = len(line) - len(line.lstrip())
+        
+        # Dedent keywords should match the if/try/for they belong to
+        is_dedent = any(stripped.startswith(kw) for kw in dedent_keywords)
+        if is_dedent and expected_indent >= 4:
+            current_indent = expected_indent - 4
+        
+        # If this line's indent doesn't match expected, use current_indent
+        # but clamp it to reasonable values
+        if current_indent > expected_indent and not any(
+            lines[j].strip().endswith(':') for j in range(max(0, i-3), i) if lines[j].strip()
+        ):
+            # No block opener above, this line shouldn't be more indented
+            current_indent = expected_indent
+        
+        fixed_line = ' ' * current_indent + stripped
+        fixed_lines.append(fixed_line)
+        
+        # Update expected indent
+        opens_block = any(stripped.startswith(kw) for kw in block_openers) and stripped.endswith(':')
+        if opens_block:
+            expected_indent = current_indent + 4
+        else:
+            expected_indent = current_indent
+    
+    content = '\n'.join(fixed_lines)
+    
+    # Final verification
+    try:
+        compile(content, filename, 'exec')
+        print(f"✅ Fixed Python syntax in {filename} (deep fix)")
+    except SyntaxError as e:
+        print(f"⚠️ Could not fully fix Python syntax in {filename}: {e}")
     
     return content
 
