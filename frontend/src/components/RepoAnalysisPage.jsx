@@ -228,6 +228,11 @@ const RepoAnalysisPage = ({ setScanResult }) => { // Assuming setScanResult is p
     const [fixedIssues, setFixedIssues] = useState(new Set());
     const [isFixingAll, setIsFixingAll] = useState(false);
     const [showAllIssues, setShowAllIssues] = useState(false); // Toggle for showing low priority issues
+    const [pentestResult, setPentestResult] = useState(null);
+    const [isPentesting, setIsPentesting] = useState(false);
+    const [pentestProgress, setPentestProgress] = useState('');
+    const [pentestError, setPentestError] = useState('');
+    const [expandedFindings, setExpandedFindings] = useState({});
     
     // --- Core Logic Functions (Restored) ---
 
@@ -238,6 +243,63 @@ const RepoAnalysisPage = ({ setScanResult }) => { // Assuming setScanResult is p
             if (!urlPattern.test(cleaned)) return null;
             return cleaned;
         } catch (e) { return null; }
+    };
+
+    const runDeepPentest = async () => {
+        const cleanedUrl = cleanRepositoryUrl(repoUrl.trim());
+        if (!cleanedUrl) {
+            setPentestError('Please enter a valid GitHub repository URL');
+            return;
+        }
+        setIsPentesting(true);
+        setPentestError('');
+        setPentestResult(null);
+        setPentestProgress('Cloning repository & uploading to S3...');
+        try {
+            const response = await fetch(apiUrl('api/pentest-repo'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ repo_url: cleanedUrl, deep_scan: true }),
+            });
+            const data = await response.json();
+            if (data.error && !data.success) {
+                setPentestError(data.error);
+            } else {
+                setPentestResult(data);
+                setPentestProgress('');
+            }
+        } catch (err) {
+            setPentestError('Failed to connect to pentest service. Ensure backend is running.');
+        } finally {
+            setIsPentesting(false);
+            setPentestProgress('');
+        }
+    };
+
+    const toggleFinding = (id) => {
+        setExpandedFindings(prev => ({ ...prev, [id]: !prev[id] }));
+    };
+
+    const getSeverityColor = (severity) => {
+        const colors = { Critical: '#dc2626', High: '#ea580c', Medium: '#d97706', Low: '#2563eb', Informational: '#6b7280' };
+        return colors[severity] || '#6b7280';
+    };
+
+    const getSeverityIcon = (severity) => {
+        const icons = { Critical: '🔴', High: '🟠', Medium: '🟡', Low: '🔵', Informational: 'ℹ️' };
+        return icons[severity] || 'ℹ️';
+    };
+
+    const getCategoryIcon = (category) => {
+        const icons = {
+            'Injection': '💉', 'Authentication Bypass': '🔓', 'Authorization Bypass': '🛡️',
+            'Cross-Site Scripting': '⚡', 'Server-Side Request Forgery': '🌐', 'Path Traversal': '📂',
+            'Insecure Direct Object Reference': '🎯', 'Security Misconfiguration': '⚙️',
+            'Sensitive Data Exposure': '📋', 'Rate Limiting': '⏱️', 'CORS Misconfiguration': '🔗',
+            'Security Headers': '🏷️', 'File Upload': '📤', 'Insecure Deserialization': '📦',
+            'Endpoint Enumeration': '🔍'
+        };
+        return icons[category] || '🔒';
     };
 
     const analyzeRepository = async () => {
@@ -1401,10 +1463,22 @@ I'm ready to answer specific questions about these findings, provide detailed ex
                         <div className="card">
                             <h3>Analysis Target</h3>
                             <div className="input-group">
-                                <input type="text" value={repoUrl} onChange={(e) => setRepoUrl(e.target.value)} placeholder="Enter public GitHub repository URL" className="input" disabled={isScanning} />
-                                <button onClick={analyzeRepository} disabled={isScanning || !repoUrl.trim()} className="btn">{isScanning ? 'Analyzing...' : 'Analyze'}</button>
+                                <input type="text" value={repoUrl} onChange={(e) => setRepoUrl(e.target.value)} placeholder="Enter public GitHub repository URL" className="input" disabled={isScanning || isPentesting} />
+                                <button onClick={analyzeRepository} disabled={isScanning || isPentesting || !repoUrl.trim()} className="btn">{isScanning ? 'Analyzing...' : 'Analyze'}</button>
+                                <button onClick={runDeepPentest} disabled={isScanning || isPentesting || !repoUrl.trim()} className="btn" style={{background: 'linear-gradient(135deg, #dc2626, #991b1b)', marginLeft: '8px'}}>{isPentesting ? 'Pentesting...' : '🔒 Deep Pentest'}</button>
                             </div>
                             {error && <p className="error-message">{error}</p>}
+                            {pentestError && <p className="error-message">{pentestError}</p>}
+                            {isPentesting && (
+                                <div style={{marginTop: '12px', padding: '12px', background: 'rgba(220, 38, 38, 0.1)', borderRadius: '8px', border: '1px solid rgba(220, 38, 38, 0.3)'}}>
+                                    <div style={{display: 'flex', alignItems: 'center', gap: '10px'}}>
+                                        <div className="spinner" style={{width: '16px', height: '16px', border: '2px solid rgba(220,38,38,0.3)', borderTop: '2px solid #dc2626', borderRadius: '50%', animation: 'spin 1s linear infinite'}}></div>
+                                        <span style={{color: '#dc2626', fontSize: '14px', fontWeight: 500}}>Deep Penetration Test Running...</span>
+                                    </div>
+                                    <p style={{color: '#9ca3af', fontSize: '13px', margin: '8px 0 0'}}>Cloning repo → S3 upload → Sandbox deploy → Endpoint discovery → Running attack payloads (SQL injection, XSS, auth bypass, IDOR, SSRF, command injection...)</p>
+                                    {pentestProgress && <p style={{color: '#f59e0b', fontSize: '12px', margin: '6px 0 0'}}>{pentestProgress}</p>}
+                                </div>
+                            )}
                         </div>
                     )}
 
@@ -2495,6 +2569,199 @@ I'm ready to answer specific questions about these findings, provide detailed ex
                                         )}
                                     </div>
                                 </div>
+                                {/* ============================================================ */}
+                                {/* DEEP PENETRATION TEST RESULTS */}
+                                {/* ============================================================ */}
+                                {pentestResult && (
+                                    <div className="card" style={{marginTop: '20px', border: '1px solid rgba(220, 38, 38, 0.3)'}}>
+                                        <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px'}}>
+                                            <h3 style={{margin: 0, color: '#f87171'}}>🔒 Deep Penetration Test Results</h3>
+                                            {!isPentesting && <button onClick={runDeepPentest} className="btn" style={{background: 'linear-gradient(135deg, #dc2626, #991b1b)', fontSize: '12px', padding: '6px 14px'}}>Re-run Pentest</button>}
+                                        </div>
+
+                                        {/* Scan Metadata */}
+                                        <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', marginBottom: '16px'}}>
+                                            <div style={{padding: '10px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px'}}>
+                                                <div style={{fontSize: '11px', color: '#9ca3af', textTransform: 'uppercase'}}>Framework</div>
+                                                <div style={{fontSize: '16px', fontWeight: 600, color: '#e5e7eb'}}>{pentestResult.framework_detected || 'Unknown'}</div>
+                                            </div>
+                                            <div style={{padding: '10px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px'}}>
+                                                <div style={{fontSize: '11px', color: '#9ca3af', textTransform: 'uppercase'}}>Language</div>
+                                                <div style={{fontSize: '16px', fontWeight: 600, color: '#e5e7eb'}}>{pentestResult.language_detected || 'Unknown'}</div>
+                                            </div>
+                                            <div style={{padding: '10px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px'}}>
+                                                <div style={{fontSize: '11px', color: '#9ca3af', textTransform: 'uppercase'}}>Endpoints Found</div>
+                                                <div style={{fontSize: '16px', fontWeight: 600, color: '#e5e7eb'}}>{pentestResult.endpoints_discovered?.length || 0}</div>
+                                            </div>
+                                            <div style={{padding: '10px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px'}}>
+                                                <div style={{fontSize: '11px', color: '#9ca3af', textTransform: 'uppercase'}}>Tests Run</div>
+                                                <div style={{fontSize: '16px', fontWeight: 600, color: '#e5e7eb'}}>{pentestResult.total_tests_run || 0}</div>
+                                            </div>
+                                            <div style={{padding: '10px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px'}}>
+                                                <div style={{fontSize: '11px', color: '#9ca3af', textTransform: 'uppercase'}}>Duration</div>
+                                                <div style={{fontSize: '16px', fontWeight: 600, color: '#e5e7eb'}}>{(pentestResult.duration_seconds || 0).toFixed(1)}s</div>
+                                            </div>
+                                            <div style={{padding: '10px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px'}}>
+                                                <div style={{fontSize: '11px', color: '#9ca3af', textTransform: 'uppercase'}}>Risk Score</div>
+                                                <div style={{fontSize: '16px', fontWeight: 600, color: (pentestResult.overall_risk_score || 0) > 50 ? '#ef4444' : (pentestResult.overall_risk_score || 0) > 20 ? '#f59e0b' : '#22c55e'}}>{pentestResult.overall_risk_score || 0}/100</div>
+                                            </div>
+                                        </div>
+
+                                        {/* Severity Summary */}
+                                        <div style={{display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap'}}>
+                                            {pentestResult.summary?.critical > 0 && <span style={{padding: '4px 12px', borderRadius: '20px', background: 'rgba(220,38,38,0.2)', color: '#ef4444', fontWeight: 600, fontSize: '13px'}}>🔴 {pentestResult.summary.critical} Critical</span>}
+                                            {pentestResult.summary?.high > 0 && <span style={{padding: '4px 12px', borderRadius: '20px', background: 'rgba(234,88,12,0.2)', color: '#fb923c', fontWeight: 600, fontSize: '13px'}}>🟠 {pentestResult.summary.high} High</span>}
+                                            {pentestResult.summary?.medium > 0 && <span style={{padding: '4px 12px', borderRadius: '20px', background: 'rgba(217,119,6,0.2)', color: '#fbbf24', fontWeight: 600, fontSize: '13px'}}>🟡 {pentestResult.summary.medium} Medium</span>}
+                                            {pentestResult.summary?.low > 0 && <span style={{padding: '4px 12px', borderRadius: '20px', background: 'rgba(37,99,235,0.2)', color: '#60a5fa', fontWeight: 600, fontSize: '13px'}}>🔵 {pentestResult.summary.low} Low</span>}
+                                            {pentestResult.summary?.info > 0 && <span style={{padding: '4px 12px', borderRadius: '20px', background: 'rgba(107,114,128,0.2)', color: '#9ca3af', fontWeight: 600, fontSize: '13px'}}>ℹ️ {pentestResult.summary.info} Info</span>}
+                                            {pentestResult.summary?.total_findings === 0 && <span style={{padding: '4px 12px', borderRadius: '20px', background: 'rgba(34,197,94,0.2)', color: '#22c55e', fontWeight: 600, fontSize: '13px'}}>✅ No vulnerabilities found</span>}
+                                        </div>
+
+                                        {/* Discovered Endpoints */}
+                                        {pentestResult.endpoints_discovered?.length > 0 && (
+                                            <div style={{marginBottom: '16px'}}>
+                                                <h4 style={{color: '#d1d5db', fontSize: '14px', marginBottom: '8px'}}>📡 Discovered Endpoints ({pentestResult.endpoints_discovered.length})</h4>
+                                                <div style={{maxHeight: '200px', overflowY: 'auto', background: 'rgba(0,0,0,0.3)', borderRadius: '8px', padding: '8px'}}>
+                                                    {pentestResult.endpoints_discovered.map((ep, idx) => (
+                                                        <div key={idx} style={{display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 8px', borderBottom: '1px solid rgba(255,255,255,0.05)', fontSize: '13px'}}>
+                                                            <span style={{padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 700, fontFamily: 'monospace',
+                                                                background: ep.method === 'GET' ? 'rgba(34,197,94,0.2)' : ep.method === 'POST' ? 'rgba(59,130,246,0.2)' : ep.method === 'PUT' ? 'rgba(245,158,11,0.2)' : ep.method === 'DELETE' ? 'rgba(239,68,68,0.2)' : 'rgba(107,114,128,0.2)',
+                                                                color: ep.method === 'GET' ? '#22c55e' : ep.method === 'POST' ? '#3b82f6' : ep.method === 'PUT' ? '#f59e0b' : ep.method === 'DELETE' ? '#ef4444' : '#9ca3af'
+                                                            }}>{ep.method}</span>
+                                                            <code style={{color: '#e5e7eb', flex: 1}}>{ep.path}</code>
+                                                            {ep.auth_required && <span style={{fontSize: '10px', padding: '1px 6px', borderRadius: '4px', background: 'rgba(245,158,11,0.2)', color: '#fbbf24'}}>AUTH</span>}
+                                                            <span style={{color: '#6b7280', fontSize: '11px'}}>{ep.file}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Auth Mechanisms */}
+                                        {pentestResult.auth_mechanisms?.length > 0 && (
+                                            <div style={{marginBottom: '16px'}}>
+                                                <h4 style={{color: '#d1d5db', fontSize: '14px', marginBottom: '8px'}}>🔐 Authentication Mechanisms</h4>
+                                                <div style={{display: 'flex', gap: '8px', flexWrap: 'wrap'}}>
+                                                    {pentestResult.auth_mechanisms.map((auth, idx) => (
+                                                        <span key={idx} style={{padding: '4px 12px', borderRadius: '6px', background: 'rgba(139,92,246,0.15)', color: '#a78bfa', fontSize: '13px'}}>{auth}</span>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Technologies */}
+                                        {pentestResult.technologies?.length > 0 && (
+                                            <div style={{marginBottom: '20px'}}>
+                                                <h4 style={{color: '#d1d5db', fontSize: '14px', marginBottom: '8px'}}>🛠️ Technologies Detected</h4>
+                                                <div style={{display: 'flex', gap: '8px', flexWrap: 'wrap'}}>
+                                                    {pentestResult.technologies.map((tech, idx) => (
+                                                        <span key={idx} style={{padding: '4px 12px', borderRadius: '6px', background: 'rgba(6,182,212,0.15)', color: '#22d3ee', fontSize: '13px'}}>{tech}</span>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Findings List */}
+                                        {pentestResult.findings?.length > 0 && (
+                                            <div>
+                                                <h4 style={{color: '#d1d5db', fontSize: '14px', marginBottom: '12px'}}>⚠️ Vulnerability Findings ({pentestResult.findings.length})</h4>
+                                                {pentestResult.findings.map((finding, idx) => (
+                                                    <div key={finding.id || idx} style={{marginBottom: '8px', border: `1px solid ${getSeverityColor(finding.severity)}33`, borderRadius: '8px', overflow: 'hidden'}}>
+                                                        <div onClick={() => toggleFinding(finding.id || idx)} style={{display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 14px', cursor: 'pointer', background: 'rgba(0,0,0,0.2)', transition: 'background 0.2s'}}>
+                                                            <span style={{fontSize: '16px'}}>{getCategoryIcon(finding.category)}</span>
+                                                            <span style={{fontSize: '14px'}}>{getSeverityIcon(finding.severity)}</span>
+                                                            <span style={{flex: 1, color: '#e5e7eb', fontSize: '13px', fontWeight: 500}}>{finding.title}</span>
+                                                            <span style={{padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, background: `${getSeverityColor(finding.severity)}22`, color: getSeverityColor(finding.severity)}}>{finding.severity}</span>
+                                                            <span style={{padding: '2px 8px', borderRadius: '4px', fontSize: '11px', background: 'rgba(255,255,255,0.05)', color: '#9ca3af'}}>{finding.method} {finding.endpoint}</span>
+                                                            <span style={{color: '#6b7280', fontSize: '14px'}}>{expandedFindings[finding.id || idx] ? '▼' : '▶'}</span>
+                                                        </div>
+                                                        {expandedFindings[finding.id || idx] && (
+                                                            <div style={{padding: '14px', background: 'rgba(0,0,0,0.15)', borderTop: '1px solid rgba(255,255,255,0.05)'}}>
+                                                                <div style={{marginBottom: '10px'}}>
+                                                                    <div style={{fontSize: '11px', color: '#9ca3af', textTransform: 'uppercase', marginBottom: '4px'}}>Description</div>
+                                                                    <div style={{color: '#d1d5db', fontSize: '13px', lineHeight: '1.5'}}>{finding.description}</div>
+                                                                </div>
+                                                                {finding.evidence && (
+                                                                    <div style={{marginBottom: '10px'}}>
+                                                                        <div style={{fontSize: '11px', color: '#9ca3af', textTransform: 'uppercase', marginBottom: '4px'}}>Evidence</div>
+                                                                        <pre style={{background: 'rgba(0,0,0,0.4)', padding: '10px', borderRadius: '6px', color: '#fbbf24', fontSize: '12px', fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: '200px', overflowY: 'auto'}}>{finding.evidence}</pre>
+                                                                    </div>
+                                                                )}
+                                                                {finding.payload_used && (
+                                                                    <div style={{marginBottom: '10px'}}>
+                                                                        <div style={{fontSize: '11px', color: '#9ca3af', textTransform: 'uppercase', marginBottom: '4px'}}>Payload Used</div>
+                                                                        <code style={{background: 'rgba(220,38,38,0.15)', padding: '4px 10px', borderRadius: '4px', color: '#f87171', fontSize: '12px', fontFamily: 'monospace'}}>{finding.payload_used}</code>
+                                                                    </div>
+                                                                )}
+                                                                {finding.response_snippet && (
+                                                                    <div style={{marginBottom: '10px'}}>
+                                                                        <div style={{fontSize: '11px', color: '#9ca3af', textTransform: 'uppercase', marginBottom: '4px'}}>Response Snippet</div>
+                                                                        <pre style={{background: 'rgba(0,0,0,0.4)', padding: '10px', borderRadius: '6px', color: '#94a3b8', fontSize: '11px', fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: '150px', overflowY: 'auto'}}>{finding.response_snippet}</pre>
+                                                                    </div>
+                                                                )}
+                                                                <div style={{marginBottom: '10px'}}>
+                                                                    <div style={{fontSize: '11px', color: '#9ca3af', textTransform: 'uppercase', marginBottom: '4px'}}>Remediation</div>
+                                                                    <div style={{color: '#86efac', fontSize: '13px', lineHeight: '1.5', background: 'rgba(34,197,94,0.1)', padding: '8px 12px', borderRadius: '6px', borderLeft: '3px solid #22c55e'}}>{finding.remediation}</div>
+                                                                </div>
+                                                                <div style={{display: 'flex', gap: '16px', flexWrap: 'wrap', marginTop: '8px'}}>
+                                                                    {finding.cwe_id && <span style={{fontSize: '11px', color: '#a78bfa', background: 'rgba(139,92,246,0.1)', padding: '2px 8px', borderRadius: '4px'}}>{finding.cwe_id}</span>}
+                                                                    {finding.owasp_category && <span style={{fontSize: '11px', color: '#f59e0b', background: 'rgba(245,158,11,0.1)', padding: '2px 8px', borderRadius: '4px'}}>{finding.owasp_category}</span>}
+                                                                    {finding.cvss_score > 0 && <span style={{fontSize: '11px', color: finding.cvss_score >= 7 ? '#ef4444' : '#fbbf24', background: finding.cvss_score >= 7 ? 'rgba(239,68,68,0.1)' : 'rgba(251,191,36,0.1)', padding: '2px 8px', borderRadius: '4px'}}>CVSS: {finding.cvss_score}</span>}
+                                                                    {finding.response_code > 0 && <span style={{fontSize: '11px', color: '#6b7280', background: 'rgba(107,114,128,0.1)', padding: '2px 8px', borderRadius: '4px'}}>HTTP {finding.response_code}</span>}
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+
+                                        {/* S3 & Sandbox Info */}
+                                        <div style={{marginTop: '16px', padding: '10px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', fontSize: '12px', color: '#6b7280'}}>
+                                            <div>Scan ID: {pentestResult.scan_id}</div>
+                                            {pentestResult.s3_key && <div>S3: {pentestResult.s3_key}</div>}
+                                            {pentestResult.sandbox_url && <div>Sandbox: {pentestResult.sandbox_url}</div>}
+                                            {pentestResult.errors?.length > 0 && (
+                                                <div style={{marginTop: '8px', color: '#f87171'}}>
+                                                    {pentestResult.errors.map((err, idx) => <div key={idx}>⚠️ {err}</div>)}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Pentest in progress indicator (when triggered from results page) */}
+                                {isPentesting && analysisResult && (
+                                    <div className="card" style={{marginTop: '20px', border: '1px solid rgba(220, 38, 38, 0.3)'}}>
+                                        <h3 style={{color: '#f87171'}}>🔒 Deep Penetration Test Running...</h3>
+                                        <div style={{padding: '16px 0'}}>
+                                            <div style={{display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px'}}>
+                                                <div style={{width: '18px', height: '18px', border: '3px solid rgba(220,38,38,0.3)', borderTop: '3px solid #dc2626', borderRadius: '50%', animation: 'spin 1s linear infinite'}}></div>
+                                                <span style={{color: '#dc2626', fontWeight: 600}}>Running attack payloads against sandbox...</span>
+                                            </div>
+                                            <div style={{color: '#9ca3af', fontSize: '13px'}}>
+                                                <p>• Cloning repo & storing in S3 bucket</p>
+                                                <p>• Deploying in isolated Docker sandbox</p>
+                                                <p>• Testing {'>'}20 SQL injection payloads</p>
+                                                <p>• Testing XSS (reflected + stored)</p>
+                                                <p>• Testing authentication bypass (JWT none, empty token, default creds)</p>
+                                                <p>• Testing authorization bypass (IDOR, forced browsing, privilege escalation)</p>
+                                                <p>• Testing SSRF, command injection, path traversal</p>
+                                                <p>• Checking CORS, rate limiting, security headers</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Run Pentest button when analysis results are shown but no pentest yet */}
+                                {analysisResult && !pentestResult && !isPentesting && (
+                                    <div className="card" style={{marginTop: '20px', textAlign: 'center', padding: '24px', border: '1px dashed rgba(220,38,38,0.3)'}}>
+                                        <h4 style={{color: '#f87171', marginBottom: '8px'}}>🔒 Want to go deeper?</h4>
+                                        <p style={{color: '#9ca3af', fontSize: '14px', marginBottom: '16px'}}>Run a full penetration test — clones the repo into a sandbox container, discovers all API endpoints, and attacks them with real payloads (SQL injection, XSS, auth bypass, IDOR, and more).</p>
+                                        <button onClick={runDeepPentest} disabled={isPentesting} className="btn" style={{background: 'linear-gradient(135deg, #dc2626, #991b1b)', padding: '10px 32px', fontSize: '15px'}}>🔒 Run Deep Penetration Test</button>
+                                    </div>
+                                )}
+
                             </main>
 
                             <aside className="report-sidebar">

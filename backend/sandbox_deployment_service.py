@@ -321,7 +321,7 @@ async def _sandbox_health_check():
         
         # Append after the last line
         content = content.rstrip() + health_code
-        main_py_path.write_text(content)
+        main_py_path.write_text(content, encoding='utf-8')
         logger.info("💉 Injected /health endpoint into main.py")
     
     def _generate_missing_modules(self, build_dir: str, project_files: Dict[str, str]):
@@ -487,11 +487,11 @@ def generate_id() -> str:
         for module in missing_modules:
             module_path = Path(build_dir) / f"{module}.py"
             if module in module_templates:
-                module_path.write_text(module_templates[module])
+                module_path.write_text(module_templates[module], encoding='utf-8')
                 logger.info(f"📝 Auto-generated missing module: {module}.py")
             else:
                 # Generic empty module stub so import doesn't fail
-                module_path.write_text(f'"""Auto-generated stub for {module} module."""\n')
+                module_path.write_text(f'"""Auto-generated stub for {module} module."""\n', encoding='utf-8')
                 logger.info(f"📝 Auto-generated stub module: {module}.py")
     
     def _generate_container_name(self, session_id: str) -> str:
@@ -742,12 +742,12 @@ passlib[bcrypt]>=1.7.4
 python-multipart>=0.0.6
 requests>=2.31.0
 google-auth>=2.23.0
-""")
+""", encoding='utf-8')
         
         # Scan project files for imports and auto-add missing packages
         extra_packages = self._scan_imports_for_packages(project_files)
         if extra_packages:
-            existing_reqs = req_file.read_text()
+            existing_reqs = req_file.read_text(encoding='utf-8')
             extra_lines = "\n# Auto-detected from project imports\n"
             for pkg in extra_packages:
                 # Don't add if already in requirements
@@ -756,14 +756,14 @@ google-auth>=2.23.0
                 if pkg_base not in existing_normalized:
                     extra_lines += f"{pkg}\n"
             if extra_lines.strip() != "# Auto-detected from project imports":
-                req_file.write_text(existing_reqs.rstrip() + "\n" + extra_lines)
+                req_file.write_text(existing_reqs.rstrip() + "\n" + extra_lines, encoding='utf-8')
                 logger.info(f"📦 Auto-added packages from imports: {extra_packages}")
         
         # Write project-specific files (can override defaults)
         for filename, content in project_files.items():
             filepath = Path(build_dir) / filename
             filepath.parent.mkdir(parents=True, exist_ok=True)
-            filepath.write_text(content)
+            filepath.write_text(content, encoding='utf-8')
         
         # Ensure we have a working main.py
         main_py_path = Path(build_dir) / "main.py"
@@ -773,12 +773,12 @@ google-auth>=2.23.0
             shutil.copy(sandbox_main_py, main_py_path)
             logger.info("Using sandbox_main.py as main.py")
         elif main_py_path.exists():
-            main_content = main_py_path.read_text()
+            main_content = main_py_path.read_text(encoding='utf-8')
             if 'app = FastAPI' not in main_content and 'FastAPI()' not in main_content:
                 if sandbox_main_py.exists():
-                    sandbox_content = sandbox_main_py.read_text()
+                    sandbox_content = sandbox_main_py.read_text(encoding='utf-8')
                     hybrid_content = sandbox_content + "\n\n# === User routes ===\n" + main_content
-                    main_py_path.write_text(hybrid_content)
+                    main_py_path.write_text(hybrid_content, encoding='utf-8')
         
         # Inject /health endpoint if missing from main.py
         self._inject_health_endpoint(build_dir)
@@ -788,7 +788,7 @@ google-auth>=2.23.0
         
         # Create .dockerignore for faster builds
         dockerignore = Path(build_dir) / ".dockerignore"
-        dockerignore.write_text("__pycache__\n*.pyc\n.git\n.env\nvenv\n*.md\n*.txt\n!requirements.txt\n!sandbox_requirements.txt\n")
+        dockerignore.write_text("__pycache__\n*.pyc\n.git\n.env\nvenv\n*.md\n*.txt\n!requirements.txt\n!sandbox_requirements.txt\n", encoding='utf-8')
     
     async def _run_container(self, container: SandboxContainer):
         """Run the container and wait for health."""

@@ -128,6 +128,14 @@ except ImportError:
 from scanner.secrets_detector import scan_secrets
 from scanner.static_python import run_bandit
 
+# Import penetration testing scanner
+try:
+    from repo_pentest_scanner import RepoPentestScanner
+    PENTEST_SCANNER_AVAILABLE = True
+except ImportError as e:
+    print(f"⚠️ Penetration test scanner not available: {e}")
+    PENTEST_SCANNER_AVAILABLE = False
+
 # Import job manager for async processing (safe - no routes)
 from job_manager import job_manager, JobStatus
 
@@ -15133,6 +15141,88 @@ async def analyze_repo_comprehensive(request: RepoAnalysisRequest):
                 
     except Exception as e:
         return {"error": f"Analysis setup failed: {str(e)}"}
+
+
+# =============================================================================
+# DEEP PENETRATION TEST ENDPOINT
+# =============================================================================
+
+@app.post("/api/pentest-repo")
+async def pentest_repository(request: dict = Body(...)):
+    """
+    Deep penetration test on a GitHub repository.
+    
+    Flow:
+    1. Clone entire repo into S3 bucket
+    2. Auto-detect framework, endpoints, auth mechanisms
+    3. Deploy in Docker sandbox container
+    4. Change API URL to localhost for scanning
+    5. Run comprehensive penetration tests:
+       - SQL Injection (20+ payloads)
+       - NoSQL Injection
+       - XSS (reflected + stored)
+       - Command Injection
+       - Path Traversal / LFI
+       - SSRF
+       - Authentication Bypass (JWT none alg, empty token, default creds...)
+       - Authorization Bypass (IDOR, forced browsing, privilege escalation)
+       - CORS misconfiguration
+       - Rate limiting
+       - Mass assignment
+       - Security headers analysis
+       - Information disclosure
+    6. Return detailed vulnerability report with evidence
+    
+    Request body:
+        - repo_url: GitHub repository URL
+        - deep_scan: bool (default True) - run extended payloads
+    """
+    if not PENTEST_SCANNER_AVAILABLE:
+        return {
+            "success": False,
+            "error": "Penetration test scanner module not available. Check server logs."
+        }
+    
+    repo_url = request.get("repo_url")
+    deep_scan = request.get("deep_scan", True)
+    
+    if not repo_url:
+        raise HTTPException(status_code=400, detail="repo_url is required")
+    
+    # Validate GitHub URL
+    repo_url_clean = repo_url.strip().rstrip('/')
+    if not re.match(r'^https?://github\.com/[\w\-\.]+/[\w\-\.]+', repo_url_clean):
+        raise HTTPException(status_code=400, detail="Invalid GitHub repository URL")
+    
+    # Clean URL (remove /tree/... /blob/... suffixes)
+    repo_url_clean = re.sub(r'/tree/[^/]+.*$', '', repo_url_clean)
+    repo_url_clean = re.sub(r'/blob/[^/]+.*$', '', repo_url_clean)
+    repo_url_clean = repo_url_clean.rstrip('/')
+    
+    try:
+        print(f"🔒 Starting penetration test for: {repo_url_clean}")
+        scanner = RepoPentestScanner()
+        result = await scanner.scan(repo_url_clean, deep_scan=deep_scan)
+        
+        # Store results for AI chat context
+        RepoAnalysis.latest_analysis = RepoAnalysis.latest_analysis or {}
+        RepoAnalysis.latest_analysis["pentest_results"] = result
+        
+        return {
+            "success": True,
+            **result
+        }
+    except Exception as e:
+        import traceback
+        print(f"❌ Pentest error: {e}")
+        traceback.print_exc()
+        return {
+            "success": False,
+            "error": f"Penetration test failed: {str(e)}",
+            "traceback": traceback.format_exc()
+        }
+
+
 # REPLACE your existing @app.post("/ai-chat") endpoint with this enhanced version
 
 @app.post("/ai-chat")
